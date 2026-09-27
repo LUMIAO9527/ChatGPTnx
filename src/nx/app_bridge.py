@@ -111,10 +111,7 @@ def candidates():
                   if re.fullmatch(r'codex-browser-use-[0-9a-f-]{36}', name)]
     except OSError:
         pass
-    paths = list(dict.fromkeys(paths))
-    if len(paths) > 12:
-        raise BridgeUnavailable('desktop_bridge_ambiguous')
-    return paths
+    return list(dict.fromkeys(paths))
 
 
 def discover(required=None):

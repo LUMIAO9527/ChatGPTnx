@@ -299,6 +299,21 @@ class BridgeCatalogTests(unittest.TestCase):
                           for name, keys in [('read_thread', ['threadId']),
                                              ('send_message_to_thread', ['threadId', 'prompt'])]]}
 
+    def test_stale_pipe_names_do_not_count_as_ambiguity(self):
+        names = [f'codex-browser-use-{i:08x}-0000-4000-8000-000000000000'
+                 for i in range(14)]
+        with patch.dict('nx.app_bridge.os.environ', {'CODEX_APP_TOOLS_PIPE_PATH': ''}), \
+             patch('nx.app_bridge.os.listdir', return_value=names), \
+             patch('nx.app_bridge.os.name', 'nt'):
+            paths = app_bridge.candidates()
+        self.assertEqual(len(paths), 14)
+        live = Mock(); live.request.return_value = self.catalog()
+        with patch('nx.app_bridge.candidates', return_value=paths), \
+             patch('nx.app_bridge.Pipe', side_effect=lambda path, timeout: live if path == paths[-1] else (_ for _ in ()).throw(OSError())):
+            selected = app_bridge.discover()
+        self.assertIs(selected, live)
+        self.assertEqual(live.request.call_count, 1)
+
     def test_multiple_compatible_pipes_are_closed_and_rejected(self):
         first, second = Mock(), Mock()
         first.request.return_value = second.request.return_value = self.catalog()
