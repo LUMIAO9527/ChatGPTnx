@@ -2,7 +2,7 @@
 <img src="docs/images/nx-mark.png" width="88" alt="ChatGPTnx">
 <h1>ChatGPTnx</h1>
 <p><b>自动接力 · 任务接续 · 按用量配置 n×</b></p>
-<p>多个 Plus 账号接力，让长任务持续推进。</p>
+<p>用 5 个 Plus 账号，接力推进一个长任务。自动切号，继续原任务。</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
 <img src="docs/images/badges/version.svg" alt="v1.0.0" height="20">
