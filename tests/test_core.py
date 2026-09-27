@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -301,6 +302,8 @@ class TransactionTests(Fixture):
             self.wait()
         snapshot.assert_called_once_with(self.paths.home)
         session=self.service.resumer.sessions[-1]
+        self.assertEqual(self.service.last_result['resume_session_id'],session['id'])
+        self.assertEqual(self.service.last_result['id'],result['operation_id'])
         self.assertEqual(session['phase'],'resuming')
         self.assertEqual(session['target'],'b@example.com')
         self.assertEqual(session['items'][0]['thread_id'],candidate['thread_id'])
@@ -323,6 +326,7 @@ class TransactionTests(Fixture):
         snapshot.assert_not_called()
         self.assertEqual(self.accounts.current(),'b@example.com')
         self.assertEqual(self.service.resumer.sessions,[])
+        self.assertIsNone(self.service.last_result['resume_session_id'])
     def test_auto_relay_still_switches_when_task_continuation_is_off(self):
         self.refresh();cache=self.service.state.get('cache');now=int(time.time())
         current=next(a for a in cache['accounts'] if a['email']=='a@example.com')
@@ -638,15 +642,49 @@ class ProtocolTests(unittest.TestCase):
         timer.return_value.start.assert_called_once()
     def test_relay_restore_survives_immediate_followup_refresh(self):
         panel=object.__new__(Desktop)
-        panel.service=SimpleNamespace(operation=None,log=Mock())
         panel.visible=True;panel._relay_restore={'id':'switch','visible':True,'scheduled':False}
         panel.changed=__import__('threading').Event()
-        panel.service=SimpleNamespace(operation={'id':'refresh','kind':'refresh'},log=Mock())
+        panel.service=SimpleNamespace(operation={'id':'refresh','kind':'refresh'},last_result=None,log=Mock())
         with patch('nx.desktop.threading.Timer') as timer:
             panel._on_service_change()
         self.assertTrue(panel._relay_restore['scheduled'])
         timer.assert_called_once()
         timer.return_value.start.assert_called_once()
+
+    def test_switch_panel_closes_only_after_its_resume_session_finishes(self):
+        panel=object.__new__(Desktop)
+        session={'id':'session','phase':'resuming'}
+        panel.service=SimpleNamespace(
+            operation={'id':'switch','kind':'switch'}, last_result=None,
+            resumer=SimpleNamespace(lock=threading.RLock(),sessions=[session]),log=Mock())
+        panel.visible=True;panel._relay_restore=None;panel.changed=threading.Event()
+        with patch.object(panel,'hide') as hide, patch('nx.desktop.threading.Timer') as timer:
+            panel._on_service_change()
+            panel.service.operation=None
+            panel.service.last_result={'id':'switch','ok':True,'resume_session_id':'session'}
+            panel._on_service_change()
+            hide.assert_not_called()
+            self.assertTrue(panel._relay_restore['scheduled'])
+            timer.assert_called_once()
+            panel.service.last_result={'id':'refresh','ok':True}
+            session['phase']='done'
+            panel._on_service_change()
+            hide.assert_called_once_with(reason='complete')
+
+    def test_switch_panel_closes_without_tasks_but_keeps_failures_visible(self):
+        panel=object.__new__(Desktop)
+        panel.service=SimpleNamespace(operation=None,last_result={'id':'switch','ok':True,
+            'resume_session_id':None},log=Mock())
+        panel.visible=True;panel._relay_restore={'id':'switch','visible':True,'scheduled':False}
+        panel.changed=threading.Event()
+        with patch.object(panel,'hide') as hide:
+            panel._on_service_change()
+            hide.assert_called_once_with(reason='complete')
+        panel.service.last_result={'id':'switch','ok':False}
+        panel._relay_restore={'id':'switch','visible':True,'scheduled':False}
+        with patch.object(panel,'hide') as hide, patch('nx.desktop.threading.Timer'):
+            panel._on_service_change()
+            hide.assert_not_called()
 
     def test_chatgpt_launch_is_brokered_from_neutral_directory(self):
         if hasattr(launch_chatgpt, '_aumid'):delattr(launch_chatgpt, '_aumid')

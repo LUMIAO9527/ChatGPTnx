@@ -413,7 +413,27 @@ class Desktop:
             self._relay_restore = {'id': operation['id'], 'visible': True,
                                    'scheduled': False, 'pinned': False}
         guard = self._relay_restore
-        if not guard or guard['scheduled'] or (operation and operation.get('id') == guard['id']):
+        if not guard:
+            return
+        if operation and operation.get('id') == guard['id']:
+            return
+        result = self.service.last_result
+        if result and result.get('id') == guard['id']:
+            guard['result_ok'] = result.get('ok')
+            guard['session_id'] = result.get('resume_session_id')
+        if guard.get('result_ok'):
+            session_id = guard.get('session_id')
+            if not session_id:
+                self.hide(reason='complete')
+                return
+            with self.service.resumer.lock:
+                session = next((item for item in self.service.resumer.sessions
+                                if item['id'] == session_id), None)
+                phase = session.get('phase') if session else None
+            if phase == 'done' or session is None:
+                self.hide(reason='complete')
+                return
+        if guard['scheduled']:
             return
         guard['scheduled'] = True
         guard['deadline'] = time.monotonic() + 8
@@ -669,7 +689,7 @@ class Desktop:
                 return
             if self._relay_restore and chatgpt_foreground():
                 return
-        if reason in ('user', 'blur', 'focus'):
+        if reason in ('user', 'blur', 'focus', 'complete'):
             self._relay_restore = None
         if not self.window or not self.visible:
             return

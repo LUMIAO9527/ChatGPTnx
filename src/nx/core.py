@@ -180,6 +180,7 @@ class Service:
                 with self.lock:
                     self.last_result = {'id': ident, 'kind': kind, 'target': target, 'ok': True,
                                         'source': source, 'previous': previous,
+                                        'resume_session_id': self.operation.get('resume_session_id'),
                                         'started_at': started_at, 'finished_at': time.time()}
                     if source in ('auto', 'auto-limit'):
                         self.auto_relay_retry_after = 0.0
@@ -202,6 +203,7 @@ class Service:
                     self.last_error = {'id': ident, 'kind': kind, 'target': target, 'message': message[:180], 'created_at': time.time(), 'seen': False}
                     self.last_result = {'id': ident, 'kind': kind, 'target': target, 'ok': False,
                                         'source': source, 'previous': previous,
+                                        'resume_session_id': self.operation.get('resume_session_id'),
                                         'started_at': started_at, 'finished_at': time.time()}
                     if source in ('auto', 'auto-limit'):
                         self.auto_relay_retry_after = time.monotonic() + 15
@@ -441,6 +443,8 @@ class Service:
                     interrupted = active_turns(self.paths.home)
                     session_id = self.resumer.prepare(previous, email, source, interrupted,
                                                       failure_events)
+                    with self.lock:
+                        self.operation['resume_session_id'] = session_id
                 else:
                     session_id = None
                 try:
