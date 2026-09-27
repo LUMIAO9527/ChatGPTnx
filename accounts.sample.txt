@@ -1,0 +1,7 @@
+# ChatGPTnx 账号顺序示例；真实账号请在应用中添加。
+# 快捷键在设置的账号快捷键页独立配置。
+pro.primary@example.com
+current.plus@example.com
+design.lab@example.com
+backup.nx@example.com
+workspace.alt@example.com

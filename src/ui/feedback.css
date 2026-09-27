@@ -1,0 +1,39 @@
+/* One low-emphasis feedback surface; inverse black is reserved for primary actions. */
+.status-bar {
+  width:100%; height:var(--status-height); min-height:var(--status-height); flex:0 0 var(--status-height);
+  display: flex; align-items: center; gap: 8px; margin: 0;
+  padding: 7px 10px; border: 1px solid var(--line);
+  border-radius: var(--radius-control); background: var(--surface); color: var(--muted);
+  text-align: left; font-size:var(--font-control); font-weight:450; line-height: 20px;
+}
+.status-bar > .icon { width: 16px; height: 16px; }
+.status-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-bar.progress { color: var(--ink); }
+.status-bar.error,.status-bar.warning { color: var(--danger); }
+.status-bar.success { color: var(--ok); }
+.status-bar > .icon:last-child:not(:first-child) { margin-left: auto; }
+.status-dock { position:absolute; left:16px; right:16px; z-index:12; pointer-events:none; }
+.status-notification { position:relative; height:var(--status-height); border:1px solid var(--status-edge); border-radius:var(--radius-pill);
+  background:var(--status-surface); box-shadow:var(--status-shadow); pointer-events:auto; }
+.status-notification > .status-bar { height:calc(var(--status-height) - 2px); min-height:0; padding:6px 42px 6px 12px; border-radius:inherit; border:0; background:transparent; }
+.status-notification .status-dismiss { position:absolute; right:3px; top:50%; transform:translateY(-50%); min-width:32px; width:32px; height:32px; padding:7px; color:var(--muted); }
+.status-dismiss .icon { width:14px; height:14px; }
+.status-dock.yields-to-focus { visibility:hidden; }
+.dock-scroll-target { position:relative; }
+.status-runway { position:absolute; left:0; width:1px; pointer-events:none; }
+/* A single control keeps its original box, baseline text, focus and hit area. */
+button.has-feedback { color: transparent !important; cursor: progress; opacity: 1; }
+button.has-feedback > :not(.control-feedback) { opacity: 0; }
+button.has-feedback::after { opacity: 0; }
+.control-feedback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 0 9px; color: var(--ink); font-size: var(--font-body); font-weight: 550; pointer-events: none; }
+.control-feedback > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.control-feedback .icon { width: 16px; height: 16px; flex: 0 0 16px; }
+:is(.primary,.relay).has-feedback .control-feedback { color: var(--action-ink); }
+button.has-feedback[data-feedback-tone="success"] { cursor: pointer; }
+.feedback-icon-only .control-feedback { padding: 0; }
+.field-feedback { display: block; min-height: 28px; padding: 6px 2px 2px; color: var(--danger); font-size: var(--font-small); line-height: 20px; }
+.field[aria-invalid="true"] { border-color: var(--danger); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+

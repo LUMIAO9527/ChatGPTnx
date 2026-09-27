@@ -1,0 +1,2 @@
+# Optional test/preview tooling; NOT bundled into the desktop app.
+playwright>=1.50,<2

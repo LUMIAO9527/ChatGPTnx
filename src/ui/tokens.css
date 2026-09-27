@@ -1,0 +1,54 @@
+/*
+  Product design scale
+  - radius: 16px surfaces, 12px controls, 8px small controls; pills stay rounded
+  - height: compact 24/28, standard 36, primary 44, list 48+
+  - type: micro 8, caption 9, small 10, body 11, control 12, title 13, heading 16
+  - shadow: selected < hover < primary < floating
+  Component-specific values below are limited to layout or optical exceptions.
+*/
+:root {
+  --radius-ui: 16px; --radius-window: var(--radius-ui); --radius-card: var(--radius-ui);
+  --radius-control: 12px; --radius-compact: 8px; --radius-pill: 999px;
+  --window-r: var(--radius-window); --r: var(--radius-card);
+  --space-1: 2px; --space-2: 4px; --space-3: 6px; --space-4: 8px; --space-5: 10px;
+  --space-6: 12px; --space-8: 16px; --space-10: 20px; --space-12: 24px;
+  --font-micro: 8px; --font-caption: 9px; --font-small: 10px; --font-body: 11px;
+  --font-control: 12px; --font-title: 13px; --font-subtitle: 14px; --font-emphasis: 15px;
+  --font-heading: 16px; --font-page-title: 18px; --font-brand-mark: 19px;
+  --font-display-small: 20px; --font-display-unit: 21px; --font-display: 26px; --font-hero: 46px;
+  --line-tight: 1.2; --line-normal: 1.5; --line-relaxed: 1.8;
+  --avatar-size: 40px; --avatar-list-size: 36px; --avatar-small-size: 34px;
+  --height-row:42px; --row-gap:8px; --height-compact:24px; --height-small: 28px; --height-icon: 32px; --height-control: 36px;
+  --status-height:40px; --status-bottom:12px; --status-home-bottom:52px;
+  --height-action: 40px; --height-primary: 44px; --height-list: 48px;
+  --bg: #fff; --surface: #f5f5f5; --surface-2: #ebebeb;
+  --ink: #171717; --muted: #686868; --line: #e8e8e8; --inverse: #fff;
+  --danger: #a84037; --action: #181818; --action-ink: #fff; --ok: #1f8c53;
+  --shadow-window: 0 18px 56px #00000018, 0 0 0 1px #0000000a;
+  --shadow-selected: 0 1px 4px #0000000c;
+  --shadow-hover: 0 4px 16px #00000014;
+  --shadow-primary: 0 6px 20px #0000001f;
+  --shadow-floating: 0 8px 32px #00000024;
+  --shadow-knob: 0 1px 3px #00000022;
+  --status-surface: #fff; --status-edge: #d9d9d9; --status-shadow: 0 8px 26px #00000029, 0 2px 6px #00000014;
+  --hover-shadow: var(--shadow-hover); --primary-hover-shadow: var(--shadow-primary);
+  --primary-hover-overlay: .08; --ease: cubic-bezier(.2,0,.2,1);
+  font-family: Inter, 'Segoe UI', 'Microsoft YaHei UI', 'Noto Sans CJK SC', sans-serif;
+  font-size: var(--font-title); color: var(--ink); font-synthesis: none;
+  color-scheme: light;
+}
+/* app.js resolves system appearance and listens for changes. */
+:root[data-appearance="dark"] {
+  --bg: #1d1d1d; --surface: #262626; --surface-2: #303030;
+  --ink: #f0f0f0; --muted: #9b9b9b; --line: #343434; --inverse: #171717;
+  --danger: #e07a70; --action: #f0f0f0; --action-ink: #171717; --ok: #4cc38a;
+  --shadow-window: 0 18px 56px #00000070, 0 0 0 1px #ffffff0f;
+  --shadow-selected: 0 1px 5px #00000050;
+  --shadow-hover: 0 4px 16px #00000070;
+  --shadow-primary: 0 0 0 1px #ffffff38, 0 7px 22px #00000085;
+  --shadow-floating: 0 10px 34px #0000008a; --shadow-knob: 0 1px 4px #00000070;
+  --status-surface: #343434; --status-edge: #555; --status-shadow: 0 10px 28px #000000b3, 0 0 0 1px #ffffff0a;
+  --hover-shadow: var(--shadow-hover); --primary-hover-shadow: var(--shadow-primary);
+  --primary-hover-overlay: .12;
+  color-scheme: dark;
+}

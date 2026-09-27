@@ -2,7 +2,7 @@
 <img src="docs/images/nx-mark.png" width="88" alt="ChatGPTnx">
 <h1>ChatGPTnx</h1>
 <p><b>多账号额度面板 · 自动接力 · 任务接续</b></p>
-<p>在 Windows 桌面集中查看自有 ChatGPT / Codex 账号的额度和用量。</p>
+<p>用 5 个 Plus 账号代替 Pro 5×，以一半的价格获得类似的持续任务能力。</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
 <img src="docs/images/badges/version.svg" alt="v1.0.0" height="20">

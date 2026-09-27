@@ -1,0 +1,2 @@
+pywebview>=5.4,<7
+pywin32>=306; sys_platform == "win32"
