@@ -23,7 +23,7 @@ class PackageTests(unittest.TestCase):
                              'preview.cmd','src/ui/views/onboarding.js','src/ui/preview.js',
                              'tools/screen_catalog.py','tools/templates/explorer.html',
                              'tools/build_explorer.py','tools/build_gallery.py',
-                             'tests/ui_final_checks.py','tests/quota_columns_checks.cjs','src/ui/preferences.js','src/ui/views/editors.js','tools/test_composer_policy.ps1','tools/test_automatic_resume.ps1','src/nx/resume_policy.py'):
+                             'tests/ui_final_checks.py','tests/quota_columns_checks.cjs','src/ui/preferences.js','src/ui/views/editors.js','tools/test_resume_priority.ps1','tools/test_automatic_resume.ps1','src/nx/resume_policy.py'):
                     self.assertIn(name,names)
                 self.assertFalse(any(n.startswith(('_data/','snapshots/','reference/','.git/','_wip/','docs/')) for n in names))
                 self.assertNotIn('accounts.txt',names)

@@ -26,6 +26,7 @@ class BridgeResumeTests(unittest.TestCase):
         self.settings.write_text(json.dumps({'settings': {'resume_source_thread_id': self.SOURCE, 'task_continuation': True,
                                                          'resume_message': '继续'}}))
         self.item = {'thread_id': 'target', 'turn_id': 'old', 'settings_file': str(self.settings)}
+        self.canonical = 'target'
         self.record = {'turn_id': 'old', 'status': 'failed',
                        'error': {'codexErrorInfo': 'usageLimitExceeded'}}
         self.snapshot = {'thread': {'id': 'target', 'kind': 'codex', 'status': {'type': 'idle'}},
@@ -45,6 +46,7 @@ class BridgeResumeTests(unittest.TestCase):
         self.pipe.request.side_effect = replies or [self.result(self.snapshot),
                                                    self.result({'threadId': 'target'})]
         with patch('nx.app_bridge.discover', return_value=self.pipe), \
+             patch('nx.desktop_location.canonical_task', return_value=self.canonical), \
              patch('nx.desktop_resume.latest_turn', side_effect=records or [self.record] * 3):
             return resume_existing(self.home, self.item, self.stop_mock, Mock())
 
@@ -56,6 +58,14 @@ class BridgeResumeTests(unittest.TestCase):
         self.assertEqual(call.args[1]['threadId'], self.SOURCE)
         self.assertTrue(call.kwargs['side_effect'])
         self.pipe.close.assert_called_once()
+
+    def test_runtime_thread_id_maps_to_canonical_bridge_target(self):
+        self.item['thread_id'] = 'runtime-id'
+        result = self.run_resume(records=[self.record, self.record, {'turn_id': 'new'}])
+        self.assertEqual(result, ('done', 'new_turn_observed'))
+        read_call, send_call = self.pipe.request.call_args_list
+        self.assertEqual(read_call.args[1]['arguments']['threadId'], 'target')
+        self.assertEqual(send_call.args[1]['arguments']['threadId'], 'target')
 
     def test_ack_timeout_is_not_retryable(self):
         result = self.run_resume([self.result(self.snapshot), BridgeUncertain()])
@@ -127,8 +137,13 @@ class BridgeResumeTests(unittest.TestCase):
         self.pipe.request.assert_not_called()
 
     def test_source_cannot_impersonate_target(self):
-        self.item['thread_id'] = self.SOURCE
+        self.canonical = self.SOURCE
         self.assertEqual(self.run_resume(), ('failed', 'resume_source_is_target'))
+        self.pipe.request.assert_not_called()
+
+    def test_missing_canonical_target_is_not_sent(self):
+        self.canonical = None
+        self.assertEqual(self.run_resume(), ('failed', 'task_identity_unavailable'))
         self.pipe.request.assert_not_called()
 
 

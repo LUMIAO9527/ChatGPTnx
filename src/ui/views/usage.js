@@ -3,13 +3,13 @@
 window.NXViews ??= {};
 window.NXViews.usage = c => {
   const {data,ui,esc,icon,name,plan,tool,disabled,scopeUsage,math,segmented,metricsRow,short,durText,statuses,brandMark,avatar,accountIdentity}=c;
-  const u=scopeUsage(),all=ui.scope==='all',account=data.accounts.find(a=>a.email===ui.scope);
+  const u=scopeUsage(),all=ui.scope==='all',account=data.accounts.find(a=>a.email===ui.scope)||ui.usage?.rows?.find(r=>r.email===ui.scope);
   const record=all?null:u?.rows?.[0],summary=!all&&['ready','missing_total'].includes(record?.status)?record.usage?.summary||{}:{};
   const lifetime=ui.days==='all',totalValue=!u?null:lifetime?(all?u.total_tokens:summary.lifetimeTokens):u.period.recorded_tokens;
   const totalFormat=math.compact(totalValue);
   const identity=all?`<div class="identity usage-source">${brandMark('usage-brand')}<div class="identity-copy"><span class="identity-title"><strong>所有账号</strong></span><small>${u?.unique_accounts??data.accounts.length} 个账号</small></div></div>`:accountIdentity(account);
   const filters=segmented({label:'用量时间范围',action:'usage-period',options:[[7,'7天'],[30,'30天'],[180,'180天'],['all','全部']],value:ui.days,className:'usage-filter quota-slot'});
-  const header=`<section class="usage-context" aria-label="账号与时间范围"><div class="current-identity detail-profile usage-top">${identity}${tool('refresh','usage-refresh','刷新个人用量',disabled(),data.operation?.kind==='usage'?'spinner':'')}</div>${filters}</section>`;
+  const header=`<section class="usage-context" aria-label="账号与时间范围"><div class="current-identity detail-profile usage-top">${identity}${account?.archived?'':tool('refresh','usage-refresh','刷新个人用量',disabled(),data.operation?.kind==='usage'?'spinner':'')}</div>${filters}</section>`;
   const hero=`<div class="usage-hero"><div class="eyebrow">累计 Tokens</div><div class="usage-total mono" aria-label="${math.exact(totalValue)} Tokens">${totalFormat.main}<span>${totalFormat.unit}</span></div></div>`;
   const {groups,groupLabel,chartStartLabel,chartEndLabel}=u?math.trendGroups(u,lifetime):{groups:[],groupLabel:'',chartStartLabel:'',chartEndLabel:''};
   const max=groups.reduce((m,g)=>g.tokens>m?g.tokens:m,1n);
@@ -25,10 +25,10 @@ window.NXViews.usage = c => {
   let lower;
   if(all){
     const rows=(ui.usage?.rows||[]).map(r=>{
-      const a=data.accounts.find(a=>a.email===r.email),value=lifetime?(r.included?r.tokens:null):r.period_tokens;
+      const a=data.accounts.find(a=>a.email===r.email)||r,value=lifetime?(r.included?r.tokens:null):r.period_tokens;
       const share=value!==null&&totalValue&&math.count(totalValue)>0n?Number((BigInt(value)*1000n/BigInt(totalValue)))/10:null;
       const status=lifetime?statuses[r.status]:value===null?'区间无记录':r.status==='ready'?'已记录':statuses[r.status]||'已记录';
-      return `<button class="account-usage-row" data-action="usage-account" data-email="${esc(r.email)}">${avatar(a)}<span class="identity-copy"><strong>${esc(name(a))}</strong><small>${esc(plan(a?.plan))} · ${esc(status)}</small></span><span class="usage-number mono">${value!==null?short(value):'—'}<small>${share==null?'查看详情':share.toFixed(1)+'%'}</small></span>${icon('chevron')}</button>`;
+      return `<button class="account-usage-row" data-action="usage-account" data-email="${esc(r.email)}">${avatar(a)}<span class="identity-copy"><strong>${esc(name(a))}${r.archived?' · 已归档':''}</strong><small>${r.archived?'':esc(plan(a?.plan))+' · '}${esc(status)}</small></span><span class="usage-number mono">${value!==null?short(value):'—'}<small>${share==null?'查看详情':share.toFixed(1)+'%'}</small></span>${icon('chevron')}</button>`;
     }).join('');
     const count=lifetime?u?.included_accounts:(u?.rows||[]).filter(r=>r.period_tokens!==null).length;
     lower=`<section class="usage-accounts"><div class="section-title"><h3>账号</h3><span>${u?`${count}/${u.unique_accounts} ${lifetime?'已计入':'有记录'}`:'读取中'}</span></div><div class="account-usage-list">${rows||'<div class="inline-empty">暂无账号记录</div>'}</div></section>`;

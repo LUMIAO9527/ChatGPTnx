@@ -13,8 +13,8 @@ foreach ($file in @('src/switch_account.ps1','src/continue_in_desktop.ps1')) {
     }
     Write-Host "Parsed: $file"
 }
-& (Join-Path $PSScriptRoot 'test_composer_policy.ps1')
 & (Join-Path $PSScriptRoot 'test_automatic_resume.ps1')
+& (Join-Path $PSScriptRoot 'test_resume_priority.ps1')
 & (Join-Path $PSScriptRoot 'test_window_selection.ps1')
 & (Join-Path $PSScriptRoot 'test_resume_location.ps1')
 & $Python tools/build.py

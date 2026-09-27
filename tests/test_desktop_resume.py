@@ -88,25 +88,18 @@ class DesktopResumeTests(unittest.TestCase):
         self.assertEqual(title_prefix(self.home, self.THREAD),
                          '测试任务：在原来的 ChatGPT 窗口继续')
 
-    def test_quota_failure_invokes_native_action_in_original_desktop_task(self):
+    def test_quota_failure_uses_bridge_without_desktop_input(self):
         self.add_turn(self.FAILED, 'failed', 1)
-
-        def desktop_invocation(command, **kwargs):
-            self.assertEqual(command[command.index('-ThreadId') + 1], self.THREAD)
-            self.assertEqual(command[command.index('-Action') + 1], 'failed')
-            self.add_turn(self.NEW, 'inProgress', 2)
-            self.assertNotIn('-Message', command)
-            return Mock(stdout='invoked:native_continue\n', returncode=0)
-
         log = Mock()
-        item = {'thread_id': self.THREAD, 'turn_id': self.FAILED}
-        with patch('nx.desktop_resume.subprocess.run', side_effect=desktop_invocation) as run:
-            result=attempt_continuation(self.home, self.home / 'helper.ps1',
-                                        item,
-                                        threading.Event(), log)
-        run.assert_called_once()
+        item = {'thread_id': self.THREAD, 'turn_id': self.FAILED,
+                'settings_file': str(self.home / 'settings.json')}
+        with patch('nx.app_bridge.resume_existing', return_value=('done', 'new_turn_observed')) as bridge, \
+             patch('nx.desktop_resume.subprocess.run') as run:
+            result = attempt_continuation(self.home, self.home / 'helper.ps1', item,
+                                          threading.Event(), log)
+        bridge.assert_called_once()
+        run.assert_not_called()
         self.assertEqual(result,('done','new_turn_observed'))
-        self.assertEqual(item['observed_turn_id'], self.NEW)
 
     def test_interruption_uses_the_native_desktop_action(self):
         self.add_turn(self.FAILED, 'interrupted', 1)
@@ -137,7 +130,7 @@ class DesktopResumeTests(unittest.TestCase):
         self.assertEqual(result,('done','new_turn_observed'))
 
     def test_archived_title_collision_blocks_wrong_window_target(self):
-        self.add_turn(self.FAILED, 'failed', 1)
+        self.add_turn(self.FAILED, 'interrupted', 1)
         db = sqlite3.connect(self.home / 'state_5.sqlite')
         try:
             db.execute('INSERT INTO threads VALUES (?,?,1,NULL)',
@@ -154,7 +147,7 @@ class DesktopResumeTests(unittest.TestCase):
         self.assertIsNone(title_prefix(self.home, self.NEW))
 
     def test_ambiguous_title_does_not_act_in_desktop(self):
-        self.add_turn(self.FAILED,'failed',1)
+        self.add_turn(self.FAILED,'interrupted',1)
         db=sqlite3.connect(self.home / 'state_5.sqlite')
         db.execute('INSERT INTO threads VALUES (?,?,0,NULL)',
                    (self.NEW,'测试任务：在原来的 ChatGPT 窗口继续，其他内容'))

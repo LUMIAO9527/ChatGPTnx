@@ -107,7 +107,9 @@ class LocationTests(unittest.TestCase):
 
     def attempt(self, outcomes, located=('located', 'task_opened_by_id'), records=None):
         item = {'thread_id': self.TARGET, 'turn_id': 'old', 'settings_file': str(self.settings)}
-        with patch('nx.desktop_resume.latest_turn', side_effect=records or [self.record] * 3), \
+        interrupted = {'turn_id': 'old', 'status': 'interrupted', 'error': None}
+        history = [interrupted] + records[1:] if records else [interrupted] * 3
+        with patch('nx.desktop_resume.latest_turn', side_effect=history), \
              patch('nx.desktop_resume.title_prefix', return_value='Unique task'), \
              patch('nx.desktop_resume._invoke', side_effect=outcomes) as invoke, \
              patch('nx.desktop_location.locate_task', return_value=located) as locate:
@@ -115,7 +117,7 @@ class LocationTests(unittest.TestCase):
                                           threading.Event(), Mock())
         return result, invoke, locate
 
-    def test_missing_target_navigates_then_observes_one_new_turn(self):
+    def test_bridge_identity_then_one_shot_sender_observes_one_new_turn(self):
         result, invoke, locate = self.attempt([
             Mock(stdout='invoked:native_continue', returncode=0)],
             records=[self.record, self.record, {'turn_id': 'new'}])
@@ -124,19 +126,28 @@ class LocationTests(unittest.TestCase):
         locate.assert_called_once()
         self.assertIn('-WaitForTarget', invoke.call_args.args[0])
 
-    def test_unconfirmed_navigation_never_reenters_sender(self):
+    def test_unconfirmed_bridge_falls_through_to_one_shot_sender(self):
         result, invoke, _ = self.attempt([Mock(stdout='skip:desktop_window_ambiguous', returncode=2)],
                                        located=('retry', 'task_navigation_unconfirmed'))
-        self.assertEqual(result, ('retry', 'task_navigation_unconfirmed'))
-        self.assertEqual(invoke.call_count, 0)
+        self.assertEqual(result, ('retry', 'desktop_window_ambiguous'))
+        self.assertEqual(invoke.call_count, 1)
 
-    def test_ambiguous_send_never_navigates_or_repeats(self):
-        result, invoke, locate = self.attempt([Mock(stdout='uncertain:send_unavailable', returncode=2)])
+    def test_bridge_unavailable_falls_back_without_a_second_send(self):
+        result, invoke, locate = self.attempt(
+            [Mock(stdout='invoked:native_continue', returncode=0)],
+            located=('retry', 'desktop_bridge_unavailable'),
+            records=[self.record, self.record, {'turn_id': 'new'}])
+        self.assertEqual(result, ('done', 'new_turn_observed'))
+        self.assertEqual(invoke.call_count, 1)
+        locate.assert_called_once()
+
+    def test_uncertain_click_never_repeats(self):
+        result, invoke, locate = self.attempt([Mock(stdout='uncertain:native_continue', returncode=2)])
         self.assertEqual(result, ('failed', 'action_outcome_unknown'))
         self.assertEqual(invoke.call_count, 1)
         locate.assert_called_once()
 
-    def test_new_turn_between_navigation_and_ui_prevents_send(self):
+    def test_new_turn_after_bridge_prevents_desktop_send(self):
         result, invoke, _ = self.attempt([Mock(stdout='skip:target_not_visible', returncode=2)],
                                        records=[self.record, {'turn_id': 'new'}])
         self.assertEqual(result, ('done', 'newer_turn'))

@@ -12,31 +12,27 @@ function Native-Continue {
 }
 function Assert-Account {}
 function Assert-Target { return $null }
-function Send-ResumeMessage { $script:sent++ }
-function Find-Composer { $script:found++; return $null }
 function Skip($reason) { throw $reason }
 $pattern=New-Object PSObject
 $pattern | Add-Member ScriptMethod Invoke {$script:clicked++}
 $button=New-Object PSObject
 $button | Add-Member NoteProperty Current ([pscustomobject]@{IsEnabled=$true})
 $button | Add-Member ScriptMethod GetCurrentPattern {param($p) return $script:pattern}
-$script:clicked=0;$script:sent=0;$script:found=0;$script:checks=0;$script:buttons=@($button)
-Resume-Task $null $null
-if($script:clicked -ne 1 -or $script:sent -ne 0){throw 'Native button must take priority'}
-if($script:found -ne 0){throw 'Native button must not require composer'}
+$script:clicked=0;$script:checks=0;$script:buttons=@($button)
+Resume-Task $null
+if($script:clicked -ne 1){throw 'Native button not clicked exactly once'}
 $script:buttons=@()
-Resume-Task $null $null
-if($script:clicked -ne 1 -or $script:sent -ne 1){throw 'Missing button must use composer'}
+try {Resume-Task $null;throw 'Missing button accepted'}catch{if($_.Exception.Message -ne 'native_continue_unavailable'){throw}}
+if($script:clicked -ne 1){throw 'Missing button caused a click'}
 $script:buttons=@($button,$button)
-try {Resume-Task $null $null;throw 'Ambiguous buttons accepted'}catch{if($_.Exception.Message -ne 'native_continue_ambiguous'){throw}}
+try {Resume-Task $null;throw 'Ambiguous buttons accepted'}catch{if($_.Exception.Message -ne 'native_continue_ambiguous'){throw}}
 $disabled=New-Object PSObject
 $disabled | Add-Member NoteProperty Current ([pscustomobject]@{IsEnabled=$false})
 $script:buttons=@($disabled)
-try {Resume-Task $null $null;throw 'Disabled native button sent text'}catch{if($_.Exception.Message -ne 'native_continue_not_ready'){throw}}
-if($script:sent -ne 1){throw 'Disabled button must not send'}
+try {Resume-Task $null;throw 'Disabled native button sent text'}catch{if($_.Exception.Message -ne 'native_continue_not_ready'){throw}}
 $script:buttons=@($button);$script:checks=0;$script:appearAfter=3
-Resume-Task $null $null
-if($script:clicked -ne 2 -or $script:sent -ne 1 -or $script:checks -lt 3){throw 'Late native button must take priority'}
+Resume-Task $null
+if($script:clicked -ne 2 -or $script:checks -lt 3){throw 'Late native button must take priority'}
 $native=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Native-Continue'},$true)
 Invoke-Expression $native.Extent.Text
 function Pinned-Window { return 'window' }
@@ -50,8 +46,8 @@ $script:editor=[pscustomobject]@{Current=[pscustomobject]@{BoundingRectangle=[ps
 $sidebar=[pscustomobject]@{Current=[pscustomobject]@{Name='继续';BoundingRectangle=[pscustomobject]@{Left=200;Width=90;Bottom=1140}}}
 $action=[pscustomobject]@{Current=[pscustomobject]@{Name='继续生成';BoundingRectangle=[pscustomobject]@{Left=1200;Width=90;Bottom=1140}}}
 $script:windowButtons=@($sidebar,$action)
-$found=@(Native-Continue 'document' $null)
+$found=@(Native-Continue 'document')
 if($found.Count -ne 1 -or $found[0] -ne $action){throw 'Conversation Continue sibling was not selected'}
 $script:windowButtons=@($sidebar)
-if(@(Native-Continue 'document' $null).Count -ne 0){throw 'Sidebar button selected'}
-Write-Output '7 continuation routing and lookup cases passed; no desktop actions'
+if(@(Native-Continue 'document').Count -ne 0){throw 'Sidebar button selected'}
+Write-Output '7 native continuation routing and lookup cases passed; no desktop actions'

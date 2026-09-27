@@ -805,7 +805,20 @@ class Service:
 
     def read_usage_all(self, days=30):
         from .usage import aggregate
-        return aggregate(self.get_data()['accounts'], self.state.get('usage'), days=days)
+        accounts = self.get_data()['accounts']
+        meta = self.state.get('account_meta', {})
+        archived_emails = set()
+        for archived in self.accounts.archived():
+            email = archived['email']
+            if email.casefold() in archived_emails:
+                continue
+            archived_emails.add(email.casefold())
+            path = self.paths.snapshots / 'removed' / archived['key']
+            accounts.append({'email': email, 'alias': meta.get(email, {}).get('alias', ''),
+                             'plan': 'unknown', 'archived': True,
+                             'identity_key': account_identity_key(path, email),
+                             'activity_key': activity_identity_key(path, email)})
+        return aggregate(accounts, self.state.get('usage'), days=days)
 
     def get_usage_all(self, force=False):
         cache = self.state.get('usage')

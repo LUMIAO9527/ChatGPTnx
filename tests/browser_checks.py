@@ -218,6 +218,16 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('usage/account-window-stats-follow-selection',document.querySelector('.metrics-row')?.textContent.includes('区间峰值')&&document.querySelector('.metrics-row')?.textContent.includes('已记录'),document.querySelector('.metrics-row')?.textContent);
   document.querySelector('[data-action="back"]').click();await wait(50);
 
+  await scenario('archived');
+  document.querySelector('[data-action="usage-all"]').click();await wait(100);
+  const archivedRow=document.querySelector('.account-usage-row[data-email="archived@example.com"]');
+  check('usage/archived-history-keeps-one-label',!!archivedRow&&archivedRow.querySelector('strong')?.textContent.includes('已归档')&&
+        archivedRow.querySelector('small')?.textContent.indexOf('已归档')===-1&&archivedRow.querySelector('.usage-number')?.textContent.includes('万'));
+  archivedRow?.click();await wait(70);
+  check('usage/archived-detail-is-read-only',document.querySelector('.usage-top .badge')?.textContent==='已归档'&&
+        !document.querySelector('[data-action="usage-refresh"]')&&document.querySelector('.usage-total')?.textContent.includes('万'));
+  document.querySelector('[data-action="back"]').click();await wait(40);
+
   await scenario('error-home');
   list=document.querySelector('.account-list');footer=document.querySelector('.footer.slim');
   const lb=box('.account-list'),fb=box('.footer.slim'),background=getComputedStyle(footer).backgroundColor;

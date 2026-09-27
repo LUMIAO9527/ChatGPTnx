@@ -264,7 +264,7 @@
   function scopeUsage() {
     if (!ui.usage) return null;
     if(ui.scope==='all')return ui.usage;
-    const a=data.accounts.find(a=>a.email===ui.scope), r=ui.usage.rows.find(r=>r.email===ui.scope);
+    const r=ui.usage.rows.find(r=>r.email===ui.scope), a=data.accounts.find(a=>a.email===ui.scope)||r;
     return a?math.aggregate([a],{[a.email]:r?.usage},ui.days):null;
   }
   function metric(label,value) { return `<div class="metric"><small>${esc(label)}</small><strong class="mono">${esc(value)}</strong></div>`; }
@@ -466,7 +466,7 @@
     } catch(error){if(navigation.current(ticket))notify(error.message||'用量读取失败');}
   }
   async function openUsage(scope='all',force=false) {
-    if(scope!=='all'&&!data.accounts.some(a=>a.email===scope))scope='all';
+    if(scope!=='all'&&!data.accounts.some(a=>a.email===scope)&&!ui.usage?.rows?.some(r=>r.email===scope&&r.archived))scope='all';
     if(ui.page!=='usage'||ui.scope!==scope){
       if(ui.page)ui.history.push({page:ui.page,email:ui.email,scope:ui.scope,scroll:captureScroll(sheet),focus:focusKey(document.activeElement)});
       ui.scope=scope;show('usage',null,false);
@@ -474,6 +474,7 @@
     const ticket=navigation.ticket();
     await loadUsage();
     if(!navigation.current(ticket))return;
+    if(scope!=='all'&&ui.usage?.rows?.some(r=>r.email===scope&&r.archived))return;
     // Refresh is a bridge transaction; leaving the screen never causes navigation.
     if(force) await action(scope==='all'?'get_usage_all':'get_usage',...(scope==='all'?[true]:[scope,true]));
     else {try{await api(scope==='all'?'get_usage_all':'get_usage',...(scope==='all'?[false]:[scope,false]));}catch(error){if(navigation.current(ticket))notify(error.message);}}

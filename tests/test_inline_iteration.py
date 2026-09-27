@@ -70,11 +70,10 @@ class InlineSourceContracts(unittest.TestCase):
     def test_native_bridge_exposes_partial_metadata_api(self):
         from nx.desktop import Bridge
         self.assertTrue(callable(Bridge.update_account_meta))
-    def test_placeholder_check_is_full_string_after_normalization(self):
+    def test_native_resume_does_not_touch_composer(self):
         ps=(ROOT/'src/continue_in_desktop.ps1').read_text(encoding='utf-8-sig')
-        # Composer text is intentionally not inspected by automatic continuation.
-        self.assertIn('append the continuation message',ps)
-        self.assertNotIn('Send-ResumeMessage $document $composer\n    #',ps)
+        self.assertNotIn('Send-ResumeMessage',ps)
+        self.assertNotIn('Find-Composer',ps)
         self.assertNotIn('$unique[0]',ps)
     def test_input_mutating_fallback_still_absent(self):
         ps=(ROOT/'src/continue_in_desktop.ps1').read_text(encoding='utf-8-sig')

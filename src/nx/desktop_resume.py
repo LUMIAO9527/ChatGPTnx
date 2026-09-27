@@ -178,15 +178,13 @@ def attempt_continuation(home, script, item, stop, log):
         return 'failed', 'unrelated_failure'
     if status not in ('failed', 'interrupted', 'inProgress'):
         return 'done', 'task_no_longer_needs_resume'
-    if item.get('settings_file'):
-        try:
-            from .settings import normalize_settings
-            settings = normalize_settings(json.loads(Path(item['settings_file']).read_text(
-                encoding='utf-8-sig')).get('settings', {}))
-        except (OSError, ValueError, AttributeError):
+    if status == 'failed':
+        if not item.get('settings_file'):
             return 'failed', 'account_guard_unavailable'
-        # UI continuation is intentionally the single user-visible route:
-        # type the configured continuation message and invoke Send directly.
+        from .app_bridge import resume_existing
+        return resume_existing(home, item, stop, log)
+    # Interrupted work has a native Continue action. It must never create a
+    # message, even when the button is missing or temporarily unavailable.
     prefix = title_prefix(home, thread_id)
     if not prefix:
         return 'failed', 'title_unavailable_or_ambiguous'
@@ -196,17 +194,20 @@ def attempt_continuation(home, script, item, stop, log):
                                    item.get('settings_file'))
         if not command:
             return 'failed', 'account_guard_unavailable'
-        # Resolve the task through the Codex desktop bridge first. The same
-        # task can appear in both a project list and Recents; title-based UIA
-        # selection sees those as two windows even when they are one task.
-        # Navigation is read-only and carries no continuation message.
+        # Resolve the exact task when the bridge is available. The desktop
+        # helper performs only the native Continue action.
         if item.get('settings_file'):
             from .desktop_location import locate_task
             located, location_reason = locate_task(
                 home, thread_id, item['settings_file'], expected_turn=turn_id, stop=stop)
             log.info('desktop_location_result state=%s reason=%s', located, location_reason)
-            if located != 'located':
-                return located, location_reason
+            if located == 'done':
+                return 'done', location_reason
+            if located == 'failed':
+                return 'failed', location_reason
+            if located == 'retry' and location_reason not in (
+                    'desktop_bridge_unavailable', 'task_navigation_unconfirmed'):
+                return 'retry', location_reason
             current = latest_turn(home, thread_id)
             if not current:
                 return 'retry', 'history_unavailable'
@@ -214,31 +215,17 @@ def attempt_continuation(home, script, item, stop, log):
                 return 'done', 'newer_turn'
             if stop.is_set():
                 return 'retry', 'shutting_down'
-            result = _invoke(command + ['-WaitForTarget'])
-        else:
-            result = _invoke(command)
+        result = _invoke(command + (['-WaitForTarget'] if item.get('settings_file') else []))
         _log_location_evidence(result, log)
-        # Never retry UI after a timeout, unknown result, or possible send.
+        # Never repeat a possible click after an unknown result.
         outcome = (result.stdout or '').strip().splitlines()[-1:]
         raw_label = outcome[0] if outcome else ''
         label = raw_label if re.fullmatch(r'(?:skip|uncertain|invoked):[a-z_]+', raw_label) else ('unrecognized_response' if outcome else 'no_response')
-        for line in (result.stdout or '').splitlines():
-            if not line.startswith('evidence:'):
-                continue
-            try:
-                evidence = json.loads(line[len('evidence:'):])
-                state = evidence.get('state')
-                count = evidence.get('patterns')
-                lengths = evidence.get('lengths')
-                if state in ('empty', 'present', 'unknown') and type(count) is int and 0 <= count <= 2 and isinstance(lengths, list) and len(lengths) <= 2 and all(type(n) is int and 0 <= n <= 10000000 for n in lengths):
-                    log.info('composer_evidence state=%s patterns=%d lengths=%s', state, count, lengths)
-            except (ValueError, TypeError, AttributeError):
-                pass
         log.info('desktop_resume_result action=%s result=%s code=%d',
                  status, label, result.returncode)
         if label == 'skip:task_already_running':
             return 'done', 'task_already_running'
-        if label in ('invoked:native_continue', 'invoked:send_message') and result.returncode == 0:
+        if label == 'invoked:native_continue' and result.returncode == 0:
             for _ in range(75):
                 after = latest_turn(home, thread_id)
                 if after and after['turn_id'] != turn_id:
@@ -249,11 +236,9 @@ def attempt_continuation(home, script, item, stop, log):
             return 'failed', 'start_not_observed'
         if label.startswith('uncertain:'):
             return 'failed', 'action_outcome_unknown'
-        if label in ('skip:user_draft_present', 'skip:user_attachment_present', 'skip:composer_in_use'):
-            return 'defer', label[5:]
-        if label in ('skip:invalid_resume_message', 'skip:composer_unavailable',
-                     'skip:composer_in_use', 'skip:composer_state_unknown', 'skip:account_changed', 'skip:continuation_disabled',
-                     'skip:automatic_send_unavailable'):
+        if label in ('skip:native_continue_unavailable', 'skip:native_continue_not_ready',
+                     'skip:native_continue_ambiguous', 'skip:account_changed',
+                     'skip:continuation_disabled', 'skip:bridge_required'):
             return 'failed', label[5:]
         if label.startswith('skip:'):
             return 'retry', label[5:]

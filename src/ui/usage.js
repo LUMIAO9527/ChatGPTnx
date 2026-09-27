@@ -15,7 +15,7 @@ window.NXMath = (() => {
       const u=cache[a.email],valid=!!(u&&u.ok===true&&u.source===SOURCE),bound=!u||u.identity_key===key;
       const tokens=valid?count(u.summary?.lifetimeTokens):null;
       const status=duplicate?'duplicate':!bound?'identity_changed':u&&!valid?'unavailable':!u?'pending':tokens===null?'missing_total':'ready';
-      rows.push({email:a.email,alias:a.alias||'',plan:a.plan,status,fetched_at:u?.fetched_at||null,tokens:tokens===null?null:String(tokens),included:status==='ready',usage:u||null});
+      rows.push({email:a.email,alias:a.alias||'',plan:a.plan,archived:!!a.archived,identity_key:key,activity_key:activityKey,status,fetched_at:u?.fetched_at||null,tokens:tokens===null?null:String(tokens),included:status==='ready',usage:u||null});
       if(!duplicate&&bound&&valid)eligible.push(u);
     }
     const observed=eligible.flatMap(u=>(u.dailyUsageBuckets||[]).filter(b=>b.startDate<=end).map(b=>b.startDate));

@@ -172,6 +172,7 @@ def resume_existing(home, item, stop, log):
     """
     from pathlib import Path
     from .desktop_resume import latest_turn
+    from .desktop_location import canonical_task
     from .storage import fingerprint
     from .settings import valid_setting
 
@@ -185,7 +186,10 @@ def resume_existing(home, item, stop, log):
         source = settings.get('resume_source_thread_id')
         if not source or not valid_setting('resume_source_thread_id', source):
             return 'failed', 'resume_source_unconfigured'
-        if source == item['thread_id']:
+        target = canonical_task(home, item['thread_id'])
+        if not target:
+            return 'failed', 'task_identity_unavailable'
+        if source == target:
             return 'failed', 'resume_source_is_target'
     except (OSError, ValueError, KeyError, AttributeError):
         return 'failed', 'account_guard_unavailable'
@@ -198,11 +202,11 @@ def resume_existing(home, item, stop, log):
         # A fresh desktop response is required, not just a window or pipe file.
         snapshot = text_result(pipe.request('tools/call', call_params(
             source, 'nx-read-' + str(uuid.uuid4()), 'read_thread',
-            {'threadId': item['thread_id'], 'hostId': 'local', 'turnLimit': 1,
+            {'threadId': target, 'hostId': 'local', 'turnLimit': 1,
              'includeOutputs': False})))
         thread = snapshot.get('thread', {})
         turns = snapshot.get('turns', [])
-        if thread.get('id') != item['thread_id'] or thread.get('kind') != 'codex':
+        if thread.get('id') != target or thread.get('kind') != 'codex':
             return 'failed', 'bridge_target_mismatch'
         if not turns:
             return 'retry', 'history_unavailable'
@@ -236,7 +240,7 @@ def resume_existing(home, item, stop, log):
         if fingerprint(auth) != before:
             return 'failed', 'account_changed'
         dispatched = True
-        dispatch_message(pipe, source, item['thread_id'], recovery_message(message))
+        dispatch_message(pipe, source, target, recovery_message(message))
         log.info('desktop_bridge_dispatch acknowledged=true')
         for _ in range(75):
             after = latest_turn(home, item['thread_id'])

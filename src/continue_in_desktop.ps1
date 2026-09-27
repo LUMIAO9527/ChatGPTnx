@@ -1,7 +1,5 @@
-﻿# Operate only in an already-running, pinned ChatGPT window. Never replace editor
-# text, touch the clipboard, launch a client, or spawn an app-server. Focus the
-# composer, append the continuation message, then invoke Send once. Existing
-# composer content and placeholder state are deliberately not inspected.
+﻿# Click Continue only in the already-running, pinned ChatGPT task window.
+# Quota failures use the desktop bridge and never call this helper.
 param(
     [Parameter(Mandatory=$true)][string]$ThreadId,
     [Parameter(Mandatory=$true)][string]$TitlePrefix,
@@ -29,34 +27,7 @@ public static class NXResumeWindow {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool BlockInput(bool block);
-    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int key);
-    [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
-    [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, INPUT[] input, int size);
-    [StructLayout(LayoutKind.Sequential)] struct LASTINPUTINFO { public uint size, time; }
-    [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT { public ushort vk, scan; public uint flags, time; public UIntPtr extra; }
-    [StructLayout(LayoutKind.Sequential)] struct MOUSEINPUT { public int dx, dy; public uint data, flags, time; public UIntPtr extra; }
-    [StructLayout(LayoutKind.Explicit)] struct INPUTUNION {
-        [FieldOffset(0)] public KEYBDINPUT keyboard;
-        [FieldOffset(0)] public MOUSEINPUT mouse;
-    }
-    [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public INPUTUNION data; }
-    public static bool Idle() {
-        LASTINPUTINFO last = new LASTINPUTINFO(); last.size=(uint)Marshal.SizeOf(last);
-        if (!GetLastInputInfo(ref last) || unchecked((uint)Environment.TickCount-last.time)<1000) return false;
-        for(int key=1;key<255;key++) if((GetAsyncKeyState(key)&0x8000)!=0) return false;
-        return true;
-    }
-    // One input batch; no VK codes, Enter, deletion, selection or shortcuts.
-    public static bool AppendUnicode(string text, IntPtr expected) {
-        if(GetForegroundWindow()!=expected) return false;
-        INPUT[] input=new INPUT[text.Length*2];
-        for(int i=0;i<text.Length;i++) {
-            input[i*2].type=1; input[i*2].data.keyboard.scan=text[i]; input[i*2].data.keyboard.flags=4;
-            input[i*2+1]=input[i*2]; input[i*2+1].data.keyboard.flags=6;
-        }
-        return SendInput((uint)input.Length,input,Marshal.SizeOf(typeof(INPUT)))==input.Length;
-    }
+
 }
 
 '@
@@ -66,13 +37,12 @@ $buttonType = [System.Windows.Automation.ControlType]::Button
 $editType = [System.Windows.Automation.ControlType]::Edit
 $documentType = [System.Windows.Automation.ControlType]::Document
 $linkType = [System.Windows.Automation.ControlType]::Hyperlink
-$script:writeStarted = $false
+$script:actionStarted = $false
 
 function Skip([string]$Reason) {
-    if ($null -ne $script:inputGuard) { $script:inputGuard.Dispose(); $script:inputGuard = $null }
-    # An error after writing/invoking cannot be retried automatically: acceptance
-    # might already have happened even when the UIA call did not return.
-    if ($script:writeStarted) { Write-Output ('uncertain:' + $Reason) }
+    # An error after Invoke cannot be retried automatically: the click may
+    # have taken effect even when the UIA call did not return.
+    if ($script:actionStarted) { Write-Output ('uncertain:' + $Reason) }
     else { Write-Output ('skip:' + $Reason) }
     exit 2
 }
@@ -206,99 +176,25 @@ function Find-Target {
     if ($matches.Count -eq 1) { return $matches[0] }
     return $null
 }
-function Composer-Trim([string]$Raw) {
-    $padding = '[\s\u00AD\u034F\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]'
-    return ($Raw -replace ('^' + $padding + '+|' + $padding + '+$'), '')
+function Runtime-Key($control) {
+    try { return (($control.GetRuntimeId()) -join '.') } catch { return '' }
 }
-function Composer-TextState([string]$Raw, [string]$AccessibleName) {
-    $text = Composer-Trim $Raw
-    if ($text.Length -eq 0) { return 'empty' }
-    $labels = @((Composer-Trim $AccessibleName), 'Ask anything', '随心输入', 'Message ChatGPT')
-    foreach ($label in $labels) { if ($label -and $text.Equals($label, [StringComparison]::OrdinalIgnoreCase)) { return 'unknown' } }
-    return 'present'
-}
-function Resolve-ComposerState([string]$ValueState, [string]$TextState) {
-    if ($ValueState -eq 'empty') { if ($TextState -eq 'present') { return 'unknown' }; return 'empty' }
-    if ($ValueState -eq 'present') { if ($TextState -eq 'empty') { return 'unknown' }; return 'present' }
-    if ($ValueState -eq 'unavailable') { if ($TextState -in @('empty','present')) { return $TextState }; return 'unknown' }
-    if ($TextState -eq 'present') { return 'present' }
-    return 'unknown'
-}
-function Find-Composer($document) {
-    $editors = @()
-    $visibleEditors = @()
-    foreach ($item in (Visible-Controls $document $editType)) {
-        try {
-            if ($item.Current.ControlType -eq $editType -and -not $item.Current.IsOffscreen -and
-                $item.Current.IsEnabled) { $visibleEditors += $item }
-            if ($item.Current.ControlType -eq $editType -and -not $item.Current.IsOffscreen -and
-                $item.Current.IsEnabled -and
-                ([string]$item.Current.Name).Trim() -in @('随心输入','Ask anything','Message ChatGPT')) { $editors += $item }
-        } catch { }
-    }
-    # Placeholder and accessible name can vary with app version and task state.
-    # A single editable control in the identified task document needs no text read.
-    if ($editors.Count -eq 0 -and $visibleEditors.Count -eq 1) { $editors = $visibleEditors }
-    if ($editors.Count -ne 1) { Skip 'composer_unavailable' }
-    return [pscustomobject]@{Editor=$editors[0]}
-}
-function Valid-ResumeMessage([object]$message) {
-    if ($message -isnot [string] -or [string]::IsNullOrWhiteSpace($message) -or
-        $message -ne $message.Trim()) { return $false }
-    $count = 0
-    for ($i = 0; $i -lt $message.Length; $i++) {
-        $category = [Globalization.CharUnicodeInfo]::GetUnicodeCategory($message, $i)
-        if ($category -in @([Globalization.UnicodeCategory]::Control,
-            [Globalization.UnicodeCategory]::Format,[Globalization.UnicodeCategory]::Surrogate,
-            [Globalization.UnicodeCategory]::PrivateUse,[Globalization.UnicodeCategory]::OtherNotAssigned,
-            [Globalization.UnicodeCategory]::LineSeparator,[Globalization.UnicodeCategory]::ParagraphSeparator)) { return $false }
-        if ($category -eq [Globalization.UnicodeCategory]::SpaceSeparator -and $message[$i] -ne ' ') { return $false }
-        if ([char]::IsHighSurrogate($message[$i])) {
-            if ($i + 1 -ge $message.Length -or -not [char]::IsLowSurrogate($message[$i+1])) { return $false }
-            $i++
-        }
-        $count++
-    }
-    return $count -ge 1 -and $count -le 200
-}
-function Get-ResumeMessage {
-    $message = '继续'
-    if ($SettingsFile) {
-        try { $message = (Get-Content -LiteralPath $SettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json).settings.resume_message }
-        catch { Skip 'account_guard_unavailable' }
-    }
-    if (-not (Valid-ResumeMessage $message)) { Skip 'invalid_resume_message' }
-    return $message
-}
-function Find-Send($document,$composer,[bool]$IncludeDisabled=$false) {
-    return @(Find-Controls $document @('发送','Send','发送消息','Send message','提交','Submit') $buttonType $IncludeDisabled |
-        Where-Object { [Math]::Abs($_.Current.BoundingRectangle.Top-$composer.Editor.Current.BoundingRectangle.Top) -le 250 })
-}
-function Send-ResumeMessage($document,$composer) {
-    $message = Get-ResumeMessage
-    if ($DryRun) { Write-Output 'ready:send_message'; return }
-    # Deliberately ignore existing composer text and placeholder state. The user
-    # requested the same fast path for empty and non-empty composers.
-    if ([NXResumeWindow]::GetForegroundWindow() -ne $script:pin.Hwnd -and
-        -not [NXResumeWindow]::SetForegroundWindow($script:pin.Hwnd)) { Skip 'input_focus_changed' }
-    $composer.Editor.SetFocus()
-    if (-not $composer.Editor.Current.HasKeyboardFocus) { Skip 'input_focus_changed' }
-    Assert-Account
-    $script:writeStarted = $true
-    if (-not [NXResumeWindow]::AppendUnicode($message,$script:pin.Hwnd)) { Skip 'text_insertion_unconfirmed' }
-    $deadline = [DateTime]::UtcNow.AddSeconds(3)
+function Wait-ResumeReady([int]$TimeoutMs=6000) {
+    # Navigation and Chromium UIA updates are asynchronous. Observe the same
+    # task document twice before looking for its native Continue button.
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
+    $last = ''
+    $stable = 0
     do {
-        $document = Assert-Target
-        if ([NXResumeWindow]::GetForegroundWindow() -ne $script:pin.Hwnd -or
-            -not $composer.Editor.Current.HasKeyboardFocus) { Skip 'input_focus_changed' }
-        $send = @(Find-Send $document $composer)
-        if ($send.Count -eq 1) { break }
-        Start-Sleep -Milliseconds 100
+        $document = Find-Target
+        $key = if ($null -ne $document) { Runtime-Key $document } else { '' }
+        if ($key -and $key -eq $last) { $stable++ } elseif ($key) { $last = $key; $stable = 1 } else { $stable = 0 }
+        if ($stable -ge 2) {
+            return [pscustomobject]@{Document=$document; Key=$key}
+        }
+        Start-Sleep -Milliseconds 150
     } while ([DateTime]::UtcNow -lt $deadline)
-    if ($send.Count -ne 1) { Skip 'send_unavailable' }
-    Assert-Account
-    $send[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Write-Output 'invoked:send_message'
+    Skip 'target_not_visible'
 }
 function Assert-Target {
     Assert-Account
@@ -307,11 +203,10 @@ function Assert-Target {
     if (@(Find-Controls $document @('停止','Stop') $buttonType).Count -gt 0) { Skip 'task_already_running' }
     return $document
 }
-function Native-Continue($document, $composer) {
+function Native-Continue($document) {
     $names = @('继续','继续生成','继续回答','继续响应','继续对话',
         'Continue','Continue generating','Continue response','Continue conversation','开始','Start')
-    # A disabled Continue button still means the native action is present. It
-    # must never cause a fallback message to be sent.
+    # A disabled Continue button is present but cannot be clicked.
     $buttons = @(Find-Controls $document $names $buttonType $true)
     if ($buttons.Count -gt 0) { return $buttons }
 
@@ -332,12 +227,11 @@ function Native-Continue($document, $composer) {
         $rect.Bottom -le $editorRect.Top + 100
     })
 }
-function Resume-Task($document,$composer) {
-    # The button can render just after the task document. Check several times
-    # before deciding that a text continuation is needed.
+function Resume-Task($document) {
+    # The button can render just after the task document.
     $deadline = [DateTime]::UtcNow.AddMilliseconds(1500)
     do {
-        $buttons = @(Native-Continue $document $composer)
+        $buttons = @(Native-Continue $document)
         if ($buttons.Count -gt 0) { break }
         if ([DateTime]::UtcNow -ge $deadline) { break }
         Start-Sleep -Milliseconds 250
@@ -348,15 +242,15 @@ function Resume-Task($document,$composer) {
         if (-not $buttons[0].Current.IsEnabled) { Skip 'native_continue_not_ready' }
         if ($DryRun) { Write-Output 'ready:native_continue'; return }
         Assert-Account
-        $script:writeStarted = $true
+        $script:actionStarted = $true
         $buttons[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         Write-Output 'invoked:native_continue'
         return
     }
-    $composer = Find-Composer $document
-    Send-ResumeMessage $document $composer
+    Skip 'native_continue_unavailable'
 }
 try {
+    if ($Action -ne 'interrupted') { Skip 'bridge_required' }
     Assert-Account
     $deadline = [DateTime]::UtcNow.AddSeconds(6)
     do {
@@ -405,8 +299,7 @@ try {
         if (-not $DryRun) { $null = [NXResumeWindow]::SetForegroundWindow($script:pin.Hwnd) }
         Write-Output 'opened:existing_task'; exit 0
     }
-    Start-Sleep -Milliseconds 250
-    $document = Assert-Target
-    Resume-Task $document $null
+    $ready = Wait-ResumeReady
+    Resume-Task $ready.Document
     exit 0
 } catch { Skip 'desktop_error' }

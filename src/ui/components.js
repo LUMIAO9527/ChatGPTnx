@@ -56,7 +56,7 @@ window.NXComponents = (() => {
   const avatar = (account,className='') => `<span class="avatar ${className}" aria-hidden="true">${esc(Array.from(accountName(account))[0]||'·')}</span>`;
   function accountIdentity(account,extra='') {
     const label=accountName(account);
-    return `<div class="identity">${avatar(account)}<div class="identity-copy"><span class="identity-title"><strong title="${esc(label)}">${esc(label)}</strong><span class="badge">${esc(planLabel(account?.plan))}</span></span><small>${esc(extra||account?.email||'')}</small></div></div>`;
+    return `<div class="identity">${avatar(account)}<div class="identity-copy"><span class="identity-title"><strong title="${esc(label)}">${esc(label)}</strong><span class="badge">${account?.archived?'已归档':esc(planLabel(account?.plan))}</span></span><small>${esc(extra||account?.email||'')}</small></div></div>`;
   }
   // A missing balance is not zero. Keep legacy snapshots readable and never format objects/NaN.
   function creditValue(account) {

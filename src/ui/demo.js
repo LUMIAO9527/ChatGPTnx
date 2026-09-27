@@ -88,11 +88,11 @@ window.NXDemo = (() => {
         item.state='waiting';item.reason='';session.phase='resuming';
         state.resume={id:session.id,phase:'resuming',done:0,failed:0,total:session.items.length};
         return {ok:true};}
-      case 'read_usage_all':if(state.demo_usage_loading)return null;return window.NXMath.aggregate(state.accounts,usages,args[0]||30);
+      case 'read_usage_all':if(state.demo_usage_loading)return null;return window.NXMath.aggregate([...state.accounts,...archives.map(x=>({...x.account,archived:true}))],usages,args[0]||30);
       case 'read_usage':return clone(usages[email]||null);
       case 'get_usage_all':
         if(!args[0])return {ok:true,accepted:false};
-        return operation('usage',null,()=>Object.values(usages).forEach(u=>{if(u.ok)u.fetched_at=sec();}));
+        return operation('usage',null,()=>state.accounts.forEach(a=>{if(usages[a.email]?.ok)usages[a.email].fetched_at=sec();}));
       case 'get_usage':
         if(!force&&usages[email])return clone(usages[email]);
         return operation('usage',email,()=>{if(usages[email]?.ok)usages[email].fetched_at=sec();});
@@ -254,7 +254,11 @@ window.NXDemo = (() => {
       resumeDetails=[{id:'automatic-blocked',target:state.current,phase:'failed',updated_at:sec(),items:[
         {thread_id:'67cc833f-6330-5bae-a638-9232b5ddfa21',title:'等待自动接续的任务',state:'failed',reason:'automatic_send_unavailable'}]}];
     }
-    if(which==='archived')archives=[{key:'demo-archive',email:'archived@example.com',archived_at:sec()-86400,account:{...clone(state.accounts[1]),email:'archived@example.com'}}];
+    if(which==='archived'){
+      const account={...clone(state.accounts[1]),email:'archived@example.com',identity_key:'archived-demo'};
+      archives=[{key:'demo-archive',email:account.email,archived_at:sec()-86400,account}];
+      usages[account.email]={...clone(usages[state.accounts[1].email]),identity_key:account.identity_key};
+    }
     if(which==='usage-empty')usages={};
     if(which==='usage-loading')state.demo_usage_loading=true;
     if(which==='usage-duplicate'){state.accounts[2].identity_key=state.accounts[1].identity_key;usages[state.accounts[2].email].identity_key=state.accounts[1].identity_key;}

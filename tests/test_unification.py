@@ -36,25 +36,24 @@ class SinglePresentationTests(unittest.TestCase):
 
 class AutomaticResultsTests(unittest.TestCase):
  def attempt(self,label,*,observed=False,code=0):
-  before={'turn_id':TURN,'status':'failed','error':{'codexErrorInfo':'usageLimitExceeded'}}
+  before={'turn_id':TURN,'status':'interrupted','error':None}
   after={**before,'turn_id':'ea10a953-d3a4-53b9-b010-6361794c2a22'}
   stop=Mock();stop.is_set.return_value=False;stop.wait.return_value=False
   with patch('nx.desktop_resume.latest_turn',side_effect=[before,after] if observed else None,return_value=before),patch('nx.desktop_resume.title_prefix',return_value='Unique synthetic task'),patch('nx.desktop_resume._desktop_command',return_value=['synthetic']),patch('nx.desktop_resume._invoke',return_value=Mock(stdout=label,returncode=code)) as run:
    result=attempt_continuation(Path('none'),Path('none'),{'thread_id':THREAD,'turn_id':TURN},stop,Mock())
   self.assertEqual(run.call_count,1);return result
- def test_automatic_message_needs_new_turn_evidence(self):self.assertEqual(self.attempt('invoked:send_message',observed=True),('done','new_turn_observed'))
- def test_native_action_same_confirmation_contract(self):self.assertEqual(self.attempt('invoked:native_continue',observed=True),('done','new_turn_observed'))
- def test_message_invoked_but_not_observed_does_not_retry(self):self.assertEqual(self.attempt('invoked:send_message'),('failed','start_not_observed'))
- def test_uncertain_insert_or_send_is_never_retryable(self):
-  for reason in ('input_guard_timeout','text_insertion_unconfirmed','composer_changed','send_unavailable','desktop_error'):
-   with self.subTest(reason=reason):self.assertEqual(self.attempt('uncertain:'+reason,code=2),('failed','action_outcome_unknown'))
- def test_nonzero_invoked_is_not_success(self):self.assertEqual(self.attempt('invoked:send_message',code=2),('failed','action_outcome_unknown'))
- def test_draft_typing_and_attachment_wait_without_writing(self):
-  for reason in ('user_draft_present','composer_in_use','user_attachment_present'):
-   with self.subTest(reason=reason):self.assertEqual(self.attempt('skip:'+reason,code=2),('defer',reason))
- def test_guard_refusal_is_pre_effect_retry_only(self):self.assertEqual(self.attempt('skip:input_guard_unavailable',code=2),('retry','input_guard_unavailable'))
- def test_unknown_composer_is_not_relabelled_as_draft(self):self.assertEqual(self.attempt('skip:composer_state_unknown',code=2),('failed','composer_state_unknown'))
- def test_private_text_in_response_does_not_become_reason(self):self.assertEqual(self.attempt('my private draft'),('failed','action_outcome_unknown'))
+ def test_native_action_needs_new_turn_evidence(self):
+  self.assertEqual(self.attempt('invoked:native_continue',observed=True),('done','new_turn_observed'))
+ def test_native_click_without_observed_turn_does_not_retry(self):
+  self.assertEqual(self.attempt('invoked:native_continue'),('failed','start_not_observed'))
+ def test_uncertain_click_is_never_retryable(self):
+  self.assertEqual(self.attempt('uncertain:desktop_error',code=2),('failed','action_outcome_unknown'))
+ def test_nonzero_invoked_is_not_success(self):
+  self.assertEqual(self.attempt('invoked:native_continue',code=2),('failed','action_outcome_unknown'))
+ def test_missing_button_is_a_failure(self):
+  self.assertEqual(self.attempt('skip:native_continue_unavailable',code=2),('failed','native_continue_unavailable'))
+ def test_private_text_in_response_does_not_become_reason(self):
+  self.assertEqual(self.attempt('my private draft'),('failed','action_outcome_unknown'))
 
 class WaitingPersistenceTests(unittest.TestCase):
  def setUp(self):
@@ -86,12 +85,12 @@ class WaitingPersistenceTests(unittest.TestCase):
   self.assertFalse(self.c.retry_draft(self.id,THREAD)['ok'])
 
 class NativeSourceBoundariesTests(unittest.TestCase):
- def test_unicode_batch_is_not_a_replacement_or_clipboard_path(self):
+ def test_native_helper_has_no_editor_write_or_clipboard_path(self):
   s=(ROOT/'src/continue_in_desktop.ps1').read_text(encoding='utf-8-sig')
   for forbidden in ('.SetValue(', 'Set-Clipboard', 'Start-Process', 'SendKeys', 'codex://'):
    self.assertNotIn(forbidden,s)
   self.assertNotIn('Assert-EmptyComposer $composer',s);self.assertNotIn('Assert-CollapsedCaret $composer',s)
-  self.assertIn('flags=4',s);self.assertIn('flags=6',s);self.assertNotIn('vk=13',s)
+  self.assertNotIn('SendInput',s);self.assertNotIn('Send-ResumeMessage',s)
  def test_automatic_navigation_waits_for_idle_but_explicit_open_is_separate(self):
   s=(ROOT/'src/continue_in_desktop.ps1').read_text(encoding='utf-8-sig')
   start=s.index("# Select the unique sidebar entry")

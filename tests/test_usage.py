@@ -98,6 +98,21 @@ class SubscriptionAndServiceTests(Fixture):
         self.service.get_usage_all();self.wait();r=self.service.read_usage_all();self.assertEqual(r['total_tokens'],'84');self.assertEqual(r['included_accounts'],2)
     def test_total_usage_success_cached(self):
         self.service.get_usage_all();self.wait();n=len(self.query.calls);self.service.get_usage_all();self.assertEqual(n,len(self.query.calls))
+    def test_archived_account_keeps_history_without_refresh(self):
+        self.service.get_usage_all();self.wait()
+        before=len(self.query.calls)
+        key=self.accounts.archive('b@example.com')
+        archived=self.service.read_usage_all(days='all')
+        row=next(r for r in archived['rows'] if r['email']=='b@example.com')
+        self.assertTrue(row['archived'])
+        self.assertEqual(row['tokens'],'42')
+        self.assertEqual(archived['total_tokens'],'84')
+        self.service.get_usage_all(force=True);self.wait()
+        self.assertEqual(len(self.query.calls),before+1)
+        self.accounts.restore(key)
+        restored=next(r for r in self.service.read_usage_all()['rows'] if r['email']=='b@example.com')
+        self.assertFalse(restored['archived'])
+        self.assertEqual(restored['tokens'],'42')
     def test_failed_account_kept_separate(self):
         self.query.fail.add('b@example.com');self.service.get_usage_all();self.wait();r=self.service.read_usage_all();self.assertEqual(r['total_tokens'],'42');self.assertEqual(r['included_accounts'],1)
     def test_switch_terminal_result_survives_followup_refresh(self):

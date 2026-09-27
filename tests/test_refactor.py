@@ -344,8 +344,7 @@ class ExistingDesktopSafetyTests(TemporaryCase):
     def setUp(self):
         super().setUp()
         atomic_bytes(self.paths.auth, credential('b@example.com'))
-        self.record = {'turn_id': TURN, 'status': 'failed',
-                       'error': {'codexErrorInfo': 'usageLimitExceeded'}}
+        self.record = {'turn_id': TURN, 'status': 'interrupted', 'error': None}
 
     def attempt(self, output=None, error=None, stop=None):
         with patch('nx.desktop_resume.latest_turn', return_value=self.record), \
@@ -359,12 +358,12 @@ class ExistingDesktopSafetyTests(TemporaryCase):
         result, _ = self.attempt(error=subprocess.TimeoutExpired('powershell', 28))
         self.assertEqual(result, ('failed', 'action_outcome_unknown'))
 
-    def test_draft_editor_and_missing_native_action_are_terminal_without_input(self):
-        for reason in ('user_draft_present', 'composer_in_use', 'composer_unavailable',
-                       'automatic_send_unavailable', 'account_changed', 'continuation_disabled'):
+    def test_missing_native_action_is_terminal_without_input(self):
+        for reason in ('native_continue_unavailable', 'native_continue_not_ready',
+                       'native_continue_ambiguous', 'account_changed', 'continuation_disabled'):
             with self.subTest(reason=reason):
                 result, run = self.attempt(output=Mock(stdout='skip:'+reason, returncode=2))
-                self.assertEqual(result, ('defer' if reason in ('user_draft_present','composer_in_use') else 'failed', reason))
+                self.assertEqual(result, ('failed', reason))
                 self.assertNotIn('-Message', run.call_args.args[0])
                 self.assertIn('-ExpectedAuthHash', run.call_args.args[0])
 
@@ -413,7 +412,8 @@ class ExistingDesktopSafetyTests(TemporaryCase):
         self.assertNotIn('Assert-EmptyComposer $composer', script)
         self.assertNotIn("Skip 'composer_state_unknown'", script)
         self.assertIn('SessionId', script)
-        self.assertIn('Send-ResumeMessage $document $composer', script)
+        self.assertNotIn('Send-ResumeMessage', script)
+        self.assertNotIn('SendInput', script)
         self.assertNotIn('Assert-CollapsedCaret $composer', script)
         self.assertNotIn('class NXInputGuard', script)
         self.assertIn('Started=$process.StartTime.Ticks', script)
