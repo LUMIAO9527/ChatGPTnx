@@ -704,6 +704,7 @@ class Desktop:
                 self.service.log.warning('panel_topmost_clear_unverified')
             self._relay_pinned = False
             self._post_script('window.nxHidden && window.nxHidden()')
+            self.service.log.info('panel_hidden reason=%s', reason)
         self._dispatch_ui(apply)
 
     def show(self, *args, relay_operation_id=None):
@@ -796,9 +797,8 @@ class Desktop:
         if not guard or guard['id'] != operation_id or guard.get('pinned'):
             return
         if time.monotonic() >= guard.get('deadline', 0):
-            self._relay_restore = None
-            if self.visible and not chatgpt_foreground():
-                self.hide(reason='focus')
+            # Stop presentation retries, but retain the workflow until its
+            # continuation finishes or the user dismisses/leaves the panel.
             return
         timer = threading.Timer(.6, self._restore_after_relay, args=(operation_id,))
         timer.daemon = True
@@ -818,9 +818,7 @@ class Desktop:
         elif time.monotonic() < guard.get('deadline', 0):
             self._retry_relay_restore(operation_id)
         else:
-            self._relay_restore = None
-            if self.visible:
-                self.hide(reason='focus')
+            return  # The presentation deadline is not a workflow deadline.
 
     def watch_focus(self):
         """Event-driven blur fallback, zero idle cost. The WebView 'blur' DOM

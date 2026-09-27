@@ -41,7 +41,8 @@ window.NXDemo = (() => {
     usages={};const totals=[18420680,26480300,60241200,9421800,5483200];
     accounts.forEach((a,i)=>{
       if(i===4){usages[a.email]={ok:false,err:'该账号暂时无法查询用量',attempted_at:n,identity_key:a.identity_key};return;}
-      const end=Date.parse(new Date(n*1000).toISOString().slice(0,10)+'T00:00:00Z');
+      const today=new Date(n*1000);
+      const end=Date.UTC(today.getFullYear(),today.getMonth(),today.getDate());
       const buckets=Array.from({length:90},(_,j)=>({startDate:new Date(end-(89-j)*day*1000).toISOString().slice(0,10),tokens:Math.round((Math.sin(j*.41+i)+1.2)*(i+1)*55000+(j%8)*13000)})).filter((_,j)=>!(i===0&&j===72));
       usages[a.email]={ok:true,source:'account/usage/read',scope:'chatgpt_account_activity',fetched_at:n-60,identity_key:a.identity_key,
         summary:{lifetimeTokens:totals[i],peakDailyTokens:Math.max(...buckets.map(b=>b.tokens)),currentStreakDays:[8,12,6,3][i],longestStreakDays:[24,31,18,9][i],longestRunningTurnSec:[720,1080,2160,480][i]},dailyUsageBuckets:buckets};

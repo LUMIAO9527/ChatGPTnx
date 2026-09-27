@@ -686,6 +686,21 @@ class ProtocolTests(unittest.TestCase):
             panel._on_service_change()
             hide.assert_not_called()
 
+    def test_restore_timeout_keeps_long_continuation_protected_from_chatgpt_blur(self):
+        panel=object.__new__(Desktop)
+        panel.service=SimpleNamespace(operation=None,log=Mock())
+        panel._relay_restore={'id':'switch','visible':True,'deadline':time.monotonic()-1}
+        panel.closing=False;panel.visible=True;panel.window=object()
+        with patch('nx.desktop.chatgpt_foreground',return_value=False), \
+             patch.object(panel,'show') as show,patch('nx.desktop.threading.Timer') as timer:
+            panel._restore_after_relay('switch')
+            panel._retry_relay_restore('switch')
+            show.assert_not_called();timer.assert_not_called()
+        self.assertIsNotNone(panel._relay_restore)
+        with patch('nx.desktop.chatgpt_foreground',return_value=True):
+            panel.hide(reason='focus')
+        self.assertTrue(panel.visible)
+
     def test_chatgpt_launch_is_brokered_from_neutral_directory(self):
         if hasattr(launch_chatgpt, '_aumid'):delattr(launch_chatgpt, '_aumid')
         found=subprocess.CompletedProcess([],0,b'OpenAI.Codex_test!App\r\n',b'')
