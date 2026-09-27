@@ -1,0 +1,31 @@
+# ChatGPTnx 运行期数据与本地文件 —— 绝不入库
+# 本仓库只发布可执行程序、说明与界面截图（见 LICENSE）。
+
+# 账号与凭据
+accounts.txt
+accounts*.json
+*.token
+*.credentials
+
+# 运行目录
+_data/
+snapshots/
+logs/
+*.log
+
+# 构建与临时产物
+build/
+dist/
+_wip/
+*.spec
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
