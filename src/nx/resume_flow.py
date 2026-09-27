@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import re
 import json
 import threading
 import time
@@ -9,7 +11,7 @@ import uuid
 
 from .desktop_resume import attempt_continuation, title_prefixes, latest_turn, THREAD_ID
 from .quota_policy import number
-from .storage import atomic_bytes, load_owned_document
+from .storage import atomic_bytes, load_owned_document, account_identity_key
 
 
 TERMINAL = {'done', 'failed', 'skipped'}
@@ -42,12 +44,25 @@ class ResumeCoordinator:
         saved, self.recovery_path = load_owned_document(self.path)
         self.sessions = saved.get('sessions', []) if isinstance(saved, dict) else []
         self.pending = saved.get('pending', []) if isinstance(saved, dict) else []
+        claims = saved.get('claims', []) if isinstance(saved, dict) else []
+        self.blocked = (bool(self.recovery_path) or saved.get('blocked') is True
+                        or not isinstance(claims, list)
+                        or any(not isinstance(v, str) or not re.fullmatch(r'[0-9a-f]{64}', v) for v in claims))
+        self.claims = {v for v in claims if isinstance(v, str) and re.fullmatch(r'[0-9a-f]{64}', v)} if isinstance(claims, list) else set()
         if not isinstance(self.sessions, list):
             self.sessions = []
         if not isinstance(self.pending, list):
             self.pending = []
         self._sanitize_saved()
-        self._committed = copy.deepcopy((self.sessions, self.pending))
+        # Migrate prior attempts before retention/clear can remove their history.
+        self.claims.update(self._claim_key(i) for session in self.sessions
+                           for i in session['items']
+                           if i.get('state') == 'acting' or i.get('attempts', 0) > 0
+                           or i.get('reason') in ('action_outcome_unknown', 'start_not_observed',
+                                                  'new_turn_observed', 'native_turn_resumed'))
+        self._committed = copy.deepcopy((self.sessions, self.pending, self.claims))
+        if self.blocked:
+            self._save()
         self._restore_recent_unavailable()
         self._recover()
         with self.lock:
@@ -90,12 +105,20 @@ class ResumeCoordinator:
                 for key in ('attempts', 'next_try'):
                     if not number(item.get(key)) or item[key] < 0:
                         item[key] = 0
-                if not number(item.get('deferred_since')) or not 0 <= item['deferred_since'] <= now:
-                    item.pop('deferred_since', None)
+                item.pop('deferred_since', None)
+                item['retry_authorized'] = raw_item.get('retry_authorized') is True
                 if not isinstance(item.get('reason'), str):
                     item['reason'] = ''
-                if item.get('reason') == 'manual_message_required':
-                    item['reason'] = 'automatic_send_unavailable'
+                if item.get('reason') in {
+                        'manual_message_required', 'automatic_send_unavailable',
+                        'user_draft_present', 'composer_in_use', 'composer_state_unknown',
+                        'composer_unavailable', 'user_attachment_present',
+                        'input_guard_unavailable', 'input_focus_changed',
+                        'composer_selection_unavailable', 'selection_not_collapsed'}:
+                    # Only a migration label, never an editor check or wait path.
+                    item.update(state='failed', reason='legacy_route_removed',
+                                retry_authorized=False)
+
                 unique[self._key(item)] = item
             s['items'] = list(unique.values())[:100]
             if not s['items'] and s['phase'] == 'resuming':
@@ -123,6 +146,17 @@ class ResumeCoordinator:
     @staticmethod
     def _key(item):
         return item.get('thread_id'), item.get('turn_id')
+
+    @staticmethod
+    def _claim_key(item):
+        # A turn UUID remains the same when the task is addressed by an alias.
+        return hashlib.sha256(str(item.get('turn_id', '')).encode('utf-8')).hexdigest()
+
+    def _target_identity(self, target):
+        try:
+            return account_identity_key(self.paths.snapshot(target), target) if target else None
+        except (ValueError, TypeError):
+            return None
 
     @staticmethod
     def _item(event):
@@ -211,13 +245,13 @@ class ResumeCoordinator:
     def _save(self):
         self._prune()
         try:
-            atomic_bytes(self.path, json.dumps({'sessions': self.sessions, 'pending': self.pending},
+            atomic_bytes(self.path, json.dumps({'sessions': self.sessions, 'pending': self.pending, 'claims': sorted(self.claims), 'blocked': self.blocked},
                                                ensure_ascii=False, separators=(',', ':'),
                                                allow_nan=False).encode('utf-8'))
         except (OSError, ValueError):
-            self.sessions, self.pending = copy.deepcopy(self._committed)
+            self.sessions, self.pending, self.claims = copy.deepcopy(self._committed)
             raise
-        self._committed = copy.deepcopy((self.sessions, self.pending))
+        self._committed = copy.deepcopy((self.sessions, self.pending, self.claims))
         self.notify()
 
     def _recover(self):
@@ -282,7 +316,8 @@ class ResumeCoordinator:
                 else:
                     unique[key]['was_active'] |= bool(event.get('was_active'))
             session = {'id': uuid.uuid4().hex, 'source': source, 'origin': origin,
-                       'target': target, 'phase': 'switching', 'created_at': now,
+                       'target': target, 'target_identity_key': self._target_identity(target),
+                       'phase': 'switching', 'created_at': now,
                        'updated_at': now, 'switched_at': None, 'seen_at': None,
                        'items': list(unique.values())}
             self.sessions.append(session)
@@ -339,18 +374,7 @@ class ResumeCoordinator:
                     if session.get('phase') == 'cancelled':
                         continue
                     existing = next((i for i in session['items'] if self._key(i) == key), None)
-                    retryable_terminal = existing and (
-                        existing['state'] == 'failed' and
-                        existing.get('reason') in ('native_continue_unavailable',
-                                                   'native_continue_ambiguous') or
-                        existing['state'] == 'done' and
-                        existing.get('reason') == 'task_already_running')
-                    if (retryable_terminal and session.get('switched_at') and
-                            session['target'] == self.current_email()):
-                        existing['state'] = 'waiting'
-                        existing['attempts'] = 0
-                        existing['next_try'] = 0
-                    elif not existing:
+                    if not existing and self._claim_key(event) not in self.claims:
                         session['items'].append(self._item(event))
                     if session['phase'] in TERMINAL and any(
                             i['state'] not in TERMINAL for i in session['items']):
@@ -370,7 +394,7 @@ class ResumeCoordinator:
                             'seen_at': None, 'items': [{**self._item(event), 'state': 'failed',
                                                         'reason': 'switch_boundary_ambiguous'}]})
                     continue
-                if any(self._key(p) == key for p in self.pending):
+                if self._claim_key(event) in self.claims or any(self._key(p) == key for p in self.pending):
                     continue
                 self.pending.append({**event, 'origin': origin, 'created_at': now,
                                      'expires_at': None if auto_enabled else now + PENDING_SECONDS,
@@ -457,7 +481,8 @@ class ResumeCoordinator:
             unique = {self._key(event): self._item(event) for event in events}
             now = time.time()
             self.sessions.append({'id': uuid.uuid4().hex, 'source': 'auto-recovered',
-                                  'origin': origin, 'target': origin, 'phase': 'resuming',
+                                  'origin': origin, 'target': origin,
+                                  'target_identity_key': self._target_identity(origin), 'phase': 'resuming',
                                   'created_at': now, 'updated_at': now,
                                   'switched_at': None, 'seen_at': None,
                                   'items': list(unique.values())})
@@ -498,7 +523,7 @@ class ResumeCoordinator:
             for session in self.sessions:
                 for item in session['items']:
                     observed = item.get('observed_turn_id')
-                    if item.get('reason') != 'new_turn_observed' or not observed:
+                    if item.get('reason') not in ('new_turn_observed', 'native_turn_resumed') or not observed:
                         continue
                     record = latest_turn(self.paths.home, item['thread_id'], observed)
                     if not record or record['turn_id'] != observed:
@@ -524,16 +549,31 @@ class ResumeCoordinator:
             for session in self.sessions:
                 if session.get('phase') != 'resuming':
                     continue
+                if self.blocked:
+                    self._fail_remaining(session, 'resume_state_unavailable')
+                    self._save()
+                    continue
                 if self.current_email() != session.get('target'):
                     self._fail_remaining(session, 'account_changed')
                     self._save()
                     continue
                 for item in session['items']:
                     if item['state'] == 'waiting' and item.get('next_try', 0) <= now:
-                        item['state'] = 'acting'
+                        claim = self._claim_key(item)
+                        if claim in self.claims and not item.get('retry_authorized'):
+                            item.update(state='skipped', reason='duplicate_attempt')
+                            self._save()
+                            continue
+                        # Durable before any desktop call. Clear/prune never clears
+                        # claims; a crash, lost ACK or second session cannot replay it.
+                        self.claims.add(claim)
+                        item.update(state='acting', retry_authorized=False)
                         session['updated_at'] = now
                         self._save()
-                        return session['id'], {**copy.deepcopy(item), 'settings_file': str(self.paths.data / 'state.json')}
+                        expected = session.get('target_identity_key') or self._target_identity(session.get('target'))
+                        return session['id'], {**copy.deepcopy(item),
+                            'settings_file': str(self.paths.data / 'state.json'),
+                            'expected_account_key': expected}
                 if session['items'] and all(i['state'] in TERMINAL for i in session['items']):
                     session['phase'] = ('failed' if any(i['state'] == 'failed'
                                                        for i in session['items']) else 'done')
@@ -588,27 +628,16 @@ class ResumeCoordinator:
                 if live is None or live['state'] == 'skipped':
                     return
                 if state == 'defer' and reason == 'desktop_transitioning':
+                    self.claims.discard(self._claim_key(live))
                     live.update(state='waiting', reason=reason, next_try=time.time() + 2)
-                elif state == 'defer':
-                    # No text or Invoke has happened. Wait for the user's input
-                    # activity/draft to clear; bounded checks, not a send retry.
-                    started = live.setdefault('deferred_since', time.time())
-                    if time.time() - started >= 300:
-                        live.update(state='failed', reason=reason)
-                    else:
-                        live.update(state='waiting', reason=reason, next_try=time.time() + 15)
                 else:
                     live['attempts'] += 1
-                    if state == 'done' and reason == 'new_turn_observed':
-                        observed = item.get('observed_turn_id')
-                        if observed and observed != item['turn_id']:
-                            live['observed_turn_id'] = observed
-                    if state == 'retry' and live['attempts'] < 3:
-                        live.update(state='waiting', next_try=time.time() +
-                                    (5 if live['attempts'] == 1 else 20))
-                    else:
-                        live['state'] = 'failed' if state == 'retry' else state
-                    live['reason'] = reason
+                    observed = item.get('observed_turn_id')
+                    if isinstance(observed, str) and THREAD_ID.fullmatch(observed):
+                        live['observed_turn_id'] = observed
+                    # Readiness failures are terminal too. Only the user may
+                    # explicitly recheck a known pre-action failure.
+                    live.update(state=state if state in TERMINAL else 'failed', reason=reason)
                 session['updated_at'] = time.time()
                 if all(i['state'] in TERMINAL for i in session['items']):
                     session['phase'] = 'failed' if any(i['state'] == 'failed'
@@ -647,7 +676,7 @@ class ResumeCoordinator:
                     continue
                 return {'id': session['id'], 'phase': session['phase'],
                         'done': sum(i['state'] == 'done' for i in items),
-                        'waiting_reason': next((i.get('reason') for i in items if i['state']=='waiting' and i.get('reason')), None),
+
                         'failed': failed, 'attention': sum(i['state'] == 'failed' and i.get('reason') in ATTENTION_REASONS for i in items), 'total': len(items)}
         return None
 
@@ -706,9 +735,11 @@ class ResumeCoordinator:
                 self._save()
         return {'ok': True}
 
-    def retry_draft(self, session_id, thread_id):
+    def retry_task(self, session_id, thread_id):
         """Explicit recheck of a known-not-invoked item; never replay uncertain effects."""
         with self.lock:
+            if self.blocked:
+                return {'ok': False, 'error': '接续记录无法验证，请先恢复记录备份'}
             session = next((s for s in self.sessions if s.get('id') == session_id), None)
             if not session or session.get('phase') != 'failed':
                 return {'ok': False, 'error': '这次接续记录已变化'}
@@ -722,7 +753,7 @@ class ResumeCoordinator:
             if self.current_email() != session.get('target'):
                 return {'ok': False, 'error': '请先切回接续时使用的账号'}
             item.pop('deferred_since', None)
-            item.update(state='waiting', attempts=0, next_try=0, reason='')
+            item.update(state='waiting', next_try=0, reason='', retry_authorized=True)
             session.update(phase='resuming', updated_at=time.time(), seen_at=None)
             self._save()
         self.wake.set()

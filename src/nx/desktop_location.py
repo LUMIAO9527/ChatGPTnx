@@ -24,10 +24,10 @@ def canonical_task(home, runtime_id):
             columns = {r[1] for r in db.execute('PRAGMA table_info(threads)')}
             rollout = 'rollout_path' if 'rollout_path' in columns else 'NULL'
             rows = db.execute(f'SELECT id, archived, {rollout} FROM threads').fetchall()
-        exact = [r for r in rows if r[0] == runtime_id]
-        matches = exact or [r for r in rows if re.search(
+        matches = [r for r in rows if r[0] == runtime_id or re.search(
             r'_' + re.escape(runtime_id) + r'\.jsonl$', str(r[2] or ''))]
-        if len(matches) == 1 and not matches[0][1]:
+        if (len(matches) == 1 and not matches[0][1]
+                and valid_setting('resume_source_thread_id', matches[0][0])):
             return matches[0][0]
     except Exception:
         pass
@@ -75,25 +75,25 @@ def locate_task(home, runtime_id, settings_file, *, expected_turn=None, stop=Non
         if expected_turn:
             turns = snapshot.get('turns', [])
             if not turns:
-                return 'retry', 'history_unavailable'
+                return 'failed', 'history_unavailable'
             if turns[0].get('id') != expected_turn:
-                return 'done', 'newer_turn'
+                return 'skipped', 'newer_turn'
             if turns[0].get('status') == 'inProgress':
-                return 'retry', 'desktop_task_not_idle'
+                return 'failed', 'desktop_task_not_idle'
             if turns[0].get('status') not in ('failed', 'interrupted'):
-                return 'done', 'task_no_longer_needs_resume'
+                return 'skipped', 'task_no_longer_needs_resume'
             record = latest_turn(home, runtime_id)
             if not record:
-                return 'retry', 'history_unavailable'
+                return 'failed', 'history_unavailable'
             if record['turn_id'] != expected_turn:
-                return 'done', 'newer_turn'
+                return 'skipped', 'newer_turn'
         current = settings()
         if current.get('resume_source_thread_id') != source:
             return 'failed', 'resume_source_unconfigured'
         if expected_turn and current.get('task_continuation') is not True:
             return 'failed', 'continuation_disabled'
         if stop and stop.is_set():
-            return 'retry', 'shutting_down'
+            return 'failed', 'shutting_down'
         if fingerprint(auth) != before:
             return 'failed', 'account_changed'
         reply = text_result(pipe.request('tools/call', call_params(
@@ -101,14 +101,14 @@ def locate_task(home, runtime_id, settings_file, *, expected_turn=None, stop=Non
             {'threadId': target}), side_effect=True))
         # The read establishes identity; require a positive navigation response.
         if reply.get('navigated') is not True:
-            return 'retry', 'task_navigation_unconfirmed'
+            return 'failed', 'task_navigation_unconfirmed'
         return 'located', 'task_opened_by_id'
     except BridgeUncertain:
         # Navigation cannot submit or start a turn. A future navigation is safe,
         # but this attempt must not type anything after an unconfirmed response.
-        return 'retry', 'task_navigation_unconfirmed'
+        return 'failed', 'task_navigation_unconfirmed'
     except (BridgeUnavailable, OSError, ValueError, TypeError, AttributeError):
-        return 'retry', 'desktop_bridge_unavailable'
+        return 'failed', 'desktop_bridge_unavailable'
     finally:
         if pipe:
             pipe.close()

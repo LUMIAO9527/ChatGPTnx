@@ -38,6 +38,7 @@ class CatalogTests(unittest.TestCase):
         source=(ROOT/'src/ui/app.js').read_text(encoding='utf-8')
         section=source.split('function renderSheet(')[1].split('const actionLabels=')[0]
         routes=set(re.findall(r"case '([^']+)'",section))
+        routes.discard('error')  # Legacy route closes the sheet; it renders no page.
         covered={c['route'] for c in CASES}|{c['expected'] for c in CASES}
         self.assertFalse(routes-covered, routes-covered)
     def test_mock_tools_and_catalog_never_enter_production_resources(self):

@@ -112,12 +112,12 @@ def fingerprint(path: Path) -> str | None:
 # Cache only decoded metadata and invalidate by atomic-file stat signature; raw
 # credential/token strings never leave this module.
 _credential_cache_lock = threading.RLock()
-_credential_cache: dict[str, tuple[tuple[int, int] | None, dict, dict]] = {}
+_credential_cache: dict[str, tuple[tuple[int, ...] | None, dict, dict]] = {}
 
 def _credential_record(path: Path) -> tuple[dict, dict]:
     try:
         stat = path.stat()
-        signature = (stat.st_mtime_ns, stat.st_size)
+        signature = (stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
     except OSError:
         signature = None
     key = str(path)
@@ -309,7 +309,7 @@ class Accounts:
     def all(self) -> list[str]:
         try:
             stat = self.paths.order.stat()
-            signature = (stat.st_mtime_ns, stat.st_size)
+            signature = (stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
         except FileNotFoundError:
             signature = None
         with self._order_lock:

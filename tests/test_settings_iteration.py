@@ -10,9 +10,9 @@ from screen_catalog import CASES
 
 class ContinuationEvidenceTests(unittest.TestCase):
  def attempt(self,stdout):
-  log=Mock();record={'turn_id':'t','status':'interrupted','error':None}
-  with patch('nx.desktop_resume.latest_turn',return_value=record),patch('nx.desktop_resume.title_prefix',return_value='synthetic title'),patch('nx.desktop_resume._desktop_command',return_value=['mock']),patch('nx.desktop_resume._invoke',return_value=Mock(stdout=stdout,returncode=0)):
-   result=attempt_continuation(Path('synthetic'),Path('helper.ps1'),{'thread_id':'67cc833f-6330-5bae-a638-9232b5ddfa21','turn_id':'t'},threading.Event(),log)
+  log=Mock();record={'turn_id':'44444444-4444-4444-8444-444444444444','status':'interrupted','error':None}
+  with patch('nx.desktop_resume.continuation_guard',return_value=('mock-hash','')),patch('nx.desktop_resume.latest_turn',return_value=record),patch('nx.desktop_resume.title_prefix',return_value='synthetic title'),patch('nx.desktop_resume._desktop_command',return_value=['mock']),patch('nx.desktop_resume._invoke',return_value=Mock(stdout=stdout,returncode=2 if stdout.startswith('skip:') else 0)):
+   result=attempt_continuation(Path('synthetic'),Path('helper.ps1'),{'thread_id':'67cc833f-6330-5bae-a638-9232b5ddfa21','turn_id':'44444444-4444-4444-8444-444444444444'},threading.Event(),log)
   return result,log
  def test_missing_native_button_is_a_visible_failure(self):
   result,_=self.attempt('skip:native_continue_unavailable\n');self.assertEqual(result,('failed','native_continue_unavailable'))
@@ -23,7 +23,7 @@ class ContinuationEvidenceTests(unittest.TestCase):
   self.assertNotIn('SendInput',s)
   self.assertNotIn('Send-ResumeMessage',s)
   self.assertNotIn('Find-Composer',s)
-  self.assertIn("if ($Action -ne 'interrupted') { Skip 'bridge_required' }",s)
+  self.assertIn("if (-not $NavigateOnly -and $Action -ne 'interrupted') { Skip 'bridge_required' }",s)
 
 class ProductBuildSeparationTests(unittest.TestCase):
  def test_production_excludes_proposal_and_demo_implementations(self):

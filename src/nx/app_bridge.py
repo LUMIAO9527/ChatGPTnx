@@ -105,34 +105,51 @@ def candidates():
     # The executor's endpoint is preferred, never a saved endpoint from before
     # account switching. Other app-owned pipes are probed with tools/list only.
     inherited = os.environ.get('CODEX_APP_TOOLS_PIPE_PATH', '')
-    paths = [inherited] if inherited.startswith(PIPE_PREFIX) else []
+    paths = [inherited] if re.fullmatch(re.escape(PIPE_PREFIX) + r'[0-9a-f-]{36}', inherited) else []
     try:
         paths += ['\\\\.\\pipe\\' + name for name in os.listdir('\\\\.\\pipe\\')
                   if re.fullmatch(r'codex-browser-use-[0-9a-f-]{36}', name)]
     except OSError:
         pass
-    return list(dict.fromkeys(paths))[:12]
+    paths = list(dict.fromkeys(paths))
+    if len(paths) > 12:
+        raise BridgeUnavailable('desktop_bridge_ambiguous')
+    return paths
 
 
 def discover(required=None):
     required = required or {'send_message_to_thread': {'threadId', 'prompt'},
                             'read_thread': {'threadId'}}
-    for path in candidates():
-        pipe = None
-        try:
-            pipe = Pipe(path, timeout=.6)
-            result = pipe.request('tools/list', {'threadStartKind': 'all'})
-            catalog = {t.get('name'): t for t in result.get('tools', [])
-                       if t.get('namespace') == 'codex_app'}
-            if all(fields <= catalog.get(name, {}).get('inputSchema', {}).get('properties', {}).keys()
-                   for name, fields in required.items()):
-                pipe.timeout = 20
-                return pipe
-        except Exception:
-            pass
-        if pipe:
-            pipe.close()
-    raise BridgeUnavailable('desktop_bridge_unavailable')
+    selected = None
+    try:
+        for path in candidates():
+            pipe = None
+            try:
+                pipe = Pipe(path, timeout=.6)
+                result = pipe.request('tools/list', {'threadStartKind': 'all'})
+                catalog = {t.get('name'): t for t in result.get('tools', [])
+                           if isinstance(t, dict) and t.get('namespace') == 'codex_app'}
+                if all(fields <= catalog.get(name, {}).get('inputSchema', {}).get('properties', {}).keys()
+                       for name, fields in required.items()):
+                    if selected is not None:
+                        raise BridgeUnavailable('desktop_bridge_ambiguous')
+                    pipe.timeout = 20
+                    selected, pipe = pipe, None
+            except BridgeUnavailable as error:
+                if str(error) == 'desktop_bridge_ambiguous':
+                    raise
+            except Exception:
+                pass
+            finally:
+                if pipe:
+                    pipe.close()
+        if selected is None:
+            raise BridgeUnavailable('desktop_bridge_unavailable')
+        return selected
+    except Exception:
+        if selected:
+            selected.close()
+        raise
 
 
 def call_params(source_thread, source_turn, tool, arguments, call_id=None):
@@ -142,22 +159,36 @@ def call_params(source_thread, source_turn, tool, arguments, call_id=None):
 
 
 def text_result(result):
-    if result.get('success') is not True:
-        raise BridgeUnavailable('app_tool_failed')
-    texts = [i['text'] for i in result.get('contentItems', []) if i.get('type') == 'inputText']
-    if len(texts) != 1:
-        raise BridgeUnavailable('invalid_tool_result')
-    return json.loads(texts[0])
+    try:
+        if not isinstance(result, dict) or result.get('success') is not True:
+            raise ValueError('app_tool_failed')
+        content = result.get('contentItems')
+        if not isinstance(content, list):
+            raise ValueError('invalid_tool_result')
+        texts = [i.get('text') for i in content if isinstance(i, dict) and i.get('type') == 'inputText']
+        if len(texts) != 1 or not isinstance(texts[0], str):
+            raise ValueError('invalid_tool_result')
+        value = json.loads(texts[0])
+        if not isinstance(value, dict):
+            raise ValueError('invalid_tool_result')
+        return value
+    except (ValueError, TypeError) as error:
+        raise BridgeUnavailable('invalid_tool_result') from error
 
 
-def dispatch_message(pipe, source, target, prompt):
-    """One shared write path for automatic resume and the explicit self-check."""
+def dispatch_message(pipe, source, target, prompt, *, call_id):
+    """The sole write: the call ID is stable, but not assumed server-idempotent."""
+    from .desktop_resume import THREAD_ID
     result = pipe.request('tools/call', call_params(
-        source, 'nx-resume-' + str(uuid.uuid4()), 'send_message_to_thread',
-        {'threadId': target, 'hostId': 'local', 'prompt': prompt}), side_effect=True)
+        source, call_id, 'send_message_to_thread',
+        {'threadId': target, 'hostId': 'local', 'prompt': prompt}, call_id=call_id),
+        side_effect=True)
     try:
         ack = text_result(result)
         if ack.get('threadId') != target:
+            raise BridgeUncertain('invalid_dispatch_ack')
+        new_turn = ack.get('turnId')
+        if new_turn is not None and not THREAD_ID.fullmatch(str(new_turn)):
             raise BridgeUncertain('invalid_dispatch_ack')
         return ack
     except Exception as error:
@@ -165,24 +196,29 @@ def dispatch_message(pipe, source, target, prompt):
 
 
 def resume_existing(home, item, stop, log):
-    """Dispatch once through the desktop; never touch the user's composer.
-
-    The caller must be an explicitly configured, existing coordination thread.
-    Never impersonate the target as its own sender or invent a source thread.
-    """
+    """Send once for a quota failure, without accessing the desktop editor."""
+    import hashlib
     from pathlib import Path
-    from .desktop_resume import latest_turn
+    from .desktop_resume import latest_turn, continuation_guard, observe_start, THREAD_ID
     from .desktop_location import canonical_task
     from .storage import fingerprint
     from .settings import valid_setting
 
-    auth = Path(home) / 'auth.json'
-    before = fingerprint(auth)
+    if not all(THREAD_ID.fullmatch(str(item.get(k, ''))) for k in ('thread_id', 'turn_id')):
+        return 'failed', 'invalid_task_id'
+    before, reason = continuation_guard(home, item)
     if not before:
-        return 'failed', 'account_guard_unavailable'
+        return 'failed', reason
+    auth = Path(home) / 'auth.json'
     try:
         settings_path = Path(item['settings_file'])
-        settings = json.loads(settings_path.read_text(encoding='utf-8-sig')).get('settings', {})
+        def read_settings():
+            document = json.loads(settings_path.read_text(encoding='utf-8-sig'))
+            settings = document.get('settings') if isinstance(document, dict) else None
+            if not isinstance(settings, dict):
+                raise ValueError('invalid_settings')
+            return settings
+        settings = read_settings()
         source = settings.get('resume_source_thread_id')
         if not source or not valid_setting('resume_source_thread_id', source):
             return 'failed', 'resume_source_unconfigured'
@@ -191,40 +227,45 @@ def resume_existing(home, item, stop, log):
             return 'failed', 'task_identity_unavailable'
         if source == target:
             return 'failed', 'resume_source_is_target'
-    except (OSError, ValueError, KeyError, AttributeError):
+        if canonical_task(home, source) != source:
+            return 'failed', 'resume_source_unavailable'
+        if settings.get('task_continuation') is not True:
+            return 'failed', 'continuation_disabled'
+        if not valid_setting('resume_message', settings.get('resume_message')):
+            return 'failed', 'invalid_resume_message'
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return 'failed', 'account_guard_unavailable'
-    try:
-        pipe = discover()
-    except BridgeUnavailable:
-        return 'retry', 'desktop_bridge_unavailable'
+    pipe = None
     dispatched = False
     try:
-        # A fresh desktop response is required, not just a window or pipe file.
+        if stop.is_set():
+            return 'failed', 'shutting_down'
+        pipe = discover()
         snapshot = text_result(pipe.request('tools/call', call_params(
             source, 'nx-read-' + str(uuid.uuid4()), 'read_thread',
             {'threadId': target, 'hostId': 'local', 'turnLimit': 1,
-             'includeOutputs': False})))
-        thread = snapshot.get('thread', {})
-        turns = snapshot.get('turns', [])
-        if thread.get('id') != target or thread.get('kind') != 'codex':
+             'includeOutputs': False, 'maxOutputCharsPerItem': 0})))
+        thread, turns = snapshot.get('thread'), snapshot.get('turns')
+        if not isinstance(thread, dict) or thread.get('id') != target or thread.get('kind') != 'codex':
             return 'failed', 'bridge_target_mismatch'
-        if not turns:
-            return 'retry', 'history_unavailable'
+        if not isinstance(turns, list) or len(turns) != 1 or not isinstance(turns[0], dict):
+            return 'failed', 'history_unavailable'
         if turns[0].get('id') != item['turn_id']:
-            return 'done', 'newer_turn'
-        if thread.get('status', {}).get('type') not in ('idle', 'notLoaded'):
-            return 'retry', 'desktop_task_not_idle'
-        if turns[0].get('status') not in ('failed', 'interrupted'):
-            return 'retry', 'desktop_task_not_idle'
-        if turns[0].get('status') == 'failed':
-            # Do not resume arbitrary application/model failures. The local
-            # normalized history and desktop latest-turn ID must agree.
-            record = latest_turn(home, item['thread_id'])
-            if not record or record['turn_id'] != item['turn_id']:
-                return 'retry', 'history_unavailable'
-            if (record.get('error') or {}).get('codexErrorInfo') != 'usageLimitExceeded':
-                return 'failed', 'unrelated_failure'
-        settings = json.loads(settings_path.read_text(encoding='utf-8-sig')).get('settings', {})
+            return 'skipped', 'newer_turn'
+        status = thread.get('status')
+        if (not isinstance(status, dict) or status.get('type') not in ('idle', 'notLoaded')
+                or turns[0].get('status') != 'failed'):
+            return 'failed', 'desktop_task_not_idle'
+        current = latest_turn(home, item['thread_id'])
+        if not current:
+            return 'failed', 'history_unavailable'
+        if current['turn_id'] != item['turn_id']:
+            return 'skipped', 'newer_turn'
+        error = current.get('error')
+        if (current.get('status') != 'failed' or not isinstance(error, dict)
+                or error.get('codexErrorInfo') != 'usageLimitExceeded'):
+            return 'failed', 'unrelated_failure'
+        settings = read_settings()
         if settings.get('resume_source_thread_id') != source:
             return 'failed', 'resume_source_unconfigured'
         if settings.get('task_continuation') is not True:
@@ -232,82 +273,26 @@ def resume_existing(home, item, stop, log):
         message = settings.get('resume_message')
         if not valid_setting('resume_message', message):
             return 'failed', 'invalid_resume_message'
-        current = latest_turn(home, item['thread_id'])
-        if not current or current['turn_id'] != item['turn_id']:
-            return ('done', 'newer_turn') if current else ('retry', 'history_unavailable')
+        if canonical_task(home, item['thread_id']) != target:
+            return 'failed', 'task_identity_unavailable'
         if stop.is_set():
-            return 'retry', 'shutting_down'
+            return 'failed', 'shutting_down'
         if fingerprint(auth) != before:
             return 'failed', 'account_changed'
+        call_id = 'nx-' + hashlib.sha256(
+            (item['thread_id'] + '\0' + item['turn_id']).encode('ascii')).hexdigest()
         dispatched = True
-        dispatch_message(pipe, source, target, recovery_message(message))
+        ack = dispatch_message(pipe, source, target, message, call_id=call_id)
         log.info('desktop_bridge_dispatch acknowledged=true')
-        for _ in range(75):
-            after = latest_turn(home, item['thread_id'])
-            if after and after['turn_id'] != item['turn_id']:
-                return 'done', 'new_turn_observed'
-            if stop.wait(.2):
-                break
-        return 'failed', 'start_not_observed'
-    except Exception:
-        # No native-button fallback: losing an ACK does not prove non-delivery.
-        return ('failed', 'action_outcome_unknown') if dispatched else ('retry', 'desktop_bridge_unavailable')
-    finally:
-        pipe.close()
-
-
-def recovery_message(message):
-    """Return exactly the configured continuation text; add no hidden guidance."""
-    return message
-
-
-def explicit_selfcheck(source, target, report_path):
-    """User-invoked diagnostic. Never entered by the automatic queue.
-
-    Uses the packaged adapter's actual write path, but intentionally does not
-    simulate a quota failure or alter task history/production settings.
-    """
-    from pathlib import Path
-    from .desktop_resume import THREAD_ID
-    from .storage import atomic_bytes
-    if not all(THREAD_ID.fullmatch(v or '') for v in (source, target)) or source == target:
-        raise ValueError('invalid diagnostic source/target')
-    report = Path(report_path)
-    # Exclusive, durable journal: invoking the same command again cannot resend.
-    with report.open('x', encoding='utf-8') as stream:
-        json.dump({'state': 'started', 'source': source, 'target': target}, stream)
-        stream.flush()
-        os.fsync(stream.fileno())
-    result = {'state': 'failed', 'source': source, 'target': target, 'sent': False}
-    pipe = None
-    try:
-        pipe = discover()
-        snapshot = text_result(pipe.request('tools/call', call_params(
-            source, 'nx-selfcheck-read', 'read_thread',
-            {'threadId': target, 'turnLimit': 1, 'includeOutputs': False})))
-        thread = snapshot.get('thread', {})
-        turns = snapshot.get('turns', [])
-        if (thread.get('id') != target
-                or thread.get('status', {}).get('type') not in ('idle', 'notLoaded')
-                or not turns
-                or turns[0].get('status') not in ('completed', 'failed', 'interrupted')):
-            raise BridgeUnavailable('target_not_idle')
-        result['previous_turn'] = snapshot['turns'][0]['id']
-        prompt = ('这是用户明确授权的 ChatGPTnx 候选 EXE 发送路径自检，只执行一次。'
-                  '不要继续原投递任务，不要填写、点击表单按钮、提交、刷新、关闭或新建页面。'
-                  '请检查本轮直接提供的浏览器工具，先获取当前连接清单，再按原百威申请页及稳定扩展实例确认浏览器，'
-                  '不要复用旧编号或绑定。按当前工具文档绑定原有标签页，只读读取并保留页面。'
-                  '仅在本任务最终回复自检是否成功及具体阻塞，不向其他任务发送消息。')
-        result['state'] = 'dispatching'
-        atomic_bytes(report, json.dumps(result).encode())
-        dispatch_message(pipe, source, target, prompt)
-        result.update(state='acknowledged', sent=True)
-    except BridgeUncertain:
-        result.update(state='uncertain', sent=None)
+        if ack.get('turnId') == item['turn_id']:
+            return 'failed', 'action_outcome_unknown'
+        return observe_start(home, item, stop, expected_auth=before, expected_turn=ack.get('turnId'))
     except Exception as error:
-        result['error_type'] = type(error).__name__
+        if dispatched:
+            return 'failed', 'action_outcome_unknown'
+        reason = ('desktop_bridge_ambiguous' if isinstance(error, BridgeUnavailable)
+                  and str(error) == 'desktop_bridge_ambiguous' else 'desktop_bridge_unavailable')
+        return 'failed', reason
     finally:
         if pipe:
             pipe.close()
-        atomic_bytes(report, json.dumps(result).encode())
-    return result

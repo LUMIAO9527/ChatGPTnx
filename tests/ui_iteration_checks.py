@@ -9,7 +9,7 @@ CASES = [
 ('first-use/full-panel-not-empty-dashboard', 'scenario=first-run', r'''()=>document.querySelector('#home').classList.contains('is-onboarding')&&!document.querySelector('.roster')&&!document.querySelector('[data-action="add"]')&&document.querySelector('.onboarding-foot').getBoundingClientRect().bottom<=document.querySelector('#app').getBoundingClientRect().bottom'''),
 ('first-use/waiting-has-clear-primary-action', 'scenario=first-waiting', r'''()=>document.querySelector('.onboarding-main').textContent.includes('等待你完成登录')&&document.querySelector('.onboarding-foot .primary').textContent.includes('回到 ChatGPT')'''),
 ('first-use/adoption-never-overlaps-write', 'scenario=first-saving', r'''()=>document.querySelector('[data-action="adopt"]').disabled&&document.querySelector('.onboarding-main').textContent.includes('正在保存')'''),
-('home/long-relay-name-preserves-card-height-and-quota', 'scenario=long-names', r'''()=>{const relay=document.querySelector('.relay'),label=relay.querySelector('strong'),quota=relay.querySelector('small');return relay.clientHeight===68&&label.scrollWidth>label.clientWidth&&quota.scrollWidth<=quota.clientWidth+1;}'''),
+('home/long-relay-name-preserves-card-height-and-quota', 'scenario=long-names', r'''()=>{const relay=document.querySelector('.relay'),label=relay.querySelector('strong'),quota=relay.querySelector('small');return relay.getBoundingClientRect().height===68&&label.scrollWidth>label.clientWidth&&quota.scrollWidth<=quota.clientWidth+1;}'''),
 ('choices/participation-single-row-name-plan-switch', 'open=relay-accounts&scenario=long-names', r'''()=>[...document.querySelectorAll('.relay-account-row')].every(row=>{
  const name=row.querySelector('.relay-account-name'),plan=row.querySelector('.badge'),sw=row.querySelector('.switch');
  return name&&plan&&sw&&row.getBoundingClientRect().height===42&&!row.querySelector('.choice-quotas,.current-chip')&&name.getBoundingClientRect().right<=plan.getBoundingClientRect().left;})'''),
@@ -30,7 +30,7 @@ CASES = [
 ('demo/message-validation-matches-product', '', r'''async()=>{const before=NXDemo.state().settings.resume_message;const r=await NXDemo.call('set_preferences',{resume_message:'x\ny'});return r.ok===false&&NXDemo.state().settings.resume_message===before;}'''),
 ]
 
-def main(browser,output):
+def main(browser,output,explorer=None):
  results=[]
  with browser_session(browser) as engine:
   for name,query,script in CASES:
@@ -44,7 +44,7 @@ def main(browser,output):
   context=engine.new_context(viewport={'width':1440,'height':960});page=context.new_page();errors=[];requests=[]
   page.on('pageerror',lambda e:errors.append(str(e)));page.on('request',lambda req:requests.append(req.url))
   try:
-   page.set_content((ROOT/'docs/ui-explorer.html').read_text())
+   page.set_content((explorer or ROOT/'docs/ui-explorer.html').read_text(encoding='utf-8'))
    page.locator('#status').filter(has_text="可操作").wait_for(timeout=5000)
    frame=page.frames[1]
    results.append({'name':'explorer/initial-flow-operable','passed':frame.locator('.onboarding-main').count()==1,'errors':list(errors)})
@@ -65,4 +65,4 @@ def main(browser,output):
  return int(any(not r['passed'] for r in results))
 
 if __name__=='__main__':
- p=argparse.ArgumentParser();p.add_argument('--browser',required=True,type=Path);p.add_argument('--output',type=Path,default=ROOT/'docs/validation/ui-iteration-tests.json');a=p.parse_args();raise SystemExit(main(a.browser,a.output))
+ p=argparse.ArgumentParser();p.add_argument('--browser',required=True,type=Path);p.add_argument('--output',type=Path,default=ROOT/'docs/validation/ui-iteration-tests.json');p.add_argument('--explorer',type=Path);a=p.parse_args();raise SystemExit(main(a.browser,a.output,a.explorer))

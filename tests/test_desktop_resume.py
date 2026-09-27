@@ -9,7 +9,13 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from nx.desktop_resume import active_turns, attempt_continuation, latest_turn, title_prefix
+from nx.desktop_resume import active_turns, attempt_continuation as _attempt, latest_turn, title_prefix
+from nx.storage import account_identity_key
+from test_refactor import credential
+
+def attempt_continuation(home, script, item, stop, log):
+    item = {**item, 'expected_account_key': account_identity_key(Path(home)/'auth.json', 'native@example.com')}
+    return _attempt(home, script, item, stop, log)
 
 
 class DesktopResumeTests(unittest.TestCase):
@@ -22,7 +28,7 @@ class DesktopResumeTests(unittest.TestCase):
         temp_root.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=temp_root)
         self.home = Path(self.temp.name)
-        (self.home / 'auth.json').write_text('{"test_auth": true}')
+        (self.home / 'auth.json').write_bytes(credential('native@example.com'))
         history = sqlite3.connect(self.home / 'thread_history_1.sqlite')
         history.execute('CREATE TABLE thread_turns (thread_id TEXT, turn_id TEXT, status TEXT, '
                         'error_json TEXT, started_at INTEGER, completed_at INTEGER, rollout_ordinal INTEGER)')
@@ -56,7 +62,7 @@ class DesktopResumeTests(unittest.TestCase):
                                         {'thread_id': self.THREAD, 'turn_id': self.FAILED},
                                         threading.Event(), Mock())
         run.assert_not_called()
-        self.assertEqual(result,('done','newer_turn'))
+        self.assertEqual(result,('skipped','newer_turn'))
 
     def test_runtime_id_uses_visible_thread_title(self):
         with sqlite3.connect(self.home / 'state_5.sqlite') as db:
@@ -116,18 +122,15 @@ class DesktopResumeTests(unittest.TestCase):
         run.assert_called_once()
         self.assertEqual(result,('done','new_turn_observed'))
 
-    def test_pre_switch_active_turn_left_stale_is_handled(self):
+    def test_pre_switch_active_snapshot_does_not_prove_interruption(self):
         self.add_turn(self.FAILED, 'inProgress', 1)
-        event={'thread_id': self.THREAD, 'turn_id': self.FAILED, 'was_active': True}
-        def desktop_invocation(command, **kwargs):
-            self.assertEqual(command[command.index('-Action') + 1], 'interrupted')
-            self.add_turn(self.NEW, 'inProgress', 2)
-            return Mock(stdout='invoked:native_continue\n', returncode=0)
-        with patch('nx.desktop_resume.subprocess.run', side_effect=desktop_invocation) as run:
-            result=attempt_continuation(self.home, self.home / 'helper.ps1', event,
-                                        threading.Event(), Mock())
-        run.assert_called_once()
-        self.assertEqual(result,('done','new_turn_observed'))
+        event = {'thread_id': self.THREAD, 'turn_id': self.FAILED, 'was_active': True}
+        with patch('nx.desktop_resume._invoke') as run, patch('nx.app_bridge.resume_existing') as bridge:
+            result = attempt_continuation(self.home, self.home/'helper.ps1', event,
+                                          threading.Event(), Mock())
+        run.assert_not_called()
+        bridge.assert_not_called()
+        self.assertEqual(result, ('failed', 'desktop_task_not_idle'))
 
     def test_archived_title_collision_blocks_wrong_window_target(self):
         self.add_turn(self.FAILED, 'interrupted', 1)
@@ -172,7 +175,7 @@ class DesktopResumeTests(unittest.TestCase):
             result=attempt_continuation(self.home,self.home/'helper.ps1',
                                         {'thread_id':self.THREAD,'turn_id':self.FAILED},
                                         threading.Event(),Mock())
-        self.assertEqual(result,('failed','unsnapshotted_active_turn'))
+        self.assertEqual(result,('failed','desktop_task_not_idle'))
         run.assert_not_called()
 
 

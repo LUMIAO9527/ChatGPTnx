@@ -146,8 +146,8 @@
   function resumeNotice() {
     const r=data.resume;if(!r)return '';
     const active=['switching','resuming'].includes(r.phase),waiting=r.phase==='waiting_account';
-    const text=r.waiting_reason?`等待输入区就绪 ${r.done}/${r.total}`:waiting?`等待可用接力账号 ${r.done}/${r.total}`:active?`任务接续中 ${r.done}/${r.total}`:r.failed&&r.attention===r.failed?`接续待处理 ${r.attention}/${r.total}`:r.failed?`任务接续失败 ${r.failed}/${r.total}`:`任务接续完成 ${r.done}/${r.total}`;
-    return statusBar({text,tone:waiting||r.waiting_reason?'neutral':active?'progress':r.failed?(r.attention===r.failed?'neutral':'error'):'success',symbol:waiting?'clock':'',action:'resume-details',className:'resume-notice'});
+    const text=waiting?`等待可用接力账号 ${r.done}/${r.total}`:active?`任务接续中 ${r.done}/${r.total}`:r.failed?`任务接续失败 ${r.failed}/${r.total}`:`任务接续完成 ${r.done}/${r.total}`;
+    return statusBar({text,tone:waiting?'neutral':active?'progress':r.failed?'error':'success',symbol:waiting?'clock':'',action:'resume-details',className:'resume-notice'});
   }
   function notice() {
     if(bridgeError)return statusBar({text:'本地连接中断 · 点击重新连接',tone:'warning',action:'refresh-state'});

@@ -11,29 +11,32 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from nx.app_bridge import resume_existing, BridgeUncertain, BridgeUnavailable, text_result, recovery_message, Pipe
+from nx.app_bridge import resume_existing, BridgeUncertain, BridgeUnavailable, text_result, Pipe
 
 
 class BridgeResumeTests(unittest.TestCase):
-    SOURCE = '01a0d9b2-d3f7-79c2-83c7-399594cca6b3'
+    SOURCE = '33333333-3333-4333-8333-333333333333'
     def setUp(self):
         root = Path(__file__).resolve().parents[1] / '_wip' / 'temp'
         root.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(dir=root)
         self.home = Path(self.temp.name)
-        (self.home / 'auth.json').write_text('test-auth')
+        from test_refactor import credential
+        from nx.storage import account_identity_key
+        (self.home / 'auth.json').write_bytes(credential('bridge@example.com'))
         self.settings = self.home / 'settings.json'
         self.settings.write_text(json.dumps({'settings': {'resume_source_thread_id': self.SOURCE, 'task_continuation': True,
                                                          'resume_message': '继续'}}))
-        self.item = {'thread_id': 'target', 'turn_id': 'old', 'settings_file': str(self.settings)}
-        self.canonical = 'target'
-        self.record = {'turn_id': 'old', 'status': 'failed',
+        self.item = {'thread_id': '11111111-1111-4111-8111-111111111111', 'turn_id': '44444444-4444-4444-8444-444444444444', 'settings_file': str(self.settings)}
+        self.item['expected_account_key'] = account_identity_key(self.home/'auth.json', 'bridge@example.com')
+        self.canonical = '11111111-1111-4111-8111-111111111111'
+        self.record = {'turn_id': '44444444-4444-4444-8444-444444444444', 'status': 'failed',
                        'error': {'codexErrorInfo': 'usageLimitExceeded'}}
-        self.snapshot = {'thread': {'id': 'target', 'kind': 'codex', 'status': {'type': 'idle'}},
-                         'turns': [{'id': 'old', 'status': 'failed'}]}
+        self.snapshot = {'thread': {'id': '11111111-1111-4111-8111-111111111111', 'kind': 'codex', 'status': {'type': 'idle'}},
+                         'turns': [{'id': '44444444-4444-4444-8444-444444444444', 'status': 'failed'}]}
         self.pipe = Mock()
         self.stop = threading.Event()
-        self.stop_mock = Mock(is_set=lambda: False, wait=lambda _: True)
+        self.stop_mock = Mock(is_set=lambda: False, wait=lambda _: False)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -44,28 +47,28 @@ class BridgeResumeTests(unittest.TestCase):
 
     def run_resume(self, replies=None, records=None):
         self.pipe.request.side_effect = replies or [self.result(self.snapshot),
-                                                   self.result({'threadId': 'target'})]
+                                                   self.result({'threadId': '11111111-1111-4111-8111-111111111111'})]
         with patch('nx.app_bridge.discover', return_value=self.pipe), \
-             patch('nx.desktop_location.canonical_task', return_value=self.canonical), \
-             patch('nx.desktop_resume.latest_turn', side_effect=records or [self.record] * 3):
+             patch('nx.desktop_location.canonical_task', side_effect=lambda home, key: self.SOURCE if key == self.SOURCE else self.canonical), \
+             patch('nx.desktop_resume.latest_turn', side_effect=records, return_value=self.record):
             return resume_existing(self.home, self.item, self.stop_mock, Mock())
 
     def test_send_never_uses_editor_or_changes_message(self):
-        result = self.run_resume(records=[self.record, self.record, {'turn_id': 'new'}])
+        result = self.run_resume(records=[self.record, {'turn_id': '55555555-5555-4555-8555-555555555555', 'status': 'inProgress', 'started_at': 1900000000}])
         self.assertEqual(result, ('done', 'new_turn_observed'))
         call = self.pipe.request.call_args_list[1]
-        self.assertEqual(call.args[1]['arguments'], {'threadId': 'target', 'hostId': 'local', 'prompt': recovery_message('继续')})
+        self.assertEqual(call.args[1]['arguments'], {'threadId': '11111111-1111-4111-8111-111111111111', 'hostId': 'local', 'prompt': '继续'})
         self.assertEqual(call.args[1]['threadId'], self.SOURCE)
         self.assertTrue(call.kwargs['side_effect'])
         self.pipe.close.assert_called_once()
 
     def test_runtime_thread_id_maps_to_canonical_bridge_target(self):
-        self.item['thread_id'] = 'runtime-id'
-        result = self.run_resume(records=[self.record, self.record, {'turn_id': 'new'}])
+        self.item['thread_id'] = '22222222-2222-4222-8222-222222222222'
+        result = self.run_resume(records=[self.record, {'turn_id': '55555555-5555-4555-8555-555555555555', 'status': 'inProgress', 'started_at': 1900000000}])
         self.assertEqual(result, ('done', 'new_turn_observed'))
         read_call, send_call = self.pipe.request.call_args_list
-        self.assertEqual(read_call.args[1]['arguments']['threadId'], 'target')
-        self.assertEqual(send_call.args[1]['arguments']['threadId'], 'target')
+        self.assertEqual(read_call.args[1]['arguments']['threadId'], '11111111-1111-4111-8111-111111111111')
+        self.assertEqual(send_call.args[1]['arguments']['threadId'], '11111111-1111-4111-8111-111111111111')
 
     def test_ack_timeout_is_not_retryable(self):
         result = self.run_resume([self.result(self.snapshot), BridgeUncertain()])
@@ -76,29 +79,29 @@ class BridgeResumeTests(unittest.TestCase):
         self.assertEqual(self.run_resume([self.result(self.snapshot), {'success': False}]),
                          ('failed', 'action_outcome_unknown'))
 
-    def test_read_failure_is_retryable_without_sending(self):
-        self.assertEqual(self.run_resume([BridgeUnavailable()]), ('retry', 'desktop_bridge_unavailable'))
+    def test_read_failure_is_terminal_without_sending(self):
+        self.assertEqual(self.run_resume([BridgeUnavailable()]), ('failed', 'desktop_bridge_unavailable'))
         self.assertEqual(self.pipe.request.call_count, 1)
 
     def test_newer_turn_is_not_sent_again(self):
-        self.snapshot['turns'][0]['id'] = 'new'
-        self.assertEqual(self.run_resume(), ('done', 'newer_turn'))
+        self.snapshot['turns'][0]['id'] = '55555555-5555-4555-8555-555555555555'
+        self.assertEqual(self.run_resume(), ('skipped', 'newer_turn'))
         self.assertEqual(self.pipe.request.call_count, 1)
 
     def test_live_task_is_not_steered(self):
         self.snapshot['thread']['status']['type'] = 'running'
-        self.assertEqual(self.run_resume(), ('retry', 'desktop_task_not_idle'))
+        self.assertEqual(self.run_resume(), ('failed', 'desktop_task_not_idle'))
         self.assertEqual(self.pipe.request.call_count, 1)
 
     def test_unloaded_failed_task_can_resume_after_restart(self):
         self.snapshot['thread']['status']['type'] = 'notLoaded'
-        self.assertEqual(self.run_resume(records=[self.record, self.record, {'turn_id': 'new'}]),
+        self.assertEqual(self.run_resume(records=[self.record, {'turn_id': '55555555-5555-4555-8555-555555555555', 'status': 'inProgress', 'started_at': 1900000000}]),
                          ('done', 'new_turn_observed'))
 
     def test_unloaded_active_turn_is_not_sent(self):
         self.snapshot['thread']['status']['type'] = 'notLoaded'
         self.snapshot['turns'][0]['status'] = 'inProgress'
-        self.assertEqual(self.run_resume(), ('retry', 'desktop_task_not_idle'))
+        self.assertEqual(self.run_resume(), ('failed', 'desktop_task_not_idle'))
         self.assertEqual(self.pipe.request.call_count, 1)
 
     def test_wrong_target_is_rejected(self):
@@ -108,7 +111,7 @@ class BridgeResumeTests(unittest.TestCase):
     def test_disabled_automation_is_respected(self):
         self.settings.write_text(json.dumps({'settings': {'resume_source_thread_id': self.SOURCE, 'task_continuation': False}}))
         self.assertEqual(self.run_resume(), ('failed', 'continuation_disabled'))
-        self.assertEqual(self.pipe.request.call_count, 1)
+        self.assertEqual(self.pipe.request.call_count, 0)
 
     def test_unrelated_failure_is_not_resumed(self):
         self.record['error']['codexErrorInfo'] = 'other'

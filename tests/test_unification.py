@@ -37,9 +37,9 @@ class SinglePresentationTests(unittest.TestCase):
 class AutomaticResultsTests(unittest.TestCase):
  def attempt(self,label,*,observed=False,code=0):
   before={'turn_id':TURN,'status':'interrupted','error':None}
-  after={**before,'turn_id':'ea10a953-d3a4-53b9-b010-6361794c2a22'}
+  after={**before,'turn_id':'ea10a953-d3a4-53b9-b010-6361794c2a22','status':'inProgress','started_at':1900000000}
   stop=Mock();stop.is_set.return_value=False;stop.wait.return_value=False
-  with patch('nx.desktop_resume.latest_turn',side_effect=[before,after] if observed else None,return_value=before),patch('nx.desktop_resume.title_prefix',return_value='Unique synthetic task'),patch('nx.desktop_resume._desktop_command',return_value=['synthetic']),patch('nx.desktop_resume._invoke',return_value=Mock(stdout=label,returncode=code)) as run:
+  with patch('nx.desktop_resume.continuation_guard',return_value=('mock-hash','')),patch('nx.storage.fingerprint',return_value='mock-hash'),patch('nx.desktop_resume.latest_turn',side_effect=[before,before,after] if observed else None,return_value=before),patch('nx.desktop_resume.title_prefix',return_value='Unique synthetic task'),patch('nx.desktop_resume._desktop_command',return_value=['synthetic']),patch('nx.desktop_resume._invoke',return_value=Mock(stdout=label,returncode=code)) as run:
    result=attempt_continuation(Path('none'),Path('none'),{'thread_id':THREAD,'turn_id':TURN},stop,Mock())
   self.assertEqual(run.call_count,1);return result
  def test_native_action_needs_new_turn_evidence(self):
@@ -62,27 +62,27 @@ class WaitingPersistenceTests(unittest.TestCase):
   self.id=self.c.prepare('a@example.com','b@example.com','auto',[{'thread_id':THREAD,'turn_id':TURN}]);self.c.switched(self.id)
   self.item=self.c.sessions[0]['items'][0]
  def tearDown(self):self.stop.set();self.tmp.cleanup()
- def test_wait_rechecks_without_counting_a_send_attempt(self):
+ def test_removed_editor_wait_is_terminal_not_requeued(self):
   before=time.time();self.c._persist_outcome(self.id,self.item,'defer','composer_in_use');i=self.c.sessions[0]['items'][0]
-  self.assertEqual(i['state'],'waiting');self.assertEqual(i['attempts'],0);self.assertGreaterEqual(i['next_try'],before+15);self.assertEqual(self.c.summary()['waiting_reason'],'composer_in_use')
- def test_wait_is_bounded_and_survives_reload(self):
+  self.assertEqual(i['state'],'failed');self.assertEqual(i['attempts'],1);self.assertIsNone(self.c._ready());self.assertNotIn('waiting_reason',self.c.summary())
+ def test_legacy_editor_failure_survives_reload_without_replay(self):
   self.item['deferred_since']=time.time()-301;self.c._save();self.c._persist_outcome(self.id,self.item,'defer','user_draft_present')
   c=ResumeCoordinator(self.paths,lambda:'b@example.com',self.stop,Mock(),Mock(),threading.Lock())
-  self.assertEqual(c.sessions[0]['items'][0]['state'],'failed');self.assertEqual(c.sessions[0]['items'][0]['attempts'],0)
+  self.assertEqual(c.sessions[0]['items'][0]['state'],'failed');self.assertEqual(c.sessions[0]['items'][0]['attempts'],1)
  def test_invalid_saved_wait_timestamp_is_sanitized(self):
   for value in ('bad',True,-1,time.time()+86400):
    self.c.sessions[0]['items'][0]['deferred_since']=value;self.c._save()
    c=ResumeCoordinator(self.paths,lambda:'b@example.com',self.stop,Mock(),Mock(),threading.Lock());self.assertNotIn('deferred_since',c.sessions[0]['items'][0])
- def test_explicit_retry_resets_wait_deadline(self):
-  self.item.update(state='failed',reason='user_draft_present',deferred_since=time.time()-301);self.c.sessions[0]['phase']='failed';self.c._save()
-  self.assertTrue(self.c.retry_draft(self.id,THREAD)['ok']);self.assertNotIn('deferred_since',self.c.sessions[0]['items'][0])
+ def test_explicit_preflight_retry_has_no_editor_deadline(self):
+  self.item.update(state='failed',reason='desktop_bridge_unavailable',deferred_since=time.time()-301);self.c.sessions[0]['phase']='failed';self.c._save()
+  self.assertTrue(self.c.retry_task(self.id,THREAD)['ok']);self.assertNotIn('deferred_since',self.c.sessions[0]['items'][0])
  def test_legacy_manual_record_migrates_but_does_not_replay(self):
   self.item.update(state='failed',reason='manual_message_required');self.c.sessions[0]['phase']='failed';self.c._save()
   c=ResumeCoordinator(self.paths,lambda:'b@example.com',self.stop,Mock(),Mock(),threading.Lock())
-  self.assertEqual(c.sessions[0]['items'][0]['reason'],'automatic_send_unavailable');self.assertIsNone(c._ready())
+  self.assertEqual(c.sessions[0]['items'][0]['reason'],'legacy_route_removed');self.assertIsNone(c._ready())
  def test_watchdog_uncertainty_not_retryable(self):
   self.item.update(state='failed',reason='action_outcome_unknown');self.c.sessions[0]['phase']='failed';self.c._save()
-  self.assertFalse(self.c.retry_draft(self.id,THREAD)['ok'])
+  self.assertFalse(self.c.retry_task(self.id,THREAD)['ok'])
 
 class NativeSourceBoundariesTests(unittest.TestCase):
  def test_native_helper_has_no_editor_write_or_clipboard_path(self):

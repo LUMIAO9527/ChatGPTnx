@@ -252,7 +252,7 @@ class ResumeDurabilityTests(TemporaryCase):
         recovered = self.coordinator()
         self.assertEqual(recovered.sessions[0]['items'][0]['reason'], 'action_outcome_unknown')
         self.assertIsNone(recovered._ready())
-        self.assertFalse(recovered.retry_draft(recovered.sessions[0]['id'], THREAD)['ok'])
+        self.assertFalse(recovered.retry_task(recovered.sessions[0]['id'], THREAD)['ok'])
 
     def test_clear_history_preserves_active_and_pending_items(self):
         c = self.coordinator()
@@ -351,7 +351,7 @@ class ExistingDesktopSafetyTests(TemporaryCase):
              patch('nx.desktop_resume.title_prefix', return_value='A unique task'), \
              patch('nx.desktop_resume.subprocess.run', return_value=output, side_effect=error) as run:
             result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
-                                          self.event(), stop or self.stop, Mock())
+                                          self.event(expected_account_key=__import__('nx.storage',fromlist=['account_identity_key']).account_identity_key(self.paths.auth, 'b@example.com')), stop or self.stop, Mock())
         return result, run
 
     def test_timeout_is_uncertain_and_cannot_be_retried(self):
@@ -367,9 +367,9 @@ class ExistingDesktopSafetyTests(TemporaryCase):
                 self.assertNotIn('-Message', run.call_args.args[0])
                 self.assertIn('-ExpectedAuthHash', run.call_args.args[0])
 
-    def test_helper_start_failure_can_retry_without_duplicate_effect(self):
+    def test_helper_start_failure_is_terminal_without_duplicate_effect(self):
         result, _ = self.attempt(error=FileNotFoundError('powershell'))
-        self.assertEqual(result, ('retry', 'FileNotFoundError'))
+        self.assertEqual(result, ('failed', 'desktop_not_running'))
 
     def test_unknown_helper_output_does_not_claim_success_or_retry(self):
         for label in ('', 'invoked:unexpected', 'uncertain:desktop_error'):

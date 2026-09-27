@@ -208,7 +208,7 @@ window.NXDemo = (() => {
         {id:'history-old',target:state.accounts[2].email,phase:'failed',updated_at:sec()-2*86400,items:[
           item('ea10a953-d3a4-53b9-b010-6361794c2a22','较早的任务','failed','switch_not_completed')]},
         {id:'history-draft',target:state.accounts[1].email,phase:'failed',updated_at:sec()-86400,items:[
-          item('c6145efd-1ac7-5980-869c-909481558def','留有草稿的任务','failed','user_draft_present')]}
+          item('c6145efd-1ac7-5980-869c-909481558def','桥接不可用的任务','failed','desktop_bridge_unavailable')]}
       ];
     }
     if(which==='stale')state.accounts.forEach(a=>a.fetched_at=sec()-3600);
@@ -243,16 +243,16 @@ window.NXDemo = (() => {
     if(which==='first-run'){state.accounts=[];state.current=null;state.pending=null;state.chatgpt_running=false;usages={};}
     if(which==='long-names')state.accounts.forEach((a,i)=>a.alias=`业务自动化研发与技术支持账号 ${i+1} · 很长的账号名称用于布局回归`);
     if(which==='no-relay')state.accounts.forEach(a=>a.windows.forEach(w=>w.used=100));
-    if(which==='resume-draft-waiting'||which==='resume-auto-sending'){
-      const waiting=which==='resume-draft-waiting',reason=waiting?'user_draft_present':'';
-      state.resume={id:'auto-current',phase:'resuming',done:0,failed:0,total:1,waiting_reason:reason};
+    if(which==='resume-transitioning'||which==='resume-auto-sending'){
+      const waiting=which==='resume-transitioning',reason=waiting?'desktop_transitioning':'';
+      state.resume={id:'auto-current',phase:'resuming',done:0,failed:0,total:1};
       resumeDetails=[{id:'auto-current',target:state.current,phase:'resuming',updated_at:sec(),items:[
         {thread_id:'67cc833f-6330-5bae-a638-9232b5ddfa21',title:'核对尚未完成的步骤',state:waiting?'waiting':'acting',reason}]}];
     }
     if(which==='resume-auto-blocked'){
-      state.resume={id:'automatic-blocked',phase:'failed',done:0,failed:1,attention:1,total:1};
+      state.resume={id:'automatic-blocked',phase:'failed',done:0,failed:1,attention:0,total:1};
       resumeDetails=[{id:'automatic-blocked',target:state.current,phase:'failed',updated_at:sec(),items:[
-        {thread_id:'67cc833f-6330-5bae-a638-9232b5ddfa21',title:'等待自动接续的任务',state:'failed',reason:'automatic_send_unavailable'}]}];
+        {thread_id:'67cc833f-6330-5bae-a638-9232b5ddfa21',title:'等待自动接续的任务',state:'failed',reason:'desktop_bridge_unavailable'}]}];
     }
     if(which==='archived'){
       const account={...clone(state.accounts[1]),email:'archived@example.com',identity_key:'archived-demo'};
@@ -314,9 +314,9 @@ window.NXDemo = (() => {
     if(which==='usage-refreshing')state.operation={kind:'usage',phase:'正在更新个人用量'};
     const specialResume={
       'resume-unknown':['action_outcome_unknown','failed'],
-      'resume-draft':['user_draft_present','failed'],
-      'resume-composer-unknown':['composer_state_unknown','failed'],
-      'resume-editing':['composer_in_use','failed'],
+      'resume-bridge-unavailable':['desktop_bridge_unavailable','failed'],
+      'resume-bridge-ambiguous':['desktop_bridge_ambiguous','failed'],
+      'resume-native-missing':['native_continue_unavailable','failed'],
       'resume-no-window':['desktop_not_running','failed'],
       'resume-ambiguous':['desktop_window_ambiguous','failed'],
       'resume-success':['new_turn_observed','done'],
@@ -326,7 +326,7 @@ window.NXDemo = (() => {
     if(specialResume[which]){
       const [reason,status]=specialResume[which],phase=which==='resume-switching'?'switching':status==='failed'?'failed':'done';
       resumeDetails=[{id:'single-resume',target:state.accounts[1].email,phase,updated_at:sec(),items:[{thread_id:'67cc833f-6330-5bae-a638-9232b5ddfa21',title:'继续处理项目中的任务',state:status,reason}]}];
-      state.resume={id:'single-resume',phase,done:status==='done'?1:0,failed:status==='failed'?1:0,attention:['user_draft_present','composer_in_use','composer_state_unknown'].includes(reason)?1:0,total:1};
+      state.resume={id:'single-resume',phase,done:status==='done'?1:0,failed:status==='failed'?1:0,attention:0,total:1};
     }
     if(which==='many')for(let i=5;i<14;i++)state.accounts.push({...clone(state.accounts[1]),email:`extra-${i}@example.com`,alias:`账号 ${i+1}`,identity_key:`extra-${i}`});
   }

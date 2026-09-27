@@ -48,7 +48,7 @@ class ResumeFlowTests(unittest.TestCase):
         self.assertEqual(item['reason'], 'resume_auth_failed')
         self.assertEqual(item['state'], 'failed')
         self.assertEqual(item['attempts'], 1)
-        self.assertFalse(c.retry_draft('observed', self.THREAD)['ok'])
+        self.assertFalse(c.retry_task('observed', self.THREAD)['ok'])
 
     def test_followup_does_not_attribute_another_turn_failure(self):
         c = self.coordinator
@@ -140,24 +140,24 @@ class ResumeFlowTests(unittest.TestCase):
     def event(self, thread=None, **extra):
         return {'thread_id': thread or self.THREAD, 'turn_id': self.TURN, **extra}
 
-    def test_unknown_composer_is_user_attention_not_known_draft(self):
+    def test_legacy_composer_reason_cannot_queue_editor_recovery(self):
         ident=self.coordinator.prepare('a@example.com','b@example.com','manual',[self.event()])
         self.current='b@example.com'; self.coordinator.switched(ident)
         session=self.coordinator.sessions[-1]; session['phase']='failed'; session['items'][0].update(state='failed',reason='composer_state_unknown')
-        summary=self.coordinator.summary(); self.assertEqual(summary['attention'],1)
-        self.assertTrue(self.coordinator.retry_draft(ident,self.THREAD)['ok'])
-        self.assertEqual(session['items'][0]['state'],'waiting')
+        summary=self.coordinator.summary(); self.assertEqual(summary['attention'],0)
+        self.assertFalse(self.coordinator.retry_task(ident,self.THREAD)['ok'])
+        self.assertEqual(session['items'][0]['state'],'failed')
 
     def test_uncertain_effect_is_not_explicitly_retryable(self):
         ident=self.coordinator.prepare('a@example.com','b@example.com','manual',[self.event()])
         self.current='b@example.com'; self.coordinator.switched(ident)
         session=self.coordinator.sessions[-1]; session['phase']='failed'; session['items'][0].update(state='failed',reason='action_outcome_unknown')
-        self.assertFalse(self.coordinator.retry_draft(ident,self.THREAD)['ok'])
+        self.assertFalse(self.coordinator.retry_task(ident,self.THREAD)['ok'])
         self.assertEqual(self.coordinator.summary()['attention'],0)
 
     def test_one_worker_processes_multiple_tasks_and_persists_result(self):
         first = self.event(was_active=True)
-        second = self.event(self.OTHER, was_active=True)
+        second = self.event(self.OTHER, was_active=True, turn_id='66666666-6666-4666-8666-666666666666')
         ident = self.coordinator.prepare('a@example.com', 'b@example.com', 'manual',
                                          [first, second])
         self.current = 'b@example.com'
@@ -201,7 +201,7 @@ class ResumeFlowTests(unittest.TestCase):
         self.assertEqual(len(switch['items']), 1)
         self.assertEqual(len(self.coordinator.pending), 1)
 
-    def test_late_limit_failure_reopens_failed_native_attempt(self):
+    def test_late_limit_failure_cannot_reopen_failed_native_attempt(self):
         ident=self.coordinator.prepare('a@example.com','b@example.com','auto',
                                        [self.event(was_active=True)])
         self.current='b@example.com';self.coordinator.switched(ident)
@@ -211,9 +211,9 @@ class ResumeFlowTests(unittest.TestCase):
         event=self.event(started_at=int(session['created_at'])-10,
                          completed_at=int(session['switched_at'])+2)
         self.coordinator.note_limit_events([event],self.current,True)
-        self.assertEqual(session['phase'],'resuming')
-        self.assertEqual(session['items'][0]['state'],'waiting')
-        self.assertEqual(session['items'][0]['attempts'],0)
+        self.assertEqual(session['phase'],'failed')
+        self.assertEqual(session['items'][0]['state'],'failed')
+        self.assertEqual(session['items'][0]['attempts'],3)
 
     def test_failure_crossing_old_switch_is_not_assigned_to_new_account(self):
         ident=self.coordinator.prepare('a@example.com','b@example.com','auto',[])
@@ -367,7 +367,7 @@ class ResumeFlowTests(unittest.TestCase):
         self.assertEqual(len(act.call_args.args), 5)
         self.assertEqual(settings['resume_message'], '请接着完成')
 
-    def test_user_draft_failure_can_retry_only_in_original_account(self):
+    def test_preflight_failure_can_retry_only_in_original_account(self):
         settings={'task_continuation':True,'resume_message':'继续'}
         self.coordinator.settings=lambda: settings
         ident=self.coordinator.prepare('a@example.com','b@example.com','manual',
@@ -375,13 +375,13 @@ class ResumeFlowTests(unittest.TestCase):
         self.current='b@example.com';self.coordinator.switched(ident)
         session=self.coordinator.sessions[-1]
         session['phase']='failed'
-        session['items'][0].update(state='failed',reason='user_draft_present')
+        session['items'][0].update(state='failed',reason='desktop_bridge_unavailable')
         self.current='c@example.com'
-        self.assertFalse(self.coordinator.retry_draft(ident,self.THREAD)['ok'])
+        self.assertFalse(self.coordinator.retry_task(ident,self.THREAD)['ok'])
         self.current='b@example.com';settings['task_continuation']=False
-        self.assertFalse(self.coordinator.retry_draft(ident,self.THREAD)['ok'])
+        self.assertFalse(self.coordinator.retry_task(ident,self.THREAD)['ok'])
         settings['task_continuation']=True
-        self.assertTrue(self.coordinator.retry_draft(ident,self.THREAD)['ok'])
+        self.assertTrue(self.coordinator.retry_task(ident,self.THREAD)['ok'])
         self.assertEqual(session['phase'],'resuming')
         self.assertEqual(session['items'][0]['state'],'waiting')
         self.assertEqual(self.coordinator._ready()[0],ident)

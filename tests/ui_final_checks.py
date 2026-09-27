@@ -13,7 +13,7 @@ def add(name,q,body):
     CASES.append((name,q,'async()=>{'+setup+body+'}'))
 
 add('reference/detail-original-42px-8px','open=detail',"const nodes=[$('.account-editor'),$('.detail-reset'),$('.detail-compact > .detail-line')];return nodes.every(n=>rect(n).height===42)&&nodes.slice(1).every((n,i)=>near(rect(n).top-rect(nodes[i]).bottom,8))&&parseFloat(getComputedStyle($('.detail-line')).paddingLeft)===12;")
-add('reference/settings-matches-detail','open=settings',"const rows=$$('.settings-list > *'),heights=rows.map(n=>rect(n).height);return rows.length===10&&heights.every(h=>h===42)&&getComputedStyle($('.settings-list')).gap==='8px'&&$$('.settings-disclosure').every(n=>getComputedStyle(n).borderRadius==='12px');")
+add('reference/settings-matches-detail','open=settings',"const rows=$$('.settings-list > *'),heights=rows.map(n=>rect(n).height);return rows.length===11&&heights.every(h=>h===42)&&getComputedStyle($('.settings-list')).gap==='8px'&&$$('.settings-disclosure').every(n=>getComputedStyle(n).borderRadius==='12px');")
 add('shapes/avatars-round-not-clickable','',"return $$('.avatar').every(n=>getComputedStyle(n).borderRadius==='50%'&&n.getAttribute('aria-hidden')==='true'&&!n.dataset.action)&&getComputedStyle($('.avatar')).boxShadow==='none';")
 add('shapes/segmented-pills-concentric','open=notifications&scenario=notify-low',"return $$('.segmented').filter(n=>rect(n).height>0).every(n=>parseFloat(getComputedStyle(n).borderRadius)>=999&&[...n.querySelectorAll('button')].every(b=>parseFloat(getComputedStyle(b).borderRadius)>=999));")
 add('shapes/usage-range-pill','open=usage',"return getComputedStyle($('.usage-filter')).borderRadius==='999px'&&$$('.usage-filter button').every(n=>getComputedStyle(n).borderRadius==='999px');")

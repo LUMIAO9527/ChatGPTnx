@@ -75,8 +75,9 @@ def title_prefixes(home, thread_ids):
         return {}
     try:
         with _read_only(path) as db:
-            rows = db.execute('SELECT id, name, title, archived FROM threads').fetchall()
             columns = {r[1] for r in db.execute('PRAGMA table_info(threads)')}
+            name_column = 'name' if 'name' in columns else 'NULL'
+            rows = db.execute(f'SELECT id, {name_column}, title, archived FROM threads').fetchall()
             aliases = {}
             if 'rollout_path' in columns:
                 for thread, rollout in db.execute('SELECT id, rollout_path FROM threads'):
@@ -84,7 +85,7 @@ def title_prefixes(home, thread_ids):
                     # a suffix ID in both the rollout filename and turn history.
                     match = re.search(r'_([0-9a-f-]{36})\.jsonl$', str(rollout or ''))
                     if match and THREAD_ID.fullmatch(match[1]):
-                        aliases[match[1]] = thread
+                        aliases.setdefault(match[1], set()).add(thread)
     except (OSError, sqlite3.Error):
         return {}
     def prefix(title):
@@ -97,19 +98,27 @@ def title_prefixes(home, thread_ids):
     # UI Automation exposes a shortened title, not the technical thread ID.
     # Archived tasks can still be open in a desktop window. Include them in
     # collision detection, but never enqueue them as active resume targets.
-    return {thread: (wanted if wanted and sum(title.startswith(wanted)
-             for title in titles.values()) == 1 else None)
-            for thread in set(thread_ids) for canonical in [aliases.get(thread, thread)]
-            for wanted in [titles.get(canonical) if canonical in active else None]}
+    resolved = {}
+    indexed = {row[0] for row in rows}
+    for thread in set(thread_ids):
+        matches = aliases.get(thread, set()) | ({thread} if thread in indexed else set())
+        if len(matches) != 1:
+            resolved[thread] = None
+            continue
+        canonical = next(iter(matches))
+        wanted = titles.get(canonical) if canonical in active else None
+        resolved[thread] = wanted if wanted and sum(t.startswith(wanted) for t in titles.values()) == 1 else None
+    return resolved
+
 
 
 def title_prefix(home, thread_id):
     return title_prefixes(home, [thread_id]).get(thread_id)
 
 
-def _desktop_command(home, script, thread_id, prefix, action, settings_file=None):
+def _desktop_command(home, script, thread_id, prefix, action, settings_file=None, *, expected_auth_hash=None):
     auth_file = Path(home) / 'auth.json'
-    auth_hash = fingerprint(auth_file)
+    auth_hash = expected_auth_hash or fingerprint(auth_file)
     if not auth_hash:
         return None
     command = ['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
@@ -158,97 +167,131 @@ def navigate_existing_task(home, script, thread_id, settings_file=None):
         return {'ok': False, 'error': '当前桌面窗口暂不可操作，请在桌面端打开原任务'}
 
 
+def continuation_guard(home, item):
+    """Bind an action to the queued account identity, not just a stable file."""
+    from .storage import identity, account_identity_key, fingerprint, claims
+    auth = Path(home) / 'auth.json'
+    before = fingerprint(auth)
+    expected = item.get('expected_account_key')
+    email, workspace = identity(auth)
+    subject = claims(auth).get('sub')
+    if (not isinstance(subject, str) or not subject or not before or not email or not workspace or not isinstance(expected, str)
+            or not re.fullmatch(r'[0-9a-f]{64}', expected)):
+        return None, 'account_guard_unavailable'
+    if account_identity_key(auth, email) != expected:
+        return None, 'account_changed'
+    return before, ''
+
+
+def observe_start(home, item, stop, *, expected_auth, expected_turn=None,
+                  allow_same_turn=False):
+    """Observe a started turn; an ACK or a changed ID alone is not success."""
+    from .storage import fingerprint
+    from .quota_policy import number
+    auth = Path(home) / 'auth.json'
+    for _ in range(75):
+        if fingerprint(auth) != expected_auth:
+            return 'failed', 'action_outcome_unknown'
+        after = latest_turn(home, item['thread_id'])
+        if after and THREAD_ID.fullmatch(str(after.get('turn_id', ''))):
+            new_id = after['turn_id']
+            is_new = new_id != item['turn_id']
+            matches_ack = expected_turn is None or new_id == expected_turn
+            if is_new and not matches_ack:
+                return 'failed', 'action_outcome_unknown'
+            if matches_ack and (is_new or allow_same_turn):
+                status = after.get('status')
+                if is_new and status == 'failed':
+                    item['observed_turn_id'] = new_id
+                    error = after.get('error')
+                    message = str(error.get('message', '')) if isinstance(error, dict) else ''
+                    reason = ('resume_auth_failed' if '401' in message or
+                              'unauthorized' in message.lower() else 'resumed_turn_failed')
+                    return 'failed', reason
+                if (status in ('inProgress', 'completed') and
+                        number(after.get('started_at')) and after['started_at'] > 0):
+                    item['observed_turn_id'] = new_id
+                    return 'done', 'new_turn_observed' if is_new else 'native_turn_resumed'
+        if stop.wait(.2):
+            return 'failed', 'action_outcome_unknown'
+    return 'failed', 'start_not_observed'
+
+
 def attempt_continuation(home, script, item, stop, log):
-    """Act once in the existing desktop window; the caller owns serialization."""
-    thread_id, turn_id = item['thread_id'], item['turn_id']
+    """Exactly two routes: native Continue OR one bridge message, never both."""
+    thread_id, turn_id = item.get('thread_id'), item.get('turn_id')
     if stop.is_set():
-        return 'retry', 'shutting_down'
-    if not THREAD_ID.fullmatch(str(thread_id)):
-        return 'failed', 'invalid_thread_id'
+        return 'failed', 'shutting_down'
+    if not all(THREAD_ID.fullmatch(str(v)) for v in (thread_id, turn_id)):
+        return 'failed', 'invalid_task_id'
     record = latest_turn(home, thread_id)
     if not record:
-        return 'retry', 'history_unavailable'
+        return 'failed', 'history_unavailable'
     if record['turn_id'] != turn_id:
-        return 'done', 'newer_turn'
+        return 'skipped', 'newer_turn'
     status = record['status']
-    if status == 'inProgress' and not item.get('was_active'):
-        return 'failed', 'unsnapshotted_active_turn'
-    if status == 'failed' and (not isinstance(record['error'], dict) or
-                               record['error'].get('codexErrorInfo') != 'usageLimitExceeded'):
-        return 'failed', 'unrelated_failure'
-    if status not in ('failed', 'interrupted', 'inProgress'):
-        return 'done', 'task_no_longer_needs_resume'
     if status == 'failed':
+        error = record.get('error')
+        if not isinstance(error, dict) or error.get('codexErrorInfo') != 'usageLimitExceeded':
+            return 'failed', 'unrelated_failure'
         if not item.get('settings_file'):
             return 'failed', 'account_guard_unavailable'
         from .app_bridge import resume_existing
         return resume_existing(home, item, stop, log)
-    # Interrupted work has a native Continue action. It must never create a
-    # message, even when the button is missing or temporarily unavailable.
+    if status == 'inProgress':
+        # A pre-switch snapshot does not prove that a live-looking turn stopped.
+        return 'failed', 'desktop_task_not_idle'
+    if status != 'interrupted':
+        return 'skipped', 'task_no_longer_needs_resume'
+    before, reason = continuation_guard(home, item)
+    if not before:
+        return 'failed', reason
     prefix = title_prefix(home, thread_id)
     if not prefix:
         return 'failed', 'title_unavailable_or_ambiguous'
     try:
-        command = _desktop_command(home, script, thread_id, prefix,
-                                   'interrupted' if status == 'inProgress' else status,
-                                   item.get('settings_file'))
+        command = _desktop_command(home, script, thread_id, prefix, 'interrupted',
+                                   item.get('settings_file'), expected_auth_hash=before)
         if not command:
             return 'failed', 'account_guard_unavailable'
-        # Resolve the exact task when the bridge is available. The desktop
-        # helper performs only the native Continue action.
-        if item.get('settings_file'):
-            from .desktop_location import locate_task
-            located, location_reason = locate_task(
-                home, thread_id, item['settings_file'], expected_turn=turn_id, stop=stop)
-            log.info('desktop_location_result state=%s reason=%s', located, location_reason)
-            if located == 'done':
-                return 'done', location_reason
-            if located == 'failed':
-                return 'failed', location_reason
-            if located == 'retry' and location_reason not in (
-                    'desktop_bridge_unavailable', 'task_navigation_unconfirmed'):
-                return 'retry', location_reason
-            current = latest_turn(home, thread_id)
-            if not current:
-                return 'retry', 'history_unavailable'
-            if current['turn_id'] != turn_id:
-                return 'done', 'newer_turn'
-            if stop.is_set():
-                return 'retry', 'shutting_down'
-        result = _invoke(command + (['-WaitForTarget'] if item.get('settings_file') else []))
+        current = latest_turn(home, thread_id)
+        if not current:
+            return 'failed', 'history_unavailable'
+        if current['turn_id'] != turn_id:
+            return 'skipped', 'newer_turn'
+        if current['status'] != 'interrupted':
+            return 'failed', 'task_state_changed'
+        if stop.is_set():
+            return 'failed', 'shutting_down'
+        # UIA locates only the unique task title resolved from the exact ID.
+        # It never launches a client, probes an editor, or submits text.
+        result = _invoke(command + ['-WaitForTarget'])
         _log_location_evidence(result, log)
-        # Never repeat a possible click after an unknown result.
         outcome = (result.stdout or '').strip().splitlines()[-1:]
         raw_label = outcome[0] if outcome else ''
-        label = raw_label if re.fullmatch(r'(?:skip|uncertain|invoked):[a-z_]+', raw_label) else ('unrecognized_response' if outcome else 'no_response')
-        log.info('desktop_resume_result action=%s result=%s code=%d',
-                 status, label, result.returncode)
-        if label == 'skip:task_already_running':
-            return 'done', 'task_already_running'
+        allowed = {'invoked:native_continue', 'uncertain:native_continue', 'uncertain:desktop_error'}
+        allowed.update('skip:' + r for r in (
+            'native_continue_unavailable', 'native_continue_not_ready', 'native_continue_ambiguous',
+            'account_changed', 'account_guard_unavailable', 'continuation_disabled', 'bridge_required',
+            'task_already_running', 'target_not_visible', 'target_changed', 'desktop_not_running',
+            'desktop_window_ambiguous', 'desktop_location_unreadable', 'desktop_error'))
+        label = raw_label if raw_label in allowed else 'unrecognized_response'
+        log.info('desktop_resume_result action=interrupted result=%s code=%d',
+                 label, result.returncode)
         if label == 'invoked:native_continue' and result.returncode == 0:
-            for _ in range(75):
-                after = latest_turn(home, thread_id)
-                if after and after['turn_id'] != turn_id:
-                    item['observed_turn_id'] = after['turn_id']
-                    return 'done', 'new_turn_observed'
-                if stop.wait(.2):
-                    return 'failed', 'action_outcome_unknown'
-            return 'failed', 'start_not_observed'
-        if label.startswith('uncertain:'):
-            return 'failed', 'action_outcome_unknown'
-        if label in ('skip:native_continue_unavailable', 'skip:native_continue_not_ready',
-                     'skip:native_continue_ambiguous', 'skip:account_changed',
-                     'skip:continuation_disabled', 'skip:bridge_required'):
+            return observe_start(home, item, stop, expected_auth=before, allow_same_turn=True)
+        if label == 'skip:task_already_running':
+            return 'skipped', 'task_already_running'
+        if label.startswith('skip:') and result.returncode == 2:
             return 'failed', label[5:]
-        if label.startswith('skip:'):
-            return 'retry', label[5:]
         return 'failed', 'action_outcome_unknown'
     except subprocess.TimeoutExpired:
         log.warning('desktop_resume_error type=TimeoutExpired')
         return 'failed', 'action_outcome_unknown'
-    except OSError as error:
-        log.warning('desktop_resume_error type=%s', type(error).__name__)
-        return 'retry', type(error).__name__
+    except OSError:
+        # Process creation failed before UIA ran. Do not schedule a retry.
+        log.warning('desktop_resume_error type=OSError')
+        return 'failed', 'desktop_not_running'
 
 
 def _log_location_evidence(result, log):

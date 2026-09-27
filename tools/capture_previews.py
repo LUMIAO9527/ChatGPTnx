@@ -31,7 +31,7 @@ def verify_png_size(image: bytes, width: int, height: int) -> None:
 def main(browser,output,appearance='both',only=None,resume=False):
  output.mkdir(parents=True,exist_ok=True)
  digest=ui_source_digest()
- report=json.loads((output/'matrix.json').read_text()) if resume and (output/'matrix.json').exists() else {'native':False,'cases':[]}
+ report=json.loads((output/'matrix.json').read_text(encoding='utf-8')) if resume and (output/'matrix.json').exists() else {'native':False,'cases':[]}
  if report.get('source_sha256',digest)!=digest:raise RuntimeError('UI sources changed: recapture into an empty directory')
  report.update(version=APP_VERSION,source_sha256=digest)
  size=[372,520]

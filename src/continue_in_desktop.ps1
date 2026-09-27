@@ -34,7 +34,6 @@ public static class NXResumeWindow {
 $tree = [System.Windows.Automation.TreeScope]
 $element = [System.Windows.Automation.AutomationElement]
 $buttonType = [System.Windows.Automation.ControlType]::Button
-$editType = [System.Windows.Automation.ControlType]::Edit
 $documentType = [System.Windows.Automation.ControlType]::Document
 $linkType = [System.Windows.Automation.ControlType]::Hyperlink
 $script:actionStarted = $false
@@ -51,7 +50,7 @@ function Assert-Account {
     try {
         $hash = (Get-FileHash -LiteralPath $AuthFile -Algorithm SHA256).Hash
         if ($hash -ine $ExpectedAuthHash) { Skip 'account_changed' }
-        if ($SettingsFile) {
+        if ($SettingsFile -and -not $NavigateOnly) {
             $stage = 'settings_read'
             if (-not (Test-Path -LiteralPath $SettingsFile)) { Skip 'account_guard_unavailable' }
             $settings = (Get-Content -LiteralPath $SettingsFile -Raw -Encoding UTF8 | ConvertFrom-Json).settings
@@ -103,9 +102,6 @@ function Select-ResumeCandidate($Candidates, [IntPtr]$Foreground) {
     if ($pool.Count -eq 1 -and $valid.Count -eq 1) { return $valid[0] }
     $focused = @($valid | Where-Object { $_.Hwnd -eq $Foreground })
     if ($focused.Count -eq 1) { return $focused[0] }
-    # Python has already established that the title identifies one task.
-    # Multiple windows showing that same task are equivalent destinations.
-    if ($documents.Count -gt 0 -and $valid.Count -gt 0) { return $valid[0] }
     return $null
 }
 function Resolve-ResumeWindow($Windows, [IntPtr]$Foreground) {
@@ -131,6 +127,7 @@ function Resolve-ResumeWindow($Windows, [IntPtr]$Foreground) {
         entry_windows=@($candidates | Where-Object {$_.EntryMatches -gt 0}).Count;
         read_errors=$readErrors}
     $script:locationReason = Get-LocationFailure $candidates $readErrors
+    if ($readErrors -gt 0) { return $null }
     $selected = Select-ResumeCandidate $candidates $Foreground
     if ($null -ne $selected) { return $selected.Candidate }
     return $null
@@ -204,30 +201,17 @@ function Assert-Target {
     return $document
 }
 function Native-Continue($document) {
+    # Only actions owned by this task document; never infer ownership from an
+    # editor's position or choose a generic Start button in the surrounding UI.
     $names = @('继续','继续生成','继续回答','继续响应','继续对话',
-        'Continue','Continue generating','Continue response','Continue conversation','开始','Start')
-    # A disabled Continue button is present but cannot be clicked.
-    $buttons = @(Find-Controls $document $names $buttonType $true)
-    if ($buttons.Count -gt 0) { return $buttons }
-
-    # In some ChatGPT desktop layouts the action is a sibling of the task
-    # Document. Search the pinned window, restricted to the conversation's
-    # horizontal area so sidebar actions cannot be selected.
-    $window = Pinned-Window
-    if ($null -eq $window) { Skip 'target_changed' }
-    $editors = @(Visible-Controls $document $editType)
-    if ($editors.Count -ne 1) { return @() }
-    $editorRect = $editors[0].Current.BoundingRectangle
-    $windowButtons = @(Find-Controls $window $names $buttonType $true)
-    return @($windowButtons | Where-Object {
-        $rect = $_.Current.BoundingRectangle
-        $center = $rect.Left + $rect.Width / 2
-        $center -ge $editorRect.Left - 150 -and
-        $center -le $editorRect.Right + 150 -and
-        $rect.Bottom -le $editorRect.Top + 100
-    })
+        'Continue','Continue generating','Continue response','Continue conversation')
+    return @(Find-Controls $document $names $buttonType $true)
 }
+
 function Resume-Task($document) {
+    $document = Assert-Target
+    $originalKey = Runtime-Key $document
+    if (-not $originalKey) { Skip 'target_changed' }
     # The button can render just after the task document.
     $deadline = [DateTime]::UtcNow.AddMilliseconds(1500)
     do {
@@ -236,21 +220,31 @@ function Resume-Task($document) {
         if ([DateTime]::UtcNow -ge $deadline) { break }
         Start-Sleep -Milliseconds 250
         $document = Assert-Target
+        if ((Runtime-Key $document) -ne $originalKey) { Skip 'target_changed' }
     } while ($true)
     if ($buttons.Count -gt 1) { Skip 'native_continue_ambiguous' }
     if ($buttons.Count -eq 1) {
         if (-not $buttons[0].Current.IsEnabled) { Skip 'native_continue_not_ready' }
         if ($DryRun) { Write-Output 'ready:native_continue'; return }
+        $current = Assert-Target
+        if ((Runtime-Key $current) -ne $originalKey) { Skip 'target_changed' }
+        $buttonKey = Runtime-Key $buttons[0]
+        if (-not $buttonKey) { Skip 'target_changed' }
+        $currentButtons = @(Native-Continue $current)
+        if ($currentButtons.Count -ne 1 -or
+            (Runtime-Key $currentButtons[0]) -ne $buttonKey) { Skip 'target_changed' }
+        if (-not $currentButtons[0].Current.IsEnabled) { Skip 'native_continue_not_ready' }
+        $invoke = $currentButtons[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
         Assert-Account
         $script:actionStarted = $true
-        $buttons[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        $invoke.Invoke()
         Write-Output 'invoked:native_continue'
         return
     }
     Skip 'native_continue_unavailable'
 }
 try {
-    if ($Action -ne 'interrupted') { Skip 'bridge_required' }
+    if (-not $NavigateOnly -and $Action -ne 'interrupted') { Skip 'bridge_required' }
     Assert-Account
     $deadline = [DateTime]::UtcNow.AddSeconds(6)
     do {
@@ -271,8 +265,7 @@ try {
         # Select the unique sidebar entry INSIDE the pinned window. Never call
         # an external protocol handler, which could launch another instance.
         if ($DryRun) { Skip 'target_not_visible' }
-        # Do not switch conversations while the user is actively typing. An
-        # explicit Open task action is separate from automatic continuation.
+        # Navigation never submits text; keep the task's existing editor intact.
         $window = Pinned-Window
         if ($null -eq $window) { Skip 'target_changed' }
         $entries = @()

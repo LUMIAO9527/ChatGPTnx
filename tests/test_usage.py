@@ -113,6 +113,19 @@ class SubscriptionAndServiceTests(Fixture):
         restored=next(r for r in self.service.read_usage_all()['rows'] if r['email']=='b@example.com')
         self.assertFalse(restored['archived'])
         self.assertEqual(restored['tokens'],'42')
+    def test_archived_history_survives_disk_reload_without_network(self):
+        from nx.storage import Accounts
+        self.service.get_usage_all();self.wait()
+        self.accounts.archive('b@example.com')
+        before=len(self.query.calls)
+        self.service.state=State(self.paths)
+        self.service.accounts=Accounts(self.paths)
+        archived=self.service.read_usage_all(days='all')
+        row=next(r for r in archived['rows'] if r['email']=='b@example.com')
+        self.assertTrue(row['archived']);self.assertEqual(row['tokens'],'42')
+        self.assertEqual(archived['total_tokens'],'84')
+        self.assertEqual(len(self.query.calls),before)
+
     def test_failed_account_kept_separate(self):
         self.query.fail.add('b@example.com');self.service.get_usage_all();self.wait();r=self.service.read_usage_all();self.assertEqual(r['total_tokens'],'42');self.assertEqual(r['included_accounts'],1)
     def test_switch_terminal_result_survives_followup_refresh(self):

@@ -75,12 +75,12 @@ class LocationTests(unittest.TestCase):
 
     def test_newer_turn_does_not_navigate(self):
         self.snapshot['turns'][0]['id'] = 'new'
-        self.assertEqual(self.locate(), ('done', 'newer_turn'))
+        self.assertEqual(self.locate(), ('skipped', 'newer_turn'))
         self.assertEqual(self.pipe.request.call_count, 1)
 
     def test_running_turn_does_not_navigate(self):
         self.snapshot['turns'][0]['status'] = 'inProgress'
-        self.assertEqual(self.locate(), ('retry', 'desktop_task_not_idle'))
+        self.assertEqual(self.locate(), ('failed', 'desktop_task_not_idle'))
         self.assertEqual(self.pipe.request.call_count, 1)
 
     def test_wrong_thread_is_rejected(self):
@@ -89,10 +89,10 @@ class LocationTests(unittest.TestCase):
         self.assertEqual(self.pipe.request.call_count, 1)
 
     def test_navigation_timeout_is_not_reported_as_resumed(self):
-        self.assertEqual(self.locate(BridgeUncertain()), ('retry', 'task_navigation_unconfirmed'))
+        self.assertEqual(self.locate(BridgeUncertain()), ('failed', 'task_navigation_unconfirmed'))
 
     def test_negative_navigation_ack_is_not_reported_as_opened(self):
-        self.assertEqual(self.locate({'navigated': False}), ('retry', 'task_navigation_unconfirmed'))
+        self.assertEqual(self.locate({'navigated': False}), ('failed', 'task_navigation_unconfirmed'))
 
     def test_auth_change_prevents_navigation(self):
         with patch('nx.desktop_location.fingerprint', side_effect=['before', 'after']):
@@ -105,53 +105,46 @@ class LocationTests(unittest.TestCase):
         self.assertEqual(self.locate(), ('failed', 'continuation_disabled'))
         self.assertEqual(self.pipe.request.call_count, 1)
 
-    def attempt(self, outcomes, located=('located', 'task_opened_by_id'), records=None):
-        item = {'thread_id': self.TARGET, 'turn_id': 'old', 'settings_file': str(self.settings)}
-        interrupted = {'turn_id': 'old', 'status': 'interrupted', 'error': None}
-        history = [interrupted] + records[1:] if records else [interrupted] * 3
-        with patch('nx.desktop_resume.latest_turn', side_effect=history), \
+    def native_attempt(self, output, records=None):
+        turn = '44444444-4444-4444-8444-444444444444'
+        item = {'thread_id': self.TARGET, 'turn_id': turn, 'settings_file': str(self.settings)}
+        interrupted = {'turn_id': turn, 'status': 'interrupted', 'error': None}
+        with patch('nx.desktop_resume.latest_turn', side_effect=records, return_value=interrupted), \
+             patch('nx.desktop_resume.continuation_guard', return_value=('mock-hash', '')), \
+             patch('nx.storage.fingerprint', return_value='mock-hash'), \
              patch('nx.desktop_resume.title_prefix', return_value='Unique task'), \
-             patch('nx.desktop_resume._invoke', side_effect=outcomes) as invoke, \
-             patch('nx.desktop_location.locate_task', return_value=located) as locate:
+             patch('nx.desktop_resume._invoke', return_value=output) as invoke, \
+             patch('nx.desktop_location.locate_task') as locate, \
+             patch('nx.app_bridge.resume_existing') as send:
             result = attempt_continuation(self.home, self.home/'helper.ps1', item,
                                           threading.Event(), Mock())
-        return result, invoke, locate
+        locate.assert_not_called()
+        send.assert_not_called()
+        return result, invoke
 
-    def test_bridge_identity_then_one_shot_sender_observes_one_new_turn(self):
-        result, invoke, locate = self.attempt([
-            Mock(stdout='invoked:native_continue', returncode=0)],
-            records=[self.record, self.record, {'turn_id': 'new'}])
+    def test_native_route_has_no_bridge_navigation_dependency(self):
+        before = {'turn_id': '44444444-4444-4444-8444-444444444444', 'status': 'interrupted'}
+        after = {'turn_id': '55555555-5555-4555-8555-555555555555', 'status': 'inProgress', 'started_at': 1900000000}
+        result, invoke = self.native_attempt(Mock(stdout='invoked:native_continue', returncode=0), [before, before, after])
         self.assertEqual(result, ('done', 'new_turn_observed'))
-        self.assertEqual(invoke.call_count, 1)
-        locate.assert_called_once()
+        invoke.assert_called_once()
         self.assertIn('-WaitForTarget', invoke.call_args.args[0])
 
-    def test_unconfirmed_bridge_falls_through_to_one_shot_sender(self):
-        result, invoke, _ = self.attempt([Mock(stdout='skip:desktop_window_ambiguous', returncode=2)],
-                                       located=('retry', 'task_navigation_unconfirmed'))
-        self.assertEqual(result, ('retry', 'desktop_window_ambiguous'))
-        self.assertEqual(invoke.call_count, 1)
+    def test_ambiguous_native_target_is_terminal(self):
+        result, invoke = self.native_attempt(Mock(stdout='skip:desktop_window_ambiguous', returncode=2))
+        self.assertEqual(result, ('failed', 'desktop_window_ambiguous'))
+        invoke.assert_called_once()
 
-    def test_bridge_unavailable_falls_back_without_a_second_send(self):
-        result, invoke, locate = self.attempt(
-            [Mock(stdout='invoked:native_continue', returncode=0)],
-            located=('retry', 'desktop_bridge_unavailable'),
-            records=[self.record, self.record, {'turn_id': 'new'}])
-        self.assertEqual(result, ('done', 'new_turn_observed'))
-        self.assertEqual(invoke.call_count, 1)
-        locate.assert_called_once()
-
-    def test_uncertain_click_never_repeats(self):
-        result, invoke, locate = self.attempt([Mock(stdout='uncertain:native_continue', returncode=2)])
+    def test_uncertain_native_click_never_repeats_or_uses_bridge(self):
+        result, invoke = self.native_attempt(Mock(stdout='uncertain:native_continue', returncode=2))
         self.assertEqual(result, ('failed', 'action_outcome_unknown'))
-        self.assertEqual(invoke.call_count, 1)
-        locate.assert_called_once()
+        invoke.assert_called_once()
 
-    def test_new_turn_after_bridge_prevents_desktop_send(self):
-        result, invoke, _ = self.attempt([Mock(stdout='skip:target_not_visible', returncode=2)],
-                                       records=[self.record, {'turn_id': 'new'}])
-        self.assertEqual(result, ('done', 'newer_turn'))
-        self.assertEqual(invoke.call_count, 0)
+    def test_new_turn_before_native_action_prevents_click(self):
+        before = {'turn_id': '44444444-4444-4444-8444-444444444444', 'status': 'interrupted'}
+        result, invoke = self.native_attempt(Mock(), [before, {'turn_id': '55555555-5555-4555-8555-555555555555'}])
+        self.assertEqual(result, ('skipped', 'newer_turn'))
+        invoke.assert_not_called()
 
 
 if __name__ == '__main__':

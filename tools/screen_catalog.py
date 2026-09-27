@@ -71,7 +71,7 @@ add(G,'resume-message-saved','接续消息 · 原位保存',route='resume-messag
 add(G,'scenarios','演示专用 · 场景选择',route='scenarios',note='此页只存在于演示；不编入真实产品入口。')
 
 G='07 · 任务接续'
-for key,label,sc in [('resume-empty','接续记录 · 无记录',None),('resume-progress','接续记录 · 正在接续','resume-progress'),('resume-switching','接续记录 · 正在切号','resume-switching'),('resume-waiting','接续记录 · 等待账号','resume-waiting'),('resume-failed','接续记录 · 失败','resume-failed'),('resume-success','接续记录 · 成功','resume-success'),('resume-unknown','接续记录 · 结果未确认','resume-unknown'),('resume-draft','接续记录 · 保留草稿','resume-draft'),('resume-editing','接续记录 · 正在输入','resume-editing'),('resume-no-window','接续记录 · 桌面未运行','resume-no-window'),('resume-ambiguous','接续记录 · 多窗口不明确','resume-ambiguous'),('resume-skipped','接续记录 · 已在运行而跳过','resume-skipped'),('resume-history','接续记录 · 时间分组','resume-history')]:add(G,key,label,route='resume',scenario=sc)
+for key,label,sc in [('resume-empty','接续记录 · 无记录',None),('resume-progress','接续记录 · 正在接续','resume-progress'),('resume-switching','接续记录 · 正在切号','resume-switching'),('resume-waiting','接续记录 · 等待账号','resume-waiting'),('resume-failed','接续记录 · 失败','resume-failed'),('resume-success','接续记录 · 成功','resume-success'),('resume-unknown','接续记录 · 结果未确认','resume-unknown'),('resume-bridge-unavailable','接续记录 · 桥接不可用','resume-bridge-unavailable'),('resume-native-missing','接续记录 · 原生按钮缺失','resume-native-missing'),('resume-no-window','接续记录 · 桌面未运行','resume-no-window'),('resume-ambiguous','接续记录 · 多窗口不明确','resume-ambiguous'),('resume-skipped','接续记录 · 已在运行而跳过','resume-skipped'),('resume-history','接续记录 · 时间分组','resume-history')]:add(G,key,label,route='resume',scenario=sc)
 add(G,'resume-history-expanded','接续记录 · 历史展开',route='resume',scenario='resume-history',steps=[click('resume-toggle')])
 add(G,'resume-collapsed','接续记录 · 折叠进行中',route='resume',scenario='resume-progress',steps=[click('resume-toggle')])
 add(G,'resume-clear','清理已结束记录 · 确认',route='resume',scenario='resume-history',steps=[click('resume-clear')])
@@ -92,7 +92,6 @@ add(G,'hotkeys','快捷键 · 列表',route='hotkeys')
 add(G,'hotkeys-recording','快捷键 · 正在录制',route='hotkeys',steps=[click('record-hotkey')])
 add(G,'hotkeys-conflict','快捷键 · 被占用',route='hotkeys',scenario='hotkey-conflict')
 add(G,'hotkeys-empty','快捷键 · 无账号',route='hotkeys',scenario='empty')
-add(G,'error-details','操作失败 · 详情',route='error',scenario='error-home')
 
 G='10 · 状态一致性与固定布局'
 add(G,'first-launch-pending','首次引导 · 单一悬浮进度',scenario='first-launch-pending',steps=[click('launch-chatgpt')],note='原按钮只保留操作标签，进度仅由底部悬浮条显示。')
@@ -113,7 +112,7 @@ G='11 · 即时设置与原地展开'
 add(G,'inline-relay','接力规则 · 参与账号展开',route='automation',steps=[selector('[data-disclosure="relay"] > summary')])
 add(G,'inline-relay-many','接力规则 · 长名单全部展开',route='automation',scenario='many',steps=[selector('[data-disclosure="relay"] > summary'),selector('[data-action="collection-more"][data-value="relay"]')])
 add(G,'inline-message','接力规则 · 消息原地编辑',route='automation',steps=[selector('[data-disclosure="message"] > summary')])
-add(G,'inline-message-failed','接力规则 · 消息保存失败保留草稿',route='automation',scenario='preference-failed',steps=[selector('[data-disclosure="message"] > summary'),{'fill':'#resume-message','value':'继续核对剩余项目'},click('save-resume-message',wait=500)])
+add(G,'inline-message-failed','接力规则 · 消息保存失败桥接不可用',route='automation',scenario='preference-failed',steps=[selector('[data-disclosure="message"] > summary'),{'fill':'#resume-message','value':'继续核对剩余项目'},click('save-resume-message',wait=500)])
 add(G,'inline-resume','一级设置 → 独立接续记录',route='settings',scenario='resume-history',steps=[click('resume-details')])
 add(G,'inline-all','接力规则 · 展开消息并收起参与名单',route='automation',scenario='resume-history',steps=[selector('[data-disclosure="relay"] > summary'),selector('[data-disclosure="message"] > summary')])
 add(G,'inline-hotkeys','设置 · 快捷键展开',route='settings',steps=[selector('[data-disclosure="hotkeys"] > summary')])
@@ -121,8 +120,8 @@ add(G,'inline-hotkeys-recording','设置 · 原地录制快捷键',route='settin
 add(G,'inline-archives','设置 · 归档账号展开',route='settings',scenario='archived',steps=[selector('[data-disclosure="archives"] > summary')])
 add(G,'inline-archives-empty','设置 · 归档空状态展开',route='settings',steps=[selector('[data-disclosure="archives"] > summary')])
 add(G,'inline-collapse','接力规则 · 展开后收起',route='automation',steps=[selector('[data-disclosure="relay"] > summary'),selector('[data-disclosure="relay"] > summary')])
-add(G,'resume-composer-unknown','接续记录 · 输入框识别不确定',route='resume',scenario='resume-composer-unknown')
-add(G,'home-composer-unknown','首页 · 接续待确认非已知草稿',scenario='resume-composer-unknown')
+add(G,'resume-bridge-ambiguous','接续记录 · 桥接目标不明确',route='resume',scenario='resume-bridge-ambiguous')
+add(G,'home-bridge-ambiguous','首页 · 桥接不可用',scenario='resume-bridge-ambiguous')
 
 G='12 · 同页设置与单行编辑'
 add(G,'root-notifications','系统 · 通知原地展开',route='settings',steps=[selector('[data-disclosure="notifications"] > summary')])
@@ -158,12 +157,11 @@ add(G,'appearance-selected','设置 · 系统外观跟随',route='settings',step
 add(G,'settings-header-hover','设置 · 收起条悬停',route='settings',steps=[{'hover':'[data-disclosure="notifications"] > summary'}])
 add(G,'settings-expanded-hover','设置 · 展开条悬停轮廓',route='settings',steps=[selector('[data-disclosure="notifications"] > summary'),{'hover':'[data-disclosure="notifications"] > summary'}])
 add(G,'hotkeys-many-expanded','快捷键 · 同高长名单',route='hotkeys',scenario='many',steps=[selector('[data-action="collection-more"][data-value="hotkeys"]')])
-add(G,'usage-account-statistics','分账号用量 · 统计明细展开',route='usage',email='work-01@example.com',steps=[selector('[data-disclosure="usage-metrics"] > summary')])
 add(G,'resume-auto-blocked','接续记录 · 自动消息路径不可用',route='resume',scenario='resume-auto-blocked')
 add(G,'home-auto-blocked','首页 · 自动接续异常提示',scenario='resume-auto-blocked')
 
-add(G,'resume-draft-waiting','接续记录 · 自动等待草稿处理',route='resume',scenario='resume-draft-waiting')
-add(G,'home-draft-waiting','首页 · 等待输入区就绪',scenario='resume-draft-waiting')
+add(G,'resume-transitioning','接续记录 · 等待切号完成',route='resume',scenario='resume-transitioning')
+add(G,'home-transitioning','首页 · 等待切号完成',scenario='resume-transitioning')
 add(G,'resume-auto-sending','接续记录 · 自动发送进行中',route='resume',scenario='resume-auto-sending')
 add(G,'resume-auto-confirmed','接续记录 · 自动发送后已确认新回合',route='resume',scenario='resume-auto-sending',steps=[{'simulate':'complete-resume'}])
 

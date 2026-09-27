@@ -312,7 +312,7 @@ class Service:
     def retry_resume_task(self, session_id, thread_id):
         if self.desktop_transitioning():
             return {'ok': False, 'error': '账号操作尚未完成，请稍后重试'}
-        return self.resumer.retry_draft(session_id, thread_id)
+        return self.resumer.retry_task(session_id, thread_id)
 
     def desktop_transitioning(self):
         operation = self.operation

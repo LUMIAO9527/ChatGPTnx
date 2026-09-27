@@ -6,30 +6,26 @@ window.NXViews.resume = context => {
   function resumeContent() {
     const sessions=[...(ui.resumeDetails||[])].sort((a,b)=>b.updated_at-a.updated_at);
     const reasons={
-      automatic_send_unavailable:'自动发送尚未执行，可重新检查',
-      user_attachment_present:'保留附件草稿，等待处理',
-      input_guard_unavailable:'安全输入暂不可用',
-      input_guard_timeout:'输入准备超时',
-      input_focus_changed:'桌面焦点已变化',
-      composer_selection_unavailable:'无法建立安全插入点',
-      selection_not_collapsed:'输入区存在选中文本',
       invalid_resume_message:'接续消息无效',
-      action_outcome_unknown:'已操作，结果未确认；请查看原任务',
-      composer_in_use:'正在编辑，已暂停接续',
+      action_outcome_unknown:'结果未确认；已停止自动接续，请查看原任务',
       account_guard_unavailable:'无法核对当前账号',
-      desktop_not_running:'等待打开桌面端',
+      desktop_not_running:'桌面端未运行，未执行接续',
       desktop_window_ambiguous:'多个任务入口冲突，无法确定窗口',
       desktop_location_unreadable:'无法读取桌面窗口内容',
       task_identity_unavailable:'无法确认任务编号对应关系',
       task_navigation_unconfirmed:'原任务打开结果未确认，尚未发送',
       target_changed:'原任务页面已变化',
+      invalid_task_id:'任务编号无效',
+      task_state_changed:'原任务状态已变化，未执行接续',
+      resume_state_unavailable:'接续记录无法验证，已停止自动接续',legacy_route_removed:'旧接续路径已停用，请查看原任务',
+      duplicate_attempt:'该回合已处理，未重复操作',
+      desktop_bridge_ambiguous:'存在多个桌面桥接，未发送消息',
+      resume_source_unavailable:'无法确认接续来源任务',
+      native_turn_resumed:'原任务已恢复运行',
       invalid_saved_state:'记录状态异常',
       title_unavailable_or_ambiguous:'无法确认原任务页面',
-      user_draft_present:'草稿已保留，等待输入区就绪',
-      composer_unavailable:'未定位到输入框，已暂停',
-      composer_state_unknown:'无法确认输入框状态，待确认',
-      desktop_bridge_unavailable:'桌面接续接口尚未就绪',
-      desktop_task_not_idle:'等待原任务结束运行',
+      desktop_bridge_unavailable:'桌面桥接不可用，未发送消息',
+      desktop_task_not_idle:'原任务状态不符合接续条件',
       bridge_target_mismatch:'接续接口返回了其他任务，已停止',
       resume_source_unconfigured:'尚未配置接续消息来源',
       resume_source_is_target:'接续来源任务不能向自身发送',
@@ -40,18 +36,18 @@ window.NXViews.resume = context => {
       relay_not_available:'没有可用的接力账号',
       start_not_observed:'未确认新回合已开始',
       native_continue_unavailable:'未找到原生继续按钮',
+      native_continue_not_ready:'原生继续按钮不可用',
       native_continue_ambiguous:'页面有多个继续按钮',
       target_not_visible:'原任务页面未显示',
       history_unavailable:'任务状态暂不可读',
       resume_expired:'接续等待已过期',
       continuation_disabled:'自动接续已关闭',
-      unsnapshotted_active_turn:'无法确认任务在切号前运行',
       unrelated_failure:'任务因其他原因停止',
       task_already_running:'任务已在运行',
       newer_turn:'已有新回合',
       new_turn_observed:'已在原任务启动新回合'
-      ,resume_auth_failed:'消息已送达，账号认证失败（401）'
-      ,resumed_turn_failed:'消息已送达，后续回合失败'
+      ,resume_auth_failed:'接续回合账号认证失败（401）'
+      ,resumed_turn_failed:'接续回合失败'
       ,resumed_turn_completed:'接续回合已完成'
       ,resumed_turn_interrupted:'接续后被中断'
     };

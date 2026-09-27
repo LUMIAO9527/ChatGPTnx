@@ -213,9 +213,16 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
         [usageTotal(),firstRangeTotal,allBars.length,document.querySelector('.usage-chart-heading')?.textContent]);
   check('usage/monthly-tooltip-uses-compact-token-unit',allBars.some(bar=>/\d+(?:\.\d{2})?[万亿] Tokens/.test(bar.getAttribute('aria-label')||''))&&!allBars.some(bar=>(bar.getAttribute('aria-label')||'').includes('— Tokens')),
         allBars.map(bar=>bar.getAttribute('aria-label')));
+  const statsAccountEmail=document.querySelector('.account-usage-row').dataset.email;
   document.querySelector('.account-usage-row').click();await wait(70);
   document.querySelector('[data-action="usage-period"][data-value="30"]').click();await wait(70);
-  check('usage/account-window-stats-follow-selection',document.querySelector('.metrics-row')?.textContent.includes('区间峰值')&&document.querySelector('.metrics-row')?.textContent.includes('已记录'),document.querySelector('.metrics-row')?.textContent);
+  const statsAccount=NXDemo.state().accounts.find(a=>a.email===statsAccountEmail);
+  const statsUsage=await NXDemo.call('read_usage',statsAccountEmail);
+  const selectedUsage=NXMath.aggregate([statsAccount],{[statsAccountEmail]:statsUsage},30);
+  const selectedPeak=selectedUsage.daily.reduce((max,d)=>BigInt(d.tokens)>max?BigInt(d.tokens):max,0n);
+  const selectedMean=selectedUsage.daily.reduce((sum,d)=>sum+BigInt(d.tokens),0n)/BigInt(selectedUsage.daily.length);
+  const metricText=document.querySelector('.metrics-row')?.textContent||'';
+  check('usage/account-window-stats-follow-selection',metricText.includes('单日峰值'+NXMath.compactText(selectedPeak))&&metricText.includes('日均用量'+NXMath.compactText(selectedMean)),metricText);
   document.querySelector('[data-action="back"]').click();await wait(50);
 
   await scenario('archived');
@@ -357,9 +364,9 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   document.querySelector('[data-action="resume-toggle"][data-value="history-old"]').click();await wait(40);
   check('resume/history-recollapses',document.querySelectorAll('.resume-task').length===0);
   document.querySelector('[data-action="resume-toggle"][data-value="history-draft"]').click();await wait(40);
-  check('resume/draft-preserved-and-retry-available',document.querySelector('.resume-body')?.textContent.includes('草稿已保留')&&!!document.querySelector('[data-action="retry-resume-task"]'));
+  check('resume/bridge-preflight-failure-and-explicit-retry',document.querySelector('.resume-body')?.textContent.includes('桌面桥接不可用')&&!!document.querySelector('[data-action="retry-resume-task"]'));
   document.querySelector('[data-action="retry-resume-task"]').click();await wait(70);
-  check('resume/draft-retry-queues-in-original-session',window.NXDemo.state().resume?.phase==='resuming'&&!document.querySelector('[data-action="retry-resume-task"]'));
+  check('resume/preflight-retry-keeps-original-session',window.NXDemo.state().resume?.phase==='resuming'&&!document.querySelector('[data-action="retry-resume-task"]'));
   await scenario('default');
 
   window.NXDemo.scenario('relay-week-priority');await window.nxShown();await wait(80);
