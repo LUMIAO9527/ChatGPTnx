@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from nx.app_bridge import resume_existing, BridgeUncertain, BridgeUnavailable, text_result, Pipe
+from nx.app_bridge import resume_existing, discover_when_ready, BridgeUncertain, BridgeUnavailable, text_result, Pipe
 
 
 class BridgeResumeTests(unittest.TestCase):
@@ -49,7 +49,7 @@ class BridgeResumeTests(unittest.TestCase):
         self.pipe.request.side_effect = replies or [self.result(self.snapshot),
                                                    self.result({'threadId': '11111111-1111-4111-8111-111111111111'})]
         with patch('nx.app_bridge.discover', return_value=self.pipe), \
-             patch('nx.desktop_location.canonical_task', side_effect=lambda home, key: self.SOURCE if key == self.SOURCE else self.canonical), \
+             patch('nx.desktop_location.canonical_task', side_effect=lambda home, key, **kwargs: self.SOURCE if key == self.SOURCE else self.canonical), \
              patch('nx.desktop_resume.latest_turn', side_effect=records, return_value=self.record):
             return resume_existing(self.home, self.item, self.stop_mock, Mock())
 
@@ -82,6 +82,16 @@ class BridgeResumeTests(unittest.TestCase):
     def test_read_failure_is_terminal_without_sending(self):
         self.assertEqual(self.run_resume([BridgeUnavailable()]), ('failed', 'desktop_bridge_unavailable'))
         self.assertEqual(self.pipe.request.call_count, 1)
+
+    def test_bridge_startup_waits_before_any_write(self):
+        with patch('nx.app_bridge.discover', side_effect=[
+                BridgeUnavailable('desktop_bridge_unavailable'),
+                BridgeUnavailable('desktop_bridge_unavailable'), self.pipe]) as discover:
+            found = discover_when_ready(self.stop, self.home/'auth.json',
+                                        __import__('nx.storage', fromlist=['fingerprint']).fingerprint(self.home/'auth.json'))
+        self.assertIs(found, self.pipe)
+        self.assertEqual(discover.call_count, 3)
+        self.pipe.request.assert_not_called()
 
     def test_newer_turn_is_not_sent_again(self):
         self.snapshot['turns'][0]['id'] = '55555555-5555-4555-8555-555555555555'
@@ -124,7 +134,7 @@ class BridgeResumeTests(unittest.TestCase):
     def test_account_change_prevents_dispatch(self):
         with patch('nx.storage.fingerprint', side_effect=['before', 'after']):
             self.assertEqual(self.run_resume(), ('failed', 'account_changed'))
-        self.assertEqual(self.pipe.request.call_count, 1)
+        self.pipe.request.assert_not_called()
 
     def test_ack_without_observed_turn_is_not_replayed(self):
         self.assertEqual(self.run_resume(), ('failed', 'start_not_observed'))

@@ -37,7 +37,9 @@ def reply(value):
 
 class ContinuationContractTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        temp_root = ROOT / '_wip' / 'temp'
+        temp_root.mkdir(parents=True, exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(dir=temp_root)
         self.addCleanup(self.tmp.cleanup)
         self.paths = Paths(Path(self.tmp.name), Path(self.tmp.name)/'desktop')
         atomic_bytes(self.paths.auth, credential(EMAIL))
@@ -114,6 +116,60 @@ class ContinuationContractTests(unittest.TestCase):
         self.assertEqual(saved['sessions'][0]['items'][0]['attempts'], 1)
         self.assertEqual(len(saved['claims']), 1)
 
+    def test_archived_configured_source_can_send_to_active_target(self):
+        with sqlite3.connect(self.paths.home/'state_1.sqlite') as db:
+            db.execute('UPDATE threads SET archived=1 WHERE id=?', (SOURCE,))
+        db.close()
+        self.assertEqual(canonical_task(self.paths.home, SOURCE, allow_archived=True), SOURCE)
+        self.assertIsNone(canonical_task(self.paths.home, SOURCE))
+        pipe = self.pipe()
+        with patch('nx.app_bridge.discover', return_value=pipe):
+            result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
+                                          self.item, self.fast_stop, self.log)
+        self.assertEqual(result, ('done', 'new_turn_observed'))
+
+    def test_stale_running_index_uses_exact_interrupted_desktop_turn(self):
+        with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
+            db.execute("UPDATE thread_turns SET status='inProgress', error_json=NULL")
+        db.close()
+        pipe = Mock()
+        continued = False
+        def request(method, params, **kwargs):
+            if params['tool'] == 'navigate_to_codex_page':
+                return reply({'navigated': True})
+            self.assertEqual(params['tool'], 'read_thread')
+            turn = ({'id': TURN, 'status': 'inProgress', 'startedAt': 1900000000}
+                    if continued else {'id': TURN, 'status': 'interrupted'})
+            return reply({'thread': {'id': TASK, 'kind': 'codex', 'status': {'type': 'idle'}},
+                          'turns': [turn]})
+        pipe.request.side_effect = request
+        def native_click(command):
+            nonlocal continued
+            continued = True
+            return Mock(stdout='invoked:native_continue', returncode=0)
+        with patch('nx.app_bridge.discover', return_value=pipe), \
+             patch('nx.desktop_resume._invoke', side_effect=native_click) as native:
+            result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
+                                          self.item, self.fast_stop, self.log)
+        self.assertEqual(result, ('done', 'native_turn_resumed'))
+        self.assertEqual(self.item['observed_turn_id'], TURN)
+        self.assertEqual(pipe.request.call_count, 3)
+        native.assert_called_once()
+
+    def test_stale_running_index_does_not_send_to_running_desktop_turn(self):
+        with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
+            db.execute("UPDATE thread_turns SET status='inProgress', error_json=NULL")
+        db.close()
+        pipe = Mock()
+        pipe.request.return_value = reply({
+            'thread': {'id': TASK, 'kind': 'codex', 'status': {'type': 'active'}},
+            'turns': [{'id': TURN, 'status': 'inProgress'}]})
+        with patch('nx.app_bridge.discover', return_value=pipe):
+            result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
+                                          self.item, self.fast_stop, self.log)
+        self.assertEqual(result, ('failed', 'desktop_task_not_idle'))
+        self.assertEqual(pipe.request.call_count, 1)
+
     def test_lost_ack_with_real_started_turn_still_cannot_replay(self):
         c = self.coordinator(); ident = self.queue(c)
         _, item = c._ready(); pipe = self.pipe(acknowledgement=False)
@@ -179,12 +235,13 @@ class ContinuationContractTests(unittest.TestCase):
         with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
             db.execute("UPDATE thread_turns SET status='interrupted'")
         db.close()
-        with patch('nx.app_bridge.discover') as discover, patch('nx.desktop_resume._invoke',
+        with patch('nx.desktop_location.locate_task', return_value=('located', 'task_opened_by_id')), \
+             patch('nx.app_bridge.resume_existing') as send, patch('nx.desktop_resume._invoke',
                 return_value=Mock(stdout='skip:native_continue_unavailable', returncode=2)) as native:
             result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
                                           self.item, self.stop, self.log)
         self.assertEqual(result, ('failed', 'native_continue_unavailable'))
-        discover.assert_not_called(); native.assert_called_once()
+        send.assert_not_called(); native.assert_called_once()
 
     def test_bridge_unavailable_never_falls_back_to_native(self):
         with patch('nx.app_bridge.discover', side_effect=app_bridge.BridgeUnavailable()), \

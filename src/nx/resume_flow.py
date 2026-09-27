@@ -19,6 +19,10 @@ HISTORY_SECONDS = 7 * 86400
 ACTIVE_SECONDS = 86400
 FAILURE_BANNER_SECONDS = 86400
 PENDING_SECONDS = 300
+SAFE_PRE_DISPATCH_FAILURES = frozenset({
+    'desktop_bridge_unavailable', 'resume_source_unavailable',
+    'desktop_task_not_idle',
+})
 
 
 from .resume_policy import ATTENTION_REASONS, RETRYABLE_REASONS
@@ -151,6 +155,15 @@ class ResumeCoordinator:
     def _claim_key(item):
         # A turn UUID remains the same when the task is addressed by an alias.
         return hashlib.sha256(str(item.get('turn_id', '')).encode('utf-8')).hexdigest()
+
+    def _claim_has_only_safe_failures(self, item):
+        """Permit a later switch after prior attempts provably sent nothing."""
+        previous = [old for session in self.sessions for old in session['items']
+                    if self._claim_key(old) == self._claim_key(item)
+                    and old.get('attempts', 0) > 0]
+        return bool(previous) and all(old.get('state') == 'failed' and
+                                      old.get('reason') in SAFE_PRE_DISPATCH_FAILURES
+                                      for old in previous)
 
     def _target_identity(self, target):
         try:
@@ -560,7 +573,8 @@ class ResumeCoordinator:
                 for item in session['items']:
                     if item['state'] == 'waiting' and item.get('next_try', 0) <= now:
                         claim = self._claim_key(item)
-                        if claim in self.claims and not item.get('retry_authorized'):
+                        if (claim in self.claims and not item.get('retry_authorized')
+                                and not self._claim_has_only_safe_failures(item)):
                             item.update(state='skipped', reason='duplicate_attempt')
                             self._save()
                             continue

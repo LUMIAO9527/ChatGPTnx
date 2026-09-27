@@ -84,6 +84,32 @@ class ResumeFlowTests(unittest.TestCase):
         self.assertEqual(session['items'][0]['state'], 'failed')
         self.assertEqual(session['items'][1]['state'], 'acting')
 
+    def test_later_switch_retries_only_proven_pre_dispatch_failure(self):
+        c = self.coordinator
+        first = c.prepare('a@example.com', 'b@example.com', 'manual', [self.event()])
+        self.current = 'b@example.com'
+        c.switched(first)
+        _, item = c._ready()
+        c._persist_outcome(first, item, 'failed', 'desktop_bridge_unavailable')
+        second = c.prepare('a@example.com', 'b@example.com', 'manual', [self.event()])
+        c.switched(second)
+        ready = c._ready()
+        self.assertIsNotNone(ready)
+        self.assertEqual(ready[0], second)
+
+    def test_later_switch_never_replays_uncertain_send(self):
+        c = self.coordinator
+        first = c.prepare('a@example.com', 'b@example.com', 'manual', [self.event()])
+        self.current = 'b@example.com'
+        c.switched(first)
+        _, item = c._ready()
+        c._persist_outcome(first, item, 'failed', 'action_outcome_unknown')
+        second = c.prepare('a@example.com', 'b@example.com', 'manual', [self.event()])
+        c.switched(second)
+        self.assertIsNone(c._ready())
+        self.assertEqual(c.sessions[-1]['items'][0]['reason'], 'duplicate_attempt')
+
+
     def test_observed_turn_is_saved_without_rereading_latest(self):
         c = self.coordinator
         ident = c.prepare('a@example.com', 'b@example.com', 'manual', [self.event()])

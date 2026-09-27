@@ -238,10 +238,19 @@ def attempt_continuation(home, script, item, stop, log):
             return 'failed', 'account_guard_unavailable'
         from .app_bridge import resume_existing
         return resume_existing(home, item, stop, log)
-    if status == 'inProgress':
-        # A pre-switch snapshot does not prove that a live-looking turn stopped.
+    stale_index = status == 'inProgress'
+    if status in ('inProgress', 'interrupted') and item.get('settings_file'):
+        # The local index can lag the desktop after a switch. Confirm the exact
+        # interrupted turn and open it; never send a message for this case.
+        from .desktop_location import locate_task
+        located, reason = locate_task(home, thread_id, item['settings_file'],
+                                      expected_turn=turn_id, stop=stop,
+                                      required_status='interrupted')
+        if located != 'located':
+            return located, reason
+    elif stale_index:
         return 'failed', 'desktop_task_not_idle'
-    if status != 'interrupted':
+    if not stale_index and status != 'interrupted':
         return 'skipped', 'task_no_longer_needs_resume'
     before, reason = continuation_guard(home, item)
     if not before:
@@ -259,7 +268,7 @@ def attempt_continuation(home, script, item, stop, log):
             return 'failed', 'history_unavailable'
         if current['turn_id'] != turn_id:
             return 'skipped', 'newer_turn'
-        if current['status'] != 'interrupted':
+        if current['status'] != ('inProgress' if stale_index else 'interrupted'):
             return 'failed', 'task_state_changed'
         if stop.is_set():
             return 'failed', 'shutting_down'
@@ -279,6 +288,9 @@ def attempt_continuation(home, script, item, stop, log):
         log.info('desktop_resume_result action=interrupted result=%s code=%d',
                  label, result.returncode)
         if label == 'invoked:native_continue' and result.returncode == 0:
+            if stale_index:
+                from .app_bridge import observe_native_start
+                return observe_native_start(home, item, stop, expected_auth=before)
             return observe_start(home, item, stop, expected_auth=before, allow_same_turn=True)
         if label == 'skip:task_already_running':
             return 'skipped', 'task_already_running'

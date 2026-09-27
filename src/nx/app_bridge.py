@@ -149,6 +149,23 @@ def discover(required=None):
         raise
 
 
+def discover_when_ready(stop, auth_file, expected_auth, timeout=12, required=None):
+    """Wait briefly for the restarted desktop bridge before any write occurs."""
+    from .storage import fingerprint
+    deadline = time.monotonic() + timeout
+    while True:
+        if stop.is_set():
+            raise BridgeUnavailable('shutting_down')
+        if fingerprint(auth_file) != expected_auth:
+            raise BridgeUnavailable('account_changed')
+        try:
+            return discover(required)
+        except BridgeUnavailable as error:
+            if str(error) != 'desktop_bridge_unavailable' or time.monotonic() >= deadline:
+                raise
+        stop.wait(min(.35, max(0, deadline - time.monotonic())))
+
+
 def call_params(source_thread, source_turn, tool, arguments, call_id=None):
     return {'arguments': arguments, 'callerSource': 'codex',
             'callId': call_id or 'nx-' + str(uuid.uuid4()), 'namespace': 'codex_app',
@@ -224,7 +241,7 @@ def resume_existing(home, item, stop, log):
             return 'failed', 'task_identity_unavailable'
         if source == target:
             return 'failed', 'resume_source_is_target'
-        if canonical_task(home, source) != source:
+        if canonical_task(home, source, allow_archived=True) != source:
             return 'failed', 'resume_source_unavailable'
         if settings.get('task_continuation') is not True:
             return 'failed', 'continuation_disabled'
@@ -237,7 +254,7 @@ def resume_existing(home, item, stop, log):
     try:
         if stop.is_set():
             return 'failed', 'shutting_down'
-        pipe = discover()
+        pipe = discover_when_ready(stop, auth, before)
         snapshot = text_result(pipe.request('tools/call', call_params(
             source, 'nx-read-' + str(uuid.uuid4()), 'read_thread',
             {'threadId': target, 'hostId': 'local', 'turnLimit': 1,
@@ -283,13 +300,74 @@ def resume_existing(home, item, stop, log):
         log.info('desktop_bridge_dispatch acknowledged=true')
         if ack.get('turnId') == item['turn_id']:
             return 'failed', 'action_outcome_unknown'
-        return observe_start(home, item, stop, expected_auth=before, expected_turn=ack.get('turnId'))
+        return observe_start(home, item, stop, expected_auth=before,
+                             expected_turn=ack.get('turnId'))
     except Exception as error:
         if dispatched:
             return 'failed', 'action_outcome_unknown'
-        reason = ('desktop_bridge_ambiguous' if isinstance(error, BridgeUnavailable)
-                  and str(error) == 'desktop_bridge_ambiguous' else 'desktop_bridge_unavailable')
+        reason = (str(error) if isinstance(error, BridgeUnavailable)
+                  and str(error) in ('desktop_bridge_ambiguous', 'account_changed', 'shutting_down')
+                  else 'desktop_bridge_unavailable')
         return 'failed', reason
     finally:
         if pipe:
             pipe.close()
+
+
+def observe_bridge_start(pipe, home, source, target, item, stop, *, expected_auth,
+                         expected_turn=None, allow_same_turn=False):
+    """Confirm a new started turn from the same desktop that accepted the send."""
+    from pathlib import Path
+    from .desktop_resume import THREAD_ID
+    from .storage import fingerprint
+    for _ in range(75):
+        if fingerprint(Path(home) / 'auth.json') != expected_auth:
+            return 'failed', 'action_outcome_unknown'
+        try:
+            snapshot = text_result(pipe.request('tools/call', call_params(
+                source, 'nx-observe-' + str(uuid.uuid4()), 'read_thread',
+                {'threadId': target, 'hostId': 'local', 'turnLimit': 1,
+                 'includeOutputs': False, 'maxOutputCharsPerItem': 0})))
+        except Exception:
+            return 'failed', 'action_outcome_unknown'
+        turns = snapshot.get('turns')
+        if snapshot.get('thread', {}).get('id') != target or not isinstance(turns, list):
+            return 'failed', 'action_outcome_unknown'
+        if len(turns) == 1 and isinstance(turns[0], dict):
+            turn = turns[0]
+            new_id = turn.get('id')
+            if THREAD_ID.fullmatch(str(new_id)) and (new_id != item['turn_id'] or allow_same_turn):
+                if expected_turn is not None and new_id != expected_turn:
+                    return 'failed', 'action_outcome_unknown'
+                item['observed_turn_id'] = new_id
+                if turn.get('status') == 'failed':
+                    error = turn.get('error') or {}
+                    message = str(error.get('message', '')) if isinstance(error, dict) else ''
+                    return 'failed', ('resume_auth_failed' if '401' in message or
+                                      'unauthorized' in message.lower() else 'resumed_turn_failed')
+                if turn.get('status') in ('inProgress', 'completed') and turn.get('startedAt'):
+                    return 'done', ('new_turn_observed' if new_id != item['turn_id']
+                                    else 'native_turn_resumed')
+        if stop.wait(.2):
+            return 'failed', 'action_outcome_unknown'
+    return 'failed', 'start_not_observed'
+
+
+def observe_native_start(home, item, stop, *, expected_auth):
+    """Observe an interrupted turn after the native Continue button was clicked."""
+    from pathlib import Path
+    from .desktop_location import canonical_task
+    try:
+        settings = json.loads(Path(item['settings_file']).read_text(encoding='utf-8-sig'))['settings']
+        source = settings['resume_source_thread_id']
+        target = canonical_task(home, item['thread_id'])
+        if not target or not source:
+            return 'failed', 'action_outcome_unknown'
+        pipe = discover_when_ready(stop, Path(home) / 'auth.json', expected_auth)
+    except Exception:
+        return 'failed', 'action_outcome_unknown'
+    try:
+        return observe_bridge_start(pipe, home, source, target, item, stop,
+                                    expected_auth=expected_auth, allow_same_turn=True)
+    finally:
+        pipe.close()

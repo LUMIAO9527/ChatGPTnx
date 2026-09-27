@@ -48,7 +48,10 @@ function Skip([string]$Reason) {
 function Assert-Account {
     $stage = 'auth_hash'
     try {
-        $hash = (Get-FileHash -LiteralPath $AuthFile -Algorithm SHA256).Hash
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $hash = [BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($AuthFile))).Replace('-', '')
+        } finally { $sha.Dispose() }
         if ($hash -ine $ExpectedAuthHash) { Skip 'account_changed' }
         if ($SettingsFile -and -not $NavigateOnly) {
             $stage = 'settings_read'

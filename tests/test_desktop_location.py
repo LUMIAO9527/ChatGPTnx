@@ -48,7 +48,7 @@ class LocationTests(unittest.TestCase):
     def locate(self, ack=None, expected='old'):
         self.pipe.request.side_effect = [self.reply(self.snapshot),
             ack if isinstance(ack, Exception) else self.reply({'navigated': True} if ack is None else ack)]
-        with patch('nx.desktop_location.discover', return_value=self.pipe), \
+        with patch('nx.desktop_location.discover_when_ready', return_value=self.pipe), \
              patch('nx.desktop_resume.latest_turn', return_value=self.record):
             return locate_task(self.home, self.RUNTIME, self.settings, expected_turn=expected)
 
@@ -114,15 +114,15 @@ class LocationTests(unittest.TestCase):
              patch('nx.storage.fingerprint', return_value='mock-hash'), \
              patch('nx.desktop_resume.title_prefix', return_value='Unique task'), \
              patch('nx.desktop_resume._invoke', return_value=output) as invoke, \
-             patch('nx.desktop_location.locate_task') as locate, \
+             patch('nx.desktop_location.locate_task', return_value=('located', 'task_opened_by_id')) as locate, \
              patch('nx.app_bridge.resume_existing') as send:
             result = attempt_continuation(self.home, self.home/'helper.ps1', item,
                                           threading.Event(), Mock())
-        locate.assert_not_called()
+        locate.assert_called_once()
         send.assert_not_called()
         return result, invoke
 
-    def test_native_route_has_no_bridge_navigation_dependency(self):
+    def test_native_route_locates_then_clicks_continue(self):
         before = {'turn_id': '44444444-4444-4444-8444-444444444444', 'status': 'interrupted'}
         after = {'turn_id': '55555555-5555-4555-8555-555555555555', 'status': 'inProgress', 'started_at': 1900000000}
         result, invoke = self.native_attempt(Mock(stdout='invoked:native_continue', returncode=0), [before, before, after])
