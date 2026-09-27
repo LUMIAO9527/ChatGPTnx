@@ -6,7 +6,7 @@
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
 <img src="docs/images/badges/version.svg" alt="v1.0.0" height="20">
-<img src="docs/images/badges/license.svg" alt="闭源 · 保留所有权利" height="20">
+<img src="docs/images/badges/license.svg" alt="源码可查看 · 保留权利" height="20">
 </div>
 
 ## 功能
@@ -15,6 +15,7 @@
 - **账号接力**：手动切换账号，或选择参与账号进行自动接力。
 - **任务接续**：切换账号后接续原桌面任务，支持自定义接续消息。
 - **桌面操作**：常驻托盘，提供通知、快捷键和深浅外观。
+- **购买账号**：在设置中查看 Plus 账号与接码服务的微信联系方式。
 
 ## 界面
 
@@ -28,7 +29,7 @@
 
 ## 下载与运行
 
-从 [Releases](../../releases) 下载 `ChatGPTnx.exe`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用，以及 Microsoft Edge WebView2 Runtime。
+从 [v1.0.0 Release](../../releases/tag/v1.0.0) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.0.0-source.zip`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用，以及 Microsoft Edge WebView2 Runtime。
 
 将 EXE 放入独立、可写的目录后启动。程序常驻托盘，关闭面板后仍会运行；可从托盘菜单退出。
 
@@ -38,4 +39,4 @@
 
 ## 授权
 
-软件为闭源作品，使用与授权条款见 [LICENSE](LICENSE)。本项目与 OpenAI 没有隶属或认可关系。
+源码可下载查看，使用与授权条款见 [LICENSE](LICENSE)。本项目与 OpenAI 没有隶属或认可关系。
