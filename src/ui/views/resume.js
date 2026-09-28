@@ -71,11 +71,13 @@ window.NXViews.resume = context => {
         : new Date(s.updated_at*1000).toLocaleString('zh-CN',s.updated_at*1000<day.getTime()?{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}:{hour:'2-digit',minute:'2-digit'});
       const progressMarkup=(progress,failed=false)=>progress==='0/1'&&failed?'<span class="resume-zero">0</span>/1':esc(progress);
       const rows=expanded?s.items.map(i=>{
-        const reason=i.state!=='done'&&i.reason?(reasons[i.reason]||(i.state==='skipped'?'已跳过':'请查看原任务')):'';
+        const reason=i.state==='failed'?(reasons[i.reason]||'接续失败，请查看原任务')
+          :i.state==='skipped'?(reasons[i.reason]||'已跳过'):'';
         const retry=i.state==='failed'&&window.NX_RESUME_POLICY.retryable.includes(i.reason);
-        const status={done:'成功',failed:'失败',skipped:'已跳过',waiting:'等待中',acting:'接续中'}[i.state]||'处理中';
-        const hint=`${i.title} · ${status}${reason?' · '+reason:''}`;
-        return `<div class="resume-task-row"><button class="resume-task" data-action="open-resume-task" data-value="${esc(i.thread_id)}" title="${esc(hint)}" aria-label="${esc(hint)}"><span class="resume-task-copy"><strong>${esc(i.title)}</strong>${reason?`<small>· ${esc(reason)}</small>`:''}</span><em class="resume-progress">${esc(status)}</em>${icon('external')}</button>${retry?`<button class="resume-retry" data-action="retry-resume-task" data-session="${esc(s.id)}" data-value="${esc(i.thread_id)}">重新接续</button>`:''}</div>`;
+        const status={waiting:'等待中',acting:'接续中'}[i.state]||(!['done','failed','skipped'].includes(i.state)?'处理中':'');
+        const accessibleState=i.state==='done'?'成功':i.state==='failed'?'失败':i.state==='skipped'?'已跳过':status;
+        const hint=`${i.title} · ${accessibleState}${reason&&reason!==accessibleState?' · '+reason:''}`;
+        return `<div class="resume-task-row"><button class="resume-task" data-action="open-resume-task" data-value="${esc(i.thread_id)}" title="${esc(hint)}" aria-label="${esc(hint)}"><span class="resume-task-copy"><strong>${esc(i.title)}</strong>${reason?`<small class="${i.state==='failed'?'resume-failure-reason':''}">· ${esc(reason)}</small>`:''}</span>${status?`<em class="resume-progress">${esc(status)}</em>`:''}${icon('external')}</button>${retry?`<button class="resume-retry" data-action="retry-resume-task" data-session="${esc(s.id)}" data-value="${esc(i.thread_id)}">重新接续</button>`:''}</div>`;
       }).join(''):'';
       const progress=`${done}/${s.items.length}`;
       const hint=`${account?name(account):'账号接力'} · ${time} · ${progress}${failed?` · ${failed} 项需要查看`:''}`;
