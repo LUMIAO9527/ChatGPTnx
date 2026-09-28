@@ -37,7 +37,7 @@ window.NXDemo = (() => {
       hotkeys:accounts.map((a,i)=>({email:a.email,shortcut:`ctrl+alt+${i+1}`,registered:true})),
       settings:{appearance:'system',autostart:false,auto_relay:false,auto_relay_excluded:[],
         task_continuation:true,resume_message:'继续',notify_credential:true,
-        notify_low:false,notify_low_threshold:20,relay_pick:null}};
+        notify_low:false,notify_reset_expiry:true,relay_pick:null}};
     usages={};const totals=[18420680,26480300,60241200,9421800,5483200];
     accounts.forEach((a,i)=>{
       if(i===4){usages[a.email]={ok:false,err:'该账号暂时无法查询用量',attempted_at:n,identity_key:a.identity_key};return;}
@@ -294,7 +294,7 @@ window.NXDemo = (() => {
     if(which==='excluded-all')state.settings.auto_relay_excluded=state.accounts.map(a=>a.email);
     if(which==='automation-on'){state.settings.auto_relay=true;state.settings.task_continuation=true;}
     if(which==='automation-off'){state.settings.auto_relay=false;state.settings.task_continuation=false;}
-    if(which==='notify-low'){state.settings.notify_low=true;state.settings.notify_low_threshold=30;}
+    if(which==='notify-low')state.settings.notify_low=true;
     if(which==='hotkey-conflict')state.hotkeys[0].registered=false;
     if(which==='adding-unchanged'||which==='adding-existing'||which==='adding-opening'||which==='adding-saving'||which==='adding-cancelling'){
       previous=state.current;state.current=null;state.adding=true;state.add_state={previous,phase:'login'};

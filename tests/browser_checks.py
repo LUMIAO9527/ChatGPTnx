@@ -32,7 +32,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   const rootStyle=getComputedStyle(document.documentElement);
   check('design/window-and-surface-radius-r16',rootStyle.getPropertyValue('--radius-ui').trim()==='16px'&&rootStyle.getPropertyValue('--window-r').trim()==='16px',
         [rootStyle.getPropertyValue('--radius-ui'),rootStyle.getPropertyValue('--window-r')]);
-  check('window/live-frame-has-no-inner-outline',liveRule?.style.boxShadow==='none',liveRule?.style.boxShadow||'missing');
+  check('window/live-frame-has-subtle-shadow',liveRule?.style.boxShadow.includes('3px')&&liveRule?.style.margin==='2px',liveRule?.style.boxShadow||'missing');
   check('window/native-config-matches-css',window.NX_CONFIG.radius===16,window.NX_CONFIG.radius);
   const currentCardStyle=getComputedStyle(document.querySelector('.current-card'));
   const rowStyle=getComputedStyle(document.querySelector('.account-list .row'));
@@ -109,6 +109,10 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
         document.querySelectorAll('.reset-credit strong').length===2&&
         [...document.querySelectorAll('.reset-credit')].every(row=>box(row).height<=42&&row.textContent.includes('2026/'))&&
         document.querySelector('.reset-summary')?.getAttribute('aria-expanded')==='true');
+  document.querySelector('.account-editor summary').click();await wait(50);
+  check('detail/opening-editor-closes-reset',document.querySelector('.account-editor details').open&&!document.querySelector('.reset-credit-details'));
+  document.querySelector('.reset-summary').click();await wait(50);
+  check('detail/opening-reset-closes-editor',!document.querySelector('.account-editor details').open&&!!document.querySelector('.reset-credit-details'));
   check('detail/expanded-keeps-quota-clear',box('.detail-overview .quota-bars').bottom+11<=box('.detail-actions').top,
         [box('.detail-overview .quota-bars').bottom,box('.detail-actions').top]);
   const expandedDetail=document.querySelector('.detail-body');
@@ -331,7 +335,10 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   progress.click();await wait(100);
   check('full/resume-keeps-home-frame',app.clientWidth===372&&app.clientHeight===520,
         [app.clientWidth,app.clientHeight]);
+  check('resume/reopens-collapsed',document.querySelectorAll('.resume-task').length===0);
+  document.querySelector('.resume-summary').click();await wait(50);
   check('resume/details-show-original-tasks',document.querySelectorAll('.resume-task').length===3&&document.querySelector('.resume-body')?.textContent.includes('研究任务 B'));
+  check('resume/title-has-regular-emphasis',getComputedStyle(document.querySelector('.resume-task-copy strong')).fontWeight==='500');
   check('resume/each-task-stays-compact', [...document.querySelectorAll('.resume-task')].every(row=>box(row).height<=42)&&
         [...document.querySelectorAll('.resume-summary')].every(row=>box(row).height<=42));
   check('resume/success-needs-no-visible-status',!document.querySelector('.resume-task')?.querySelector('.resume-progress')&&
@@ -344,6 +351,8 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   const waitingNotice=document.querySelector('.resume-notice');
   check('resume/waiting-account-banner',waitingNotice?.textContent.includes('等待可用接力账号 0/2'));
   waitingNotice.click();await wait(100);
+  check('resume/waiting-reopens-collapsed',document.querySelectorAll('.resume-task').length===0);
+  document.querySelector('.resume-summary').click();await wait(50);
   check('resume/waiting-task-rows-and-dismissible-expansion',document.querySelectorAll('.resume-task').length===2&&
         [...document.querySelectorAll('.resume-task .resume-progress')].every(n=>n.textContent==='等待中'));
   check('resume/waiting-shows-nearest-reset-time',document.querySelector('.resume-summary')?.textContent.includes('预计'));
@@ -355,6 +364,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   const failure=document.querySelector('.resume-notice');
   check('resume/failure-banner-is-visible',failure?.textContent.includes('任务接续失败 1/3'));
   failure.click();await wait(100);
+  document.querySelector('.resume-summary').click();await wait(50);
   check('resume/viewing-clears-banner-and-keeps-history',!window.NXDemo.state().resume&&document.querySelectorAll('.resume-task').length===3);
   check('resume/failure-shows-only-muted-red-reason',[...document.querySelectorAll('.resume-task')].some(row=>{
     const reason=row.querySelector('.resume-failure-reason');
@@ -393,10 +403,12 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   const selected=key=>document.querySelector(`[data-key="${key}"][aria-pressed="true"]`)?.dataset.value;
   const groupsValid=()=>[...document.querySelectorAll('.segmented')].filter(n=>n.offsetParent!==null).every(group=>group.getAttribute('role')==='group'&&group.getAttribute('aria-label')&&group.querySelectorAll('[aria-pressed="true"]').length===1);
   check('settings/full-groups-have-one-accessible-selection',groupsValid());
+  check('settings/opens-all-collapsed',[...document.querySelectorAll('.settings-body details')].every(d=>!d.open));
+  document.querySelector('[data-disclosure="appearance"] > summary').click();await wait(30);
   document.querySelector('[data-disclosure="notifications"] > summary').click();await wait(70);
+  check('settings/opening-notifications-closes-appearance',!document.querySelector('[data-disclosure="appearance"]').open&&document.querySelector('[data-disclosure="notifications"]').open);
   document.querySelector('[data-key="notify_low"]').click();await wait(70);
-  document.querySelector('[data-key="notify_low_threshold"][data-value="30"]').click();await wait(70);
-  check('settings/threshold-updates-value-and-selection',selected('notify_low_threshold')==='30'&&window.NXDemo.state().settings.notify_low_threshold===30);
+  check('settings/fixed-low-threshold-and-reset-expiry-toggle',!document.querySelector('[data-key="notify_low_threshold"]')&&!!document.querySelector('[data-key="notify_reset_expiry"]')&&window.NXDemo.state().settings.notify_reset_expiry===true);
   document.querySelector('[data-disclosure="notifications"] > summary').click();await wait(70);
   if(!document.querySelector('[data-disclosure="appearance"]').open)document.querySelector('[data-disclosure="appearance"] > summary').click();
   document.querySelector('[data-key="appearance"][data-value="light"]').click();await wait(70);
@@ -409,6 +421,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   document.querySelector('[data-action="back"]').click();await wait(40);
   document.querySelector('[data-action="settings"]').click();await wait(60);
   check('settings/navigation-retains-values',window.NXDemo.state().settings.auto_relay===true&&window.NXDemo.state().settings.appearance==='system');
+  check('settings/reopens-all-collapsed',[...document.querySelectorAll('.settings-body details')].every(d=>!d.open));
   await scenario('default');window.nxShown();await wait(80);
   document.querySelector('[data-action="relay"]').click();await wait(60);
   const execute=document.querySelector('[data-action="execute-switch"]'),target=execute.dataset.email;

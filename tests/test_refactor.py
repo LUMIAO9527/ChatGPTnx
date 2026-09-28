@@ -95,6 +95,8 @@ class SettingsAndQuotaTests(unittest.TestCase):
                 self.assertFalse(valid_setting(key, value))
         self.assertTrue(valid_setting('resume_message', '😀' * 200))
         self.assertTrue(valid_setting('task_continuation', True))
+        self.assertTrue(valid_setting('notify_reset_expiry', True))
+        self.assertFalse(valid_setting('notify_reset_expiry', 'true'))
 
     def test_exclusions_are_deduplicated_without_shared_defaults(self):
         one = normalize_settings({'auto_relay_excluded': ['a', 'a', '', 'b']})

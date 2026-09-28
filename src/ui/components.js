@@ -27,6 +27,7 @@ window.NXComponents = (() => {
   const notifications = [
     {key:'notify_credential', label:'凭据失效提醒'},
     {key:'notify_low', label:'低额度提醒'},
+    {key:'notify_reset_expiry', label:'重置次数到期提醒'},
   ];
   function segmented({label, action, options, value, key, className=''}) {
     const buttons = options.map(([id, text]) => `<button data-action="${esc(action)}" data-value="${esc(id)}" ${key ? `data-key="${esc(key)}"` : ''} aria-pressed="${String(value)===String(id)}" class="${String(value)===String(id)?'active':''}">${esc(text)}</button>`).join('');
@@ -45,9 +46,7 @@ window.NXComponents = (() => {
   const autoRelaySetting = settings => settingRow(automation[0],settings);
   const taskContinuationSetting = settings => settingRow(automation[1],settings);
   function notificationSettings(settings) {
-    const toggles = notifications.map(item=>settingRow(item,settings)).join('');
-    if (!settings.notify_low) return toggles;
-    return toggles + `<div class="toggle-line sub"><span>提醒阈值</span>${segmented({label:'提醒阈值',action:'pref',key:'notify_low_threshold',options:[10,20,30,40].map(v=>[v,`${v}%`]),value:settings.notify_low_threshold??20,className:'compact'})}</div>`;
+    return notifications.map(item=>settingRow(item,settings)).join('');
   }
   const planLabel = value => ({plus:'Plus',prolite:'Pro',pro:'Pro',free:'Free',go:'Go',team:'Team',business:'Business',enterprise:'Enterprise',edu:'Edu'}[value] || (typeof value==='string'&&value!=='unknown'?'其他':'待查询'));
   const accountName = account => account?.alias || account?.email?.split('@')[0] || '未选择账号';

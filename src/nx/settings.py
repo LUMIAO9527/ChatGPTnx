@@ -8,11 +8,10 @@ DEFAULTS = {'appearance': 'system', 'autostart': False,
             'task_continuation': True, 'resume_message': '继续',
             'resume_transport': 'desktop_ui',
             'resume_source_thread_id': '',
-            'notify_low': False, 'notify_low_threshold': 20, 'notify_credential': True,
+            'notify_low': False, 'notify_reset_expiry': True, 'notify_credential': True,
             'poll_minutes': 10, 'query_timeout': 45, 'query_workers': 2}
 ENUMS = {'appearance': ('system', 'light', 'dark'),
-         'resume_transport': ('desktop_bridge', 'desktop_ui'),
-         'notify_low_threshold': (10, 20, 30, 40)}
+         'resume_transport': ('desktop_bridge', 'desktop_ui')}
 RANGES = {'poll_minutes': (1, 1440), 'query_timeout': (5, 180), 'query_workers': (1, 2)}
 
 def valid_setting(key, value):

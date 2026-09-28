@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'));sys.path.insert(0,str(ROOT/'tools'))
-from nx.desktop import Desktop
+from nx.desktop import Desktop, due_reset_expiry_notices
 from build import CONFIG,panel
 from screen_catalog import CASES
 
@@ -55,5 +55,26 @@ class SinglePanelTests(unittest.TestCase):
         host.show()
         self.assertEqual(host._show_view.call_args.args[0],'home')
         self.assertNotIn('compact',str(host._show_view.call_args))
+
+    def test_reset_expiry_reminders_are_fresh_available_and_once_per_stage(self):
+        now=1900000000
+        credit={'status':'available','expires_known':True,'expires_at':now+6*86400,
+                'granted_at':now-86400,'reset_type':'codexRateLimits'}
+        account={'email':'a@example.com','alias':'a','ok':True,'fetched_at':now,
+                 'banked_resets':{'available_count':1,'items':[credit]}}
+        seen={}
+        for offset,expected in ((0,7),(3*86400+1,3),(5*86400+1,1)):
+            account['fetched_at']=now+offset
+            due=due_reset_expiry_notices([account],seen,now+offset)
+            self.assertEqual([row[2] for row in due],[expected])
+            seen[due[0][0]]=due[0][3]
+            self.assertEqual(due_reset_expiry_notices([account],seen,now+offset),[])
+        account['fetched_at']=now-1801
+        self.assertEqual(due_reset_expiry_notices([account],{},now),[])
+        account['fetched_at']=now
+        for changed in ({'status':'redeemed'},{'expires_known':False},
+                        {'expires_at':now-1},{'expires_at':None}):
+            self.assertEqual(due_reset_expiry_notices([{
+                **account,'banked_resets':{'available_count':1,'items':[{**credit,**changed}]}}],{},now),[])
 
 if __name__=='__main__':unittest.main()

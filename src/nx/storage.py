@@ -225,7 +225,7 @@ class State:
         existing, self.recovery_path = load_owned_document(self.path)
         original = copy.deepcopy(existing)
         allowed_state = {'settings', 'cache', 'account_meta', 'usage', 'usage_revision',
-                         'adding', 'reauth', 'subscriptions', 'hotkeys'}
+                         'adding', 'reauth', 'subscriptions', 'hotkeys', 'reset_expiry_notices'}
         self.value = {key: value for key, value in existing.items() if key in allowed_state}
         saved_settings = existing.get('settings', {})
         saved_settings = saved_settings if isinstance(saved_settings, dict) else {}
@@ -240,6 +240,10 @@ class State:
         self.value.setdefault('reauth', None)
         self.value.setdefault('subscriptions', {})
         self.value.setdefault('hotkeys', {})
+        notices = self.value.get('reset_expiry_notices', {})
+        self.value['reset_expiry_notices'] = {k: v for k, v in notices.items()
+            if isinstance(k, str) and len(k) == 64 and type(v) is int and 0 < v <= 253402300799} \
+            if isinstance(notices, dict) else {}
         # Shape-check caches and workflow state before callers dereference them.
         for key in ('account_meta', 'usage', 'subscriptions'):
             raw = self.value[key]

@@ -870,8 +870,8 @@ class Service:
     def set_preferences(self, changes):
         if not isinstance(changes, dict):
             return {'ok': False, 'error': '设置格式不合法'}
-        writable = {'appearance', 'notify_low', 'notify_credential',
-                    'auto_relay', 'task_continuation', 'resume_message', 'notify_low_threshold'}
+        writable = {'appearance', 'notify_low', 'notify_reset_expiry', 'notify_credential',
+                    'auto_relay', 'task_continuation', 'resume_message'}
         if any(key not in writable or not valid_setting(key, value) for key, value in changes.items()):
             return {'ok': False, 'error': '设置项或值不合法'}
         allowed = changes

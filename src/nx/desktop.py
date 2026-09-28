@@ -1,6 +1,7 @@
 """Windows tray, native hotkeys and one reusable WebView2 window."""
 from __future__ import annotations
 import ctypes
+import hashlib
 from ctypes import wintypes as wt
 import os
 from pathlib import Path
@@ -12,6 +13,36 @@ from .design import PANEL_CONFIG as DEFAULT_CONFIG
 
 CHATGPT_DEFAULT_AUMID = 'OpenAI.Codex_2p2nqsd0c76g0!App'
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
+
+
+def due_reset_expiry_notices(accounts, seen, now):
+    """One reminder per available credit at the nearest 7/3/1-day milestone."""
+    due = []
+    for account in accounts:
+        if not account.get('ok') or not isinstance(account.get('email'), str):
+            continue
+        fetched = account.get('fetched_at')
+        if type(fetched) not in (int, float) or not 0 <= now - fetched <= 1800:
+            continue
+        bank = account.get('banked_resets')
+        if not isinstance(bank, dict) or not bank.get('available_count'):
+            continue
+        items = bank.get('items')
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict) or item.get('status') != 'available' or not item.get('expires_known'):
+                continue
+            expiry = item.get('expires_at')
+            if type(expiry) is not int or not 0 < expiry - now <= 7 * 86400:
+                continue
+            days = 1 if expiry - now <= 86400 else 3 if expiry - now <= 3 * 86400 else 7
+            identity = '|'.join(str(value) for value in (
+                account['email'], item.get('granted_at'), expiry, item.get('reset_type'), days))
+            key = hashlib.sha256(identity.encode('utf-8')).hexdigest()
+            if key not in seen:
+                due.append((key, account.get('alias') or account['email'].split('@')[0], days, expiry))
+    return due
 
 
 def system_prefers_dark() -> bool:
@@ -949,8 +980,7 @@ class Desktop:
                     title += ' | ' + ' · '.join(f"{w['label']} 剩{100-w['used']:g}%" for w in account.get('windows', []))
                     fresh = time.time() - (account.get('fetched_at') or 0) <= 600
                     valid = all(w['resets_at'] > time.time() for w in account.get('windows', []))
-                    threshold = 100 - int(settings.get('notify_low_threshold', 20))
-                    low = bool(fresh and valid and any(w['used'] >= threshold for w in account.get('windows', [])))
+                    low = bool(fresh and valid and any(w['used'] >= 80 for w in account.get('windows', [])))
             self.icon.title = title[:127]
             key = (data['current'], tuple((w['label'], w['resets_at']) for w in (account or {}).get('windows', [])))
             if settings.get('notify_low') and low and key != self.last_notice:
@@ -958,6 +988,8 @@ class Desktop:
                 self.last_notice = key
             if settings.get('notify_credential', True):
                 self._notify_stale_credentials(data)
+            if settings.get('notify_reset_expiry', True):
+                self._notify_reset_expiry(data)
             if settings.get('auto_relay'):
                 result = self.service.auto_relay_if_needed()
                 key = result.get('exhaustion_key')
@@ -984,6 +1016,20 @@ class Desktop:
             self.noticed.add(note_key)
             self.icon.notify(f'账号 {who} 的登录凭据已失效，请重新登录后刷新。', 'ChatGPTnx')
             self.service.log.info('credential_stale_notified account_index=%d', data['accounts'].index(account))
+
+    def _notify_reset_expiry(self, data):
+        if not self.icon:
+            return
+        now = time.time()
+        seen = self.service.state.get('reset_expiry_notices', {})
+        # Expired credits no longer need deduplication entries.
+        seen = {key: expiry for key, expiry in seen.items() if expiry > now}
+        due = due_reset_expiry_notices(data['accounts'], seen, now)
+        for key, who, days, expiry in due:
+            self.icon.notify(f'{who} 的重置次数将在 {days} 天内到期。', 'ChatGPTnx')
+            seen[key] = expiry
+        if due or len(seen) != len(self.service.state.get('reset_expiry_notices', {})):
+            self.service.state.update(reset_expiry_notices=dict(list(seen.items())[-500:]))
 
     def quit(self, *args):
         if self.service.operation or self.service.state.get('adding'):

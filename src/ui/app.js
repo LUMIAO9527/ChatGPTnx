@@ -18,7 +18,7 @@
          notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity} = window.NXComponents;
   const defaults = {appearance:'system', autostart:false,
     auto_relay:false, auto_relay_excluded:[], task_continuation:true, resume_message:'继续',
-    notify_credential:true, notify_low:false, notify_low_threshold:20, relay_pick:null};
+    notify_credential:true, notify_low:false, notify_reset_expiry:true, relay_pick:null};
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[]};
   let workflowResume = false;
   const ui = {page:null, email:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), disclosures:new Set(), fullCollections:new Set(), inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
@@ -215,8 +215,14 @@
   }
   function show(page, target=null, push=true, saved=null) {
     const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message'};
-    if(Object.hasOwn(aliases,page)){if(aliases[page])selectSettingDisclosure(aliases[page]);page='settings';}
-    if(page==='edit'){ui.disclosures.add('meta:'+target);page='detail';}
+    const initial=page;
+    if(Object.hasOwn(aliases,page))page='settings';
+    if(page==='edit')page='detail';
+    if(page==='settings'){ui.disclosures.clear();ui.fullCollections.clear();}
+    if(page==='detail'){ui.disclosures.clear();ui.resetExpanded.clear();}
+    if(page==='resume'){ui.resumeExpanded.clear();ui.resumeCollapsed.clear();}
+    if(Object.hasOwn(aliases,initial)&&aliases[initial])selectSettingDisclosure(aliases[initial]);
+    if(initial==='edit')ui.disclosures.add('meta:'+target);
     feedback.clear();clearNotification();
     if (!ui.page) {previousFocus=document.activeElement;previousFocusKey=focusKey(previousFocus);}
     if (push && ui.page) ui.history.push({page:ui.page,email:ui.email,scope:ui.scope,
@@ -480,15 +486,13 @@
     else {try{await api(scope==='all'?'get_usage_all':'get_usage',...(scope==='all'?[false]:[scope,false]));}catch(error){if(navigation.current(ticket))notify(error.message);}}
   }
   async function openResumeDetails() {
-    const selectedId=data.resume?.id;
     show('resume');const ticket=navigation.ticket();
     try {
       const details=await api('get_resume_details');
       if(!navigation.current(ticket))return;
       ui.resumeDetails=details;
-      if(selectedId){ui.resumeExpanded.clear();ui.resumeCollapsed.clear();ui.resumeExpanded.add(selectedId);}
       renderSheet();
-      if(selectedId) await api('mark_resume_seen',selectedId);
+      if(data.resume?.id) await api('mark_resume_seen',data.resume.id);
       await poll(true);
     }catch(error){if(navigation.current(ticket))notify(error.message||'接续记录读取失败');}
   }
@@ -521,7 +525,7 @@
     const key=d.dataset?.disclosure;if(!key||!d.isConnected||!sheet.contains(d))return;
     if(d.open){
       if(ui.page==='settings'&&settingDisclosureKeys.has(key))selectSettingDisclosure(key);
-      else ui.disclosures.add(key);
+      else {ui.disclosures.add(key);if(ui.page==='detail'&&key.startsWith('meta:')&&ui.resetExpanded.size){ui.resetExpanded.clear();renderSheet();}}
       if(ui.inlineLoading[key]!=='error')loadInline(key);
     }else {
       ui.disclosures.delete(key);
@@ -609,7 +613,7 @@
       case 'retry-resume-task':await run('retry_resume_task',b.dataset.session,val);break;
       case 'home':closeSheet();break;
       case 'detail':show('detail',target);break;
-      case 'toggle-reset-credits':if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else ui.resetExpanded.add(target);renderSheet();break;
+      case 'toggle-reset-credits':if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.disclosures.delete('meta:'+target);}renderSheet();break;
       case 'back':back();break;
       case 'relay':await requestSwitch(relay()?.email,'relay');break;
       case 'launch-chatgpt':await run('launch_chatgpt');break;
@@ -617,9 +621,7 @@
       case 'execute-switch':await executeSwitch(target,b);break;
       case 'toggle':preferences.set(b.dataset.key,!data.settings[b.dataset.key]);break;
       case 'auto-relay-account':preferences.set('account:'+target,b.getAttribute('aria-checked')!=='true');break;
-      case 'pref':{
-        const preference=b.dataset.key==='notify_low_threshold'?Number(val):val;
-        preferences.set(b.dataset.key,preference);break;}
+      case 'pref':preferences.set(b.dataset.key,val);break;
       case 'collection-more':ui.fullCollections.has(val)?ui.fullCollections.delete(val):ui.fullCollections.add(val);renderSheet();break;
       case 'inline-reload':await loadInline(val,true);break;
       case 'hotkeys':show('hotkeys');break;
@@ -730,8 +732,8 @@
         if(page==='resume'){await openResumeDetails();return;}
         const target=['detail','edit','remove','reauth'].includes(page)?data.accounts.find(a=>a.email===params.get('email'))||current()||data.accounts.find(a=>a.error_code==='reauth_required'):page==='confirm'?relay():null;
         if(page==='confirm')ui.switchKind=params.get('kind')==='relay'?'relay':'manual';
-        if(page==='detail'&&params.get('expand')==='reset'&&target)ui.resetExpanded.add(target.email);
         show(page,target?.email||null);
+        if(page==='detail'&&params.get('expand')==='reset'&&target){ui.resetExpanded.add(target.email);renderSheet();}
         if(page==='archives')await loadInline('archives');
       },
       refresh:()=>poll(true),
