@@ -547,13 +547,38 @@ class Desktop:
             self.hide(reason='shape')
 
     def _apply_native_shape(self):
-        """Clip the whole HWND, including its WebView2 child, with one region.
+        """Use DWM's antialiased corners where available, otherwise Win32 region."""
+        hwnd = _find_hwnd()
+        if not hwnd:
+            return False
+        version = getattr(sys, 'getwindowsversion', None)
+        if not version or version().build < 22621:
+            return self._apply_native_region()
+        try:
+            dwm = ctypes.windll.dwmapi
+            dwm.DwmSetWindowAttribute.argtypes = [ctypes.c_void_p, wt.DWORD,
+                                                   ctypes.c_void_p, wt.DWORD]
+            dwm.DwmSetWindowAttribute.restype = ctypes.c_long
+            # 33=DWMWA_WINDOW_CORNER_PREFERENCE, 2=DWMWCP_ROUND;
+            # 34=DWMWA_BORDER_COLOR, COLOR_NONE suppresses the frame;
+            # 38=DWMWA_SYSTEMBACKDROP_TYPE, 1=DWMSBT_NONE.
+            for attribute, setting in ((33, ctypes.c_int(2)),
+                                       (34, ctypes.c_uint(0xFFFFFFFE)),
+                                       (38, ctypes.c_int(1))):
+                result = dwm.DwmSetWindowAttribute(
+                    hwnd, attribute, ctypes.byref(setting), ctypes.sizeof(setting))
+                if result:
+                    self.service.log.warning('window_dwm_shape_failed attribute=%s hresult=%#x',
+                                             attribute, result & 0xFFFFFFFF)
+                    return False
+            return True
+        except Exception as error:
+            self.service.log.warning('window_dwm_shape_failed type=%s',
+                                     type(error).__name__)
+            return False
 
-        Pixels outside the region are not part of this window. WebView2 draws
-        an opaque page inside it. Disable DWM's system backdrop so that no
-        frame remains visible outside the region. Keep the existing 16-DIP
-        radius and shadow=False.
-        """
+    def _apply_native_region(self):
+        """Windows 10 fallback: hard-clip the HWND when DWM rounding is unavailable."""
         region = None
         stage = 'bind'
         try:
@@ -572,22 +597,6 @@ class Desktop:
             hwnd = _find_hwnd()
             if not hwnd:
                 return False
-            # DWMWA_SYSTEMBACKDROP_TYPE=38, DWMSBT_NONE=1 (Windows 11).
-            # Older Windows versions may not support this attribute.
-            try:
-                dwm = ctypes.windll.dwmapi
-                dwm.DwmSetWindowAttribute.argtypes = [ctypes.c_void_p, wt.DWORD,
-                                                       ctypes.c_void_p, wt.DWORD]
-                dwm.DwmSetWindowAttribute.restype = ctypes.c_long
-                backdrop = ctypes.c_int(1)
-                result = dwm.DwmSetWindowAttribute(hwnd, 38, ctypes.byref(backdrop),
-                                                    ctypes.sizeof(backdrop))
-                if result:
-                    self.service.log.warning('window_backdrop_disable_failed hresult=%#x',
-                                             result & 0xFFFFFFFF)
-            except (AttributeError, OSError) as error:
-                self.service.log.warning('window_backdrop_disable_failed type=%s',
-                                         type(error).__name__)
             stage = 'GetWindowRect'
             rect = wt.RECT()
             if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):

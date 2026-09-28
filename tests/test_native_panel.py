@@ -67,6 +67,9 @@ class PanelTests(unittest.TestCase):
         self.dlls = SimpleNamespace(user32=self.user, gdi32=self.gdi, dwmapi=self.dwm)
         self.addCleanup(patch.stopall)
         patch.object(ctypes, 'windll', self.dlls, create=True).start()
+        self.windows_version = patch.object(desktop.sys, 'getwindowsversion',
+                                            return_value=SimpleNamespace(build=19045),
+                                            create=True).start()
         self.find = patch.object(desktop, '_find_hwnd', return_value=HWND).start()
         self.host = desktop.Desktop(SimpleNamespace(log=Mock(), listeners=[], operation=None))
         self.host.window = SimpleNamespace(uid='synthetic')
@@ -81,14 +84,22 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(self.user.SetWindowRgn.calls, [(HWND, HRGN, True)])
         self.assertEqual(self.gdi.DeleteObject.calls, [])
 
-    def test_shape_disables_system_backdrop(self):
-        self.host._apply_native_shape()
+    def test_windows_11_uses_smooth_dwm_corners_without_region(self):
+        self.windows_version.return_value.build = 26200
+        self.assertTrue(self.host._apply_native_shape())
         calls = self.dwm.DwmSetWindowAttribute.calls
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][0], HWND)
-        self.assertEqual(calls[0][1], 38)
-        self.assertEqual(calls[0][2]._obj.value, 1)
-        self.assertEqual(calls[0][3], ctypes.sizeof(ctypes.c_int))
+        self.assertEqual([call[1] for call in calls], [33, 34, 38])
+        self.assertEqual([call[2]._obj.value for call in calls],
+                         [2, 0xFFFFFFFE, 1])
+        self.assertTrue(all(call[0] == HWND for call in calls))
+        self.assertEqual(self.user.SetWindowRgn.calls, [])
+
+    def test_dwm_failure_does_not_show_a_square_or_hard_clipped_window(self):
+        self.windows_version.return_value.build = 26200
+        self.dwm.DwmSetWindowAttribute.result = -1
+        self.assertFalse(self.host._apply_native_shape())
+        self.assertEqual(self.user.SetWindowRgn.calls, [])
+        self.host.service.log.warning.assert_called_once()
 
     def test_shape_also_works_without_dwm_library(self):
         del self.dlls.dwmapi
