@@ -15,7 +15,7 @@ class PackageTests(unittest.TestCase):
             target=Path(temp)/'source.zip';package(target)
             with zipfile.ZipFile(target) as archive:
                 names=set(archive.namelist())
-                for name in ('build.cmd','LICENSE','src/assets/nx.ico','src/nx/settings.py',
+                for name in ('build.cmd','LICENSE','README.en.md','src/assets/nx.ico','src/nx/settings.py',
                              'src/nx/quota_policy.py','src/ui/runtime.js',
                              'src/ui/views/settings.js','tests/runtime_checks.cjs',
                              'tests/ui_refactor_checks.py','tools/browser_session.py',

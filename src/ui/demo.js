@@ -289,6 +289,8 @@ window.NXDemo = (() => {
     if(which==='banked-zero')state.accounts[0].banked_resets={available_count:0,items:[]};
     if(which==='banked-many'){const a=state.accounts[0];a.banked_resets={available_count:8,items:Array.from({length:8},(_,i)=>({...a.banked_resets.items[0],expires_at:sec()+(i+1)*86400,status:i===1?'redeeming':'available'}))};}
     if(which==='single-account')state.accounts=state.accounts.slice(0,1);
+    if(which==='three-accounts')state.accounts=state.accounts.slice(0,3);
+    if(which==='four-accounts')state.accounts=state.accounts.slice(0,4);
     if(which==='plan-types'){const plans=['pro','plus','free','go','business','enterprise','edu','unknown'];state.accounts=plans.map((plan,i)=>({...clone(state.accounts[i%4]),email:`plan-${i}@example.com`,alias:`${plan} 账号`,plan}));state.current=state.accounts[0].email;}
     if(which==='excluded-some')state.settings.auto_relay_excluded=[state.accounts[1].email,state.accounts[3].email];
     if(which==='excluded-all')state.settings.auto_relay_excluded=state.accounts.map(a=>a.email);

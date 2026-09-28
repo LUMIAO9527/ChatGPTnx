@@ -257,7 +257,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .current-card .quota-bars { gap:10px; }
 .roster { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-bottom: -4px; overflow: hidden; }
 
-.roster .account-list { flex: 1 1 auto; display: grid; grid-auto-rows: minmax(50px,1fr); align-content: stretch; gap: 4px; max-height: none; padding-bottom: 4px; margin-bottom: -4px; }
+.roster .account-list { flex: 1 1 auto; display: grid; grid-auto-rows: minmax(50px,max-content); align-content: start; gap: 4px; max-height: none; padding-bottom: 4px; margin-bottom: -4px; }
 
 /* The scroll viewport owns a real shadow gutter. Hover elevation therefore
    fades naturally instead of being cut by an invisible list boundary. */

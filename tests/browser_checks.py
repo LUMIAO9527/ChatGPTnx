@@ -59,9 +59,18 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('home/footer-compact',footer.offsetHeight<=40,footer.offsetHeight);
   check('home/add-button-near-panel-bottom',box('#app').bottom-box('.footer.slim .add').bottom<=8,
         box('#app').bottom-box('.footer.slim .add').bottom);
-  const lastVisibleRow=[...list.querySelectorAll('.row')].at(-1);
-  check('home/last-account-near-footer',box(footer).top-box(lastVisibleRow).bottom<=10,
-        [box(footer).top,box(lastVisibleRow).bottom,box(footer).top-box(lastVisibleRow).bottom]);
+  for(const [name,count] of [['three-accounts',1],['four-accounts',2]]){
+    await scenario(name);
+    list=document.querySelector('.account-list');footer=document.querySelector('.footer.slim');
+    const rows=[...list.querySelectorAll('.row')],head=box('.section-link');
+    const positions=rows.map(row=>box(row));
+    check(`home/${name}-rows-start-at-top`,rows.length===count&&
+          positions.every((row,i)=>row.height>=50&&row.height<=55&&
+            (i===0?row.top-head.bottom<=10:Math.abs(row.top-positions[i-1].bottom-4)<=1))&&
+          box(footer).top-positions.at(-1).bottom>20,
+          positions.map(row=>[row.top,row.height]));
+  }
+  await scenario('default');
   await scenario('week-exhausted-auto-off');
   check('home/weekly-limit-shows-disabled-auto-relay',document.querySelector('.notice[data-action="settings"]')?.textContent.includes('自动接力未开启'));
   await scenario('default');
