@@ -32,7 +32,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   const rootStyle=getComputedStyle(document.documentElement);
   check('design/window-and-surface-radius-r16',rootStyle.getPropertyValue('--radius-ui').trim()==='16px'&&rootStyle.getPropertyValue('--window-r').trim()==='16px',
         [rootStyle.getPropertyValue('--radius-ui'),rootStyle.getPropertyValue('--window-r')]);
-  check('window/live-frame-has-subtle-shadow',liveRule?.style.boxShadow.includes('3px')&&liveRule?.style.margin==='2px',liveRule?.style.boxShadow||'missing');
+  check('window/live-frame-has-no-shadow',liveRule?.style.boxShadow==='none'&&!liveRule?.style.margin,liveRule?.style.boxShadow||'missing');
   check('window/native-config-matches-css',window.NX_CONFIG.radius===16,window.NX_CONFIG.radius);
   const currentCardStyle=getComputedStyle(document.querySelector('.current-card'));
   const rowStyle=getComputedStyle(document.querySelector('.account-list .row'));
