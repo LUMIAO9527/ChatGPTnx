@@ -209,8 +209,8 @@ def dispatch_message(pipe, source, target, prompt, *, call_id):
         raise BridgeUncertain('invalid_dispatch_ack') from error
 
 
-def resume_existing(home, item, stop, log):
-    """Send once for a quota failure, without accessing the desktop editor."""
+def resume_existing(home, item, stop, log, *, interrupted=False):
+    """Send once for a quota failure or an interruption with no native Continue."""
     import hashlib
     from pathlib import Path
     from .desktop_resume import latest_turn, continuation_guard, observe_start, THREAD_ID
@@ -267,8 +267,9 @@ def resume_existing(home, item, stop, log):
         if turns[0].get('id') != item['turn_id']:
             return 'skipped', 'newer_turn'
         status = thread.get('status')
+        expected_status = 'interrupted' if interrupted else 'failed'
         if (not isinstance(status, dict) or status.get('type') not in ('idle', 'notLoaded')
-                or turns[0].get('status') != 'failed'):
+                or turns[0].get('status') != expected_status):
             return 'failed', 'desktop_task_not_idle'
         current = latest_turn(home, item['thread_id'])
         if not current:
@@ -276,7 +277,10 @@ def resume_existing(home, item, stop, log):
         if current['turn_id'] != item['turn_id']:
             return 'skipped', 'newer_turn'
         error = current.get('error')
-        if (current.get('status') != 'failed' or not isinstance(error, dict)
+        if interrupted:
+            if current.get('status') not in ('interrupted', 'inProgress'):
+                return 'failed', 'task_state_changed'
+        elif (current.get('status') != 'failed' or not isinstance(error, dict)
                 or error.get('codexErrorInfo') != 'usageLimitExceeded'):
             return 'failed', 'unrelated_failure'
         settings = read_settings()

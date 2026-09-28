@@ -332,8 +332,9 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('full/resume-keeps-home-frame',app.clientWidth===372&&app.clientHeight===520,
         [app.clientWidth,app.clientHeight]);
   check('resume/details-show-original-tasks',document.querySelectorAll('.resume-task').length===3&&document.querySelector('.resume-body')?.textContent.includes('研究任务 B'));
-  check('resume/each-task-one-line-progress', [...document.querySelectorAll('.resume-task')].every(row=>box(row).height<=42&&/^[01]\/1$/.test(row.querySelector('.resume-progress')?.textContent||''))&&
+  check('resume/each-task-shows-status', [...document.querySelectorAll('.resume-task')].every(row=>box(row).height<=42&&['成功','失败','已跳过','等待中','接续中'].includes(row.querySelector('.resume-progress')?.textContent||''))&&
         [...document.querySelectorAll('.resume-summary')].every(row=>box(row).height<=42));
+  check('resume/success-only-shows-success',document.querySelector('.resume-task .resume-progress')?.textContent==='成功'&&!document.querySelector('.resume-task .resume-task-copy small'));
   check('resume/in-progress-zero-is-not-failure-red',!document.querySelector('.resume-task .resume-zero'));
   const resumeScroll=stableScrollRegion(document.querySelector('.resume-body'));
   check('resume/scroll-keeps-width',resumeScroll.every(Boolean),resumeScroll);
@@ -343,7 +344,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('resume/waiting-account-banner',waitingNotice?.textContent.includes('等待可用接力账号 0/2'));
   waitingNotice.click();await wait(100);
   check('resume/waiting-task-rows-and-dismissible-expansion',document.querySelectorAll('.resume-task').length===2&&
-        [...document.querySelectorAll('.resume-task .resume-progress')].every(n=>n.textContent==='0/1'));
+        [...document.querySelectorAll('.resume-task .resume-progress')].every(n=>n.textContent==='等待中'));
   check('resume/waiting-shows-nearest-reset-time',document.querySelector('.resume-summary')?.textContent.includes('预计'));
   document.querySelector('.resume-summary').click();await wait(50);
   check('resume/waiting-group-collapses',document.querySelectorAll('.resume-task').length===0);
@@ -354,6 +355,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('resume/failure-banner-is-visible',failure?.textContent.includes('任务接续失败 1/3'));
   failure.click();await wait(100);
   check('resume/viewing-clears-banner-and-keeps-history',!window.NXDemo.state().resume&&document.querySelectorAll('.resume-task').length===3);
+  check('resume/failure-keeps-specific-reason',[...document.querySelectorAll('.resume-task')].some(row=>row.querySelector('.resume-progress')?.textContent==='失败'&&row.querySelector('.resume-task-copy small')?.textContent.includes('无法确认原任务页面')));
   document.querySelector('[data-action="back"]').click();await wait(80);
   await scenario('resume-history');
   document.querySelector('[data-action="settings"]').click();await wait(60);

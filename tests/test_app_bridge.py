@@ -45,13 +45,13 @@ class BridgeResumeTests(unittest.TestCase):
     def result(value):
         return {'success': True, 'contentItems': [{'type': 'inputText', 'text': json.dumps(value)}]}
 
-    def run_resume(self, replies=None, records=None):
+    def run_resume(self, replies=None, records=None, *, interrupted=False):
         self.pipe.request.side_effect = replies or [self.result(self.snapshot),
                                                    self.result({'threadId': '11111111-1111-4111-8111-111111111111'})]
         with patch('nx.app_bridge.discover', return_value=self.pipe), \
              patch('nx.desktop_location.canonical_task', side_effect=lambda home, key, **kwargs: self.SOURCE if key == self.SOURCE else self.canonical), \
              patch('nx.desktop_resume.latest_turn', side_effect=records, return_value=self.record):
-            return resume_existing(self.home, self.item, self.stop_mock, Mock())
+            return resume_existing(self.home, self.item, self.stop_mock, Mock(), interrupted=interrupted)
 
     def test_send_never_uses_editor_or_changes_message(self):
         result = self.run_resume(records=[self.record, {'turn_id': '55555555-5555-4555-8555-555555555555', 'status': 'inProgress', 'started_at': 1900000000}])
@@ -61,6 +61,21 @@ class BridgeResumeTests(unittest.TestCase):
         self.assertEqual(call.args[1]['threadId'], self.SOURCE)
         self.assertTrue(call.kwargs['side_effect'])
         self.pipe.close.assert_called_once()
+
+    def test_missing_native_button_sends_only_for_exact_interrupted_turn(self):
+        self.snapshot['turns'][0]['status'] = 'interrupted'
+        self.record = {'turn_id': self.item['turn_id'], 'status': 'interrupted', 'error': None}
+        result = self.run_resume(records=[self.record, {'turn_id': '55555555-5555-4555-8555-555555555555',
+                                                       'status': 'inProgress', 'started_at': 1900000000}],
+                                 interrupted=True)
+        self.assertEqual(result, ('done', 'new_turn_observed'))
+        self.assertEqual(self.pipe.request.call_count, 2)
+
+    def test_interrupted_fallback_rejects_running_task(self):
+        self.snapshot['turns'][0]['status'] = 'inProgress'
+        self.record = {'turn_id': self.item['turn_id'], 'status': 'interrupted', 'error': None}
+        self.assertEqual(self.run_resume(interrupted=True), ('failed', 'desktop_task_not_idle'))
+        self.assertEqual(self.pipe.request.call_count, 1)
 
     def test_runtime_thread_id_maps_to_canonical_bridge_target(self):
         self.item['thread_id'] = '22222222-2222-4222-8222-222222222222'

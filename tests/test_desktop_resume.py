@@ -122,6 +122,34 @@ class DesktopResumeTests(unittest.TestCase):
         run.assert_called_once()
         self.assertEqual(result,('done','new_turn_observed'))
 
+    def test_missing_native_continue_uses_guarded_bridge_fallback(self):
+        self.add_turn(self.FAILED, 'interrupted', 1)
+        (self.home / 'settings.json').write_text('{}')
+        item = {'thread_id': self.THREAD, 'turn_id': self.FAILED,
+                'settings_file': str(self.home / 'settings.json')}
+        with patch('nx.desktop_location.locate_task', return_value=('located', 'task_opened_by_id')), \
+             patch('nx.desktop_resume._invoke', return_value=Mock(
+                stdout='skip:native_continue_unavailable\n', returncode=2)), \
+             patch('nx.app_bridge.resume_existing', return_value=('done', 'new_turn_observed')) as bridge:
+            result = attempt_continuation(self.home, self.home / 'helper.ps1', item,
+                                          threading.Event(), Mock())
+        self.assertEqual(result, ('done', 'new_turn_observed'))
+        self.assertTrue(bridge.call_args.kwargs['interrupted'])
+
+    def test_uncertain_native_action_never_uses_bridge_fallback(self):
+        self.add_turn(self.FAILED, 'interrupted', 1)
+        (self.home / 'settings.json').write_text('{}')
+        item = {'thread_id': self.THREAD, 'turn_id': self.FAILED,
+                'settings_file': str(self.home / 'settings.json')}
+        with patch('nx.desktop_location.locate_task', return_value=('located', 'task_opened_by_id')), \
+             patch('nx.desktop_resume._invoke', return_value=Mock(
+                stdout='uncertain:native_continue\n', returncode=2)), \
+             patch('nx.app_bridge.resume_existing') as bridge:
+            result = attempt_continuation(self.home, self.home / 'helper.ps1', item,
+                                          threading.Event(), Mock())
+        self.assertEqual(result, ('failed', 'action_outcome_unknown'))
+        bridge.assert_not_called()
+
     def test_pre_switch_active_snapshot_does_not_prove_interruption(self):
         self.add_turn(self.FAILED, 'inProgress', 1)
         event = {'thread_id': self.THREAD, 'turn_id': self.FAILED, 'was_active': True}

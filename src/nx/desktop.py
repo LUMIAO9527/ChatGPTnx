@@ -514,10 +514,10 @@ class Desktop:
     def _apply_native_shape(self):
         """Give the frameless WebView a real Windows window shape.
 
-        CSS border-radius only rounds the page; the HWND remains rectangular and
-        exposes WebView's background in the four corners.  DWM supplies the
-        smooth Win11 corner/shadow and SetWindowRgn is the hard clip fallback
-        (also fixes Win10 and frameless cases where DWM does not infer corners).
+        CSS border-radius only rounds the page; the HWND remains rectangular.
+        Preserve the WebView's alpha in DWM's redirection bitmap so pixels
+        outside the corner reveal the actual desktop background. SetWindowRgn
+        remains the hard clip fallback where DWM does not infer corners.
         Radius is scaled from logical CSS px to the window DPI.
         """
         try:
@@ -548,6 +548,9 @@ class Desktop:
             border_color = ctypes.c_uint(0xFFFFFFFE)  # DWMWA_COLOR_NONE
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 hwnd, 34, ctypes.byref(border_color), ctypes.sizeof(border_color))
+            redirection_alpha = ctypes.c_int(1)  # DWMWA_REDIRECTIONBITMAP_ALPHA
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 38, ctypes.byref(redirection_alpha), ctypes.sizeof(redirection_alpha))
         except Exception:
             pass
         try:

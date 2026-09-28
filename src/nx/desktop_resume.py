@@ -294,6 +294,12 @@ def attempt_continuation(home, script, item, stop, log):
             return observe_start(home, item, stop, expected_auth=before, allow_same_turn=True)
         if label == 'skip:task_already_running':
             return 'skipped', 'task_already_running'
+        if label == 'skip:native_continue_unavailable' and result.returncode == 2 and item.get('settings_file'):
+            # The desktop can show an interrupted task without a Continue button.
+            # UIA has made no submission; recheck the exact turn and account in
+            # the bridge before sending the configured continuation message once.
+            from .app_bridge import resume_existing
+            return resume_existing(home, item, stop, log, interrupted=True)
         if label.startswith('skip:') and result.returncode == 2:
             return 'failed', label[5:]
         return 'failed', 'action_outcome_unknown'

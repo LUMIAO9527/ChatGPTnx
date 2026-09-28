@@ -231,17 +231,17 @@ class ContinuationContractTests(unittest.TestCase):
         self.assertEqual(result, ('failed', 'invalid_task_id'))
         discover.assert_not_called(); native.assert_not_called()
 
-    def test_interrupted_task_never_enters_bridge_sender(self):
+    def test_interrupted_task_uses_bridge_only_when_native_button_is_missing(self):
         with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
             db.execute("UPDATE thread_turns SET status='interrupted'")
         db.close()
         with patch('nx.desktop_location.locate_task', return_value=('located', 'task_opened_by_id')), \
-             patch('nx.app_bridge.resume_existing') as send, patch('nx.desktop_resume._invoke',
+             patch('nx.app_bridge.resume_existing', return_value=('done', 'new_turn_observed')) as send, patch('nx.desktop_resume._invoke',
                 return_value=Mock(stdout='skip:native_continue_unavailable', returncode=2)) as native:
             result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
                                           self.item, self.stop, self.log)
-        self.assertEqual(result, ('failed', 'native_continue_unavailable'))
-        send.assert_not_called(); native.assert_called_once()
+        self.assertEqual(result, ('done', 'new_turn_observed'))
+        self.assertTrue(send.call_args.kwargs['interrupted']); native.assert_called_once()
 
     def test_bridge_unavailable_never_falls_back_to_native(self):
         with patch('nx.app_bridge.discover', side_effect=app_bridge.BridgeUnavailable()), \
