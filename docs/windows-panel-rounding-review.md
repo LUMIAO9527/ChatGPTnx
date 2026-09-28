@@ -17,10 +17,10 @@
 - Windows 11 build 26200、真实 WebView2：使用与产品相同的 CSS 和 `Desktop._apply_native_shape()`，在面板显示前设置 DWM 圆角。浅色和暗色面板分别置于蓝色 `#305bce`、浅灰色 `#e7ebef` 窗口前；四角最外侧采样像素均与后景一致，弧边有 8–10 种混合颜色。截图与测试代码位于本次隔离工作区 `_wip/AUTO_20260928native-review/`。
 - `tools/verify_windows.ps1`：PowerShell 解析、合成接续检查、资源构建和 443 项 Python 测试通过。原生面板单组 34 项通过。
 - Edge 浏览器界面检查 130 项通过；它不代表原生窗口视觉验收。
-- 隔离副本能够打包为 `ChatGPTnx.exe`。最终实际 NX 窗口和 GitHub 发布验收结果应在部署后另行核对。
+- 实际 NX EXE：在 Windows 11 build 26200、168 DPI 的窗口上读取到 DWM 圆角属性 33=2、系统背景属性 38=1，且没有窗口区域。面板前方保持可见时，在深灰色无焦点背景窗上四角最外侧像素与背景一致，弧边有 10 种混合颜色；四条直边外侧采样未见额外阴影。首轮硬裁剪版本被用户指出锯齿后停止发布，随后换成了这版 DWM 圆角。
 
 ## 尚未验证
 
-Windows 10、其他 Windows 11 构建、其他 DPI/显示器组合，以及真实账号切换和任务接续尚未做端到端验收。本机视觉测试只使用合成内容，没有触碰账号或运行数据。
+Windows 10、其他 Windows 11 构建、其他 DPI/显示器组合，以及真实账号切换和任务接续尚未做端到端验收。圆角视觉测试使用真实 NX 窗口和不含账号内容的角部截图，没有发起切号。
 
 参考：[微软 DWM 圆角说明](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-rounded-corners)、[DWM 属性](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)、[DWM 系统背景类型](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwm_systembackdrop_type)、[SetWindowRgn](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowrgn)。

@@ -16,6 +16,9 @@ def inspect_panel() -> dict:
         raise RuntimeError('Windows is required')
     user = ctypes.WinDLL('user32', use_last_error=True)
     gdi = ctypes.WinDLL('gdi32', use_last_error=True)
+    user.SetProcessDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+    user.SetProcessDpiAwarenessContext.restype = wt.BOOL
+    user.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))  # Per-monitor V2
     user.FindWindowW.argtypes = [wt.LPCWSTR, wt.LPCWSTR]
     user.FindWindowW.restype = wt.HWND
     user.IsWindowVisible.argtypes = [wt.HWND]
@@ -59,7 +62,8 @@ def inspect_panel() -> dict:
                                                    ctypes.c_void_p, wt.DWORD]
             dwm.DwmGetWindowAttribute.restype = ctypes.c_long
             values = {}
-            for attr in (33, 34, 38):
+            # BORDER_COLOR (34) is set-only on this Windows build.
+            for attr in (33, 38):
                 value = ctypes.c_uint()
                 result = dwm.DwmGetWindowAttribute(
                     hwnd, attr, ctypes.byref(value), ctypes.sizeof(value))
@@ -69,7 +73,7 @@ def inspect_panel() -> dict:
             details['dwm_attributes'] = values
             details['no_window_region'] = region_kind == 0
             details['native_corner_check'] = (
-                values == {33: 2, 34: 0xFFFFFFFE, 38: 1} and region_kind == 0)
+                values == {33: 2, 38: 1} and region_kind == 0)
         else:
             if region_kind == 0:
                 raise RuntimeError('No queryable window region')
