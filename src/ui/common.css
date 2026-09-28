@@ -2,11 +2,11 @@
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
 /*
-  The native HWND is clipped to the same outer radius in desktop.py. Keeping the WebView
-  root transparent prevents a rectangular black/white backing surface from
-  leaking through if Edge paints one frame before the native region is applied.
+  desktop.py owns the live window outline through SetWindowRgn. Paint the
+  whole WebView surface so transparent CSS pixels never expose its fixed
+  startup background. Browser demos keep their CSS-rounded outline.
 */
-body.live { background: transparent; }
+body.live { background: var(--bg); }
 body.demo { min-height: 100vh; padding: 24px; display: grid; place-items: center; background: var(--surface-2); }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -37,7 +37,7 @@ button:disabled { cursor: not-allowed; opacity: .46; box-shadow: none; }
 .icon { width: 19px; height: 19px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 #app { width: 372px; height: 520px; position: relative; overflow: hidden; background: var(--bg); border-radius: var(--window-r);
   box-shadow: var(--shadow-window); isolation: isolate; }
-body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-shadow: none; border-radius: var(--window-r); overflow: hidden; }
+body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-shadow: none; border-radius: 0; overflow: hidden; }
 #home, .sheet { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 #home { padding: 14px 16px 6px; gap: 10px; }
 .header { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; min-height: var(--height-control); }

@@ -531,7 +531,10 @@ class Desktop:
 
     def _physical_size(self, hwnd):
         width, height = self.config['sizes'].get(self.view, self.config['sizes']['home'])
-        dpi = int(ctypes.windll.user32.GetDpiForWindow(hwnd) or 96)
+        user32 = ctypes.windll.user32
+        user32.GetDpiForWindow.argtypes = [ctypes.c_void_p]
+        user32.GetDpiForWindow.restype = wt.UINT
+        dpi = int(user32.GetDpiForWindow(hwnd) or 96)
         return round(width * dpi / 96), round(height * dpi / 96)
 
     def _apply_layout(self):
@@ -540,70 +543,79 @@ class Desktop:
             return
         width, height = self._physical_size(hwnd)
         self._place_at_tray(width, height)
-        self._apply_native_shape()
+        if not self._apply_native_shape():
+            self.hide(reason='shape')
 
     def _apply_native_shape(self):
-        """Give the frameless WebView a real Windows window shape.
+        """Clip the whole HWND, including its WebView2 child, with one region.
 
-        CSS border-radius only rounds the page; the HWND remains rectangular.
-        Preserve the WebView's alpha in DWM's redirection bitmap so pixels
-        outside the corner reveal the actual desktop background. SetWindowRgn
-        remains the hard clip fallback where DWM does not infer corners.
-        Radius is scaled from logical CSS px to the window DPI.
+        Pixels outside the region are not part of this window. WebView2 draws
+        an opaque page inside it. Disable DWM's system backdrop so that no
+        frame remains visible outside the region. Keep the existing 16-DIP
+        radius and shadow=False.
         """
+        region = None
+        stage = 'bind'
         try:
             user32 = ctypes.windll.user32
             gdi32 = ctypes.windll.gdi32
-            # ctypes defaults to 32-bit int return values. HWND/HRGN are pointer
-            # sized, so leaving the defaults here can truncate handles on x64
-            # Windows and produce the exact rectangular/black-corner artefact.
-            user32.FindWindowW.restype = ctypes.c_void_p
-            user32.FindWindowW.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p]
             user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.RECT)]
-            user32.GetWindowRect.restype = ctypes.c_bool
-            user32.SetWindowRgn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
+            user32.GetWindowRect.restype = wt.BOOL
+            user32.GetDpiForWindow.argtypes = [ctypes.c_void_p]
+            user32.GetDpiForWindow.restype = wt.UINT
+            user32.SetWindowRgn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wt.BOOL]
             user32.SetWindowRgn.restype = ctypes.c_int
             gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_int] * 6
             gdi32.CreateRoundRectRgn.restype = ctypes.c_void_p
             gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
-            gdi32.DeleteObject.restype = ctypes.c_bool
-            hwnd = user32.FindWindowW(None, 'ChatGPTnx')
-        except Exception:
-            return
-        if not hwnd:
-            return
-        try:
-            preference = ctypes.c_int(2)  # DWMWCP_ROUND
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 33, ctypes.byref(preference), ctypes.sizeof(preference))
-            border_color = ctypes.c_uint(0xFFFFFFFE)  # DWMWA_COLOR_NONE
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 34, ctypes.byref(border_color), ctypes.sizeof(border_color))
-            redirection_alpha = ctypes.c_int(1)  # DWMWA_REDIRECTIONBITMAP_ALPHA
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 38, ctypes.byref(redirection_alpha), ctypes.sizeof(redirection_alpha))
-        except Exception:
-            pass
-        try:
+            gdi32.DeleteObject.restype = wt.BOOL
+            hwnd = _find_hwnd()
+            if not hwnd:
+                return False
+            # DWMWA_SYSTEMBACKDROP_TYPE=38, DWMSBT_NONE=1 (Windows 11).
+            # Older Windows versions may not support this attribute.
+            try:
+                dwm = ctypes.windll.dwmapi
+                dwm.DwmSetWindowAttribute.argtypes = [ctypes.c_void_p, wt.DWORD,
+                                                       ctypes.c_void_p, wt.DWORD]
+                dwm.DwmSetWindowAttribute.restype = ctypes.c_long
+                backdrop = ctypes.c_int(1)
+                result = dwm.DwmSetWindowAttribute(hwnd, 38, ctypes.byref(backdrop),
+                                                    ctypes.sizeof(backdrop))
+                if result:
+                    self.service.log.warning('window_backdrop_disable_failed hresult=%#x',
+                                             result & 0xFFFFFFFF)
+            except (AttributeError, OSError) as error:
+                self.service.log.warning('window_backdrop_disable_failed type=%s',
+                                         type(error).__name__)
+            stage = 'GetWindowRect'
             rect = wt.RECT()
             if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
-                return
-            dpi = 96
-            try:
-                value = int(user32.GetDpiForWindow(hwnd) or 96)
-                dpi = value if value > 0 else 96
-            except Exception:
-                pass
-            radius = max(1, round(float(self.config.get('radius', 16)) * dpi / 96))
+                raise OSError
             width, height = rect.right - rect.left, rect.bottom - rect.top
+            if width <= 0 or height <= 0:
+                return False
+            stage = 'GetDpiForWindow'
+            dpi = int(user32.GetDpiForWindow(hwnd) or 96)
+            radius = max(1, round(float(self.config.get('radius', 16)) * dpi / 96))
+            stage = 'CreateRoundRectRgn'
             region = gdi32.CreateRoundRectRgn(0, 0, width + 1, height + 1,
                                                radius * 2, radius * 2)
-            if region:
-                # Windows owns the region after a successful SetWindowRgn call.
-                if not user32.SetWindowRgn(hwnd, region, True):
-                    gdi32.DeleteObject(region)
+            if not region:
+                raise OSError
+            stage = 'SetWindowRgn'
+            if not user32.SetWindowRgn(hwnd, region, True):
+                raise OSError
+            # Ownership transfers only on success. Never delete that handle.
+            region = None
+            return True
         except Exception as error:
-            self.service.log.warning('window_shape failed: %s', type(error).__name__)
+            self.service.log.warning('window_shape_failed stage=%s type=%s',
+                                     stage, type(error).__name__)
+            return False
+        finally:
+            if region:
+                gdi32.DeleteObject(region)
 
     def _remove_from_taskbar(self):
         """The panel belongs to the tray icon: no taskbar button, no Alt+Tab.
@@ -631,6 +643,10 @@ class Desktop:
         user32 = ctypes.windll.user32
         user32.MonitorFromRect.argtypes = [ctypes.POINTER(wt.RECT), wt.DWORD]
         user32.MonitorFromRect.restype = ctypes.c_void_p
+        user32.MonitorFromPoint.argtypes = [wt.POINT, wt.DWORD]
+        user32.MonitorFromPoint.restype = ctypes.c_void_p
+        user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.POINTER(MonitorInfo)]
+        user32.GetMonitorInfoW.restype = wt.BOOL
         hmon = None
         if icon_rect:
             box = wt.RECT(icon_rect[0], icon_rect[1], icon_rect[2], icon_rect[3])
@@ -668,7 +684,13 @@ class Desktop:
                        info.rcMonitor.right, info.rcMonitor.bottom)
             x, y = popup_position(icon, work, monitor, (width, height))
             flags = 0x0004 | 0x0010  # NOZORDER | NOACTIVATE
-            ctypes.windll.user32.SetWindowPos(hwnd, 0, x, y, width, height, flags)
+            user32 = ctypes.windll.user32
+            user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                            ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                            ctypes.c_int, wt.UINT]
+            user32.SetWindowPos.restype = wt.BOOL
+            if not user32.SetWindowPos(hwnd, 0, x, y, width, height, flags):
+                self.service.log.warning('panel_position_failed')
         except Exception:
             pass
 
@@ -676,7 +698,7 @@ class Desktop:
         """Apply the no-taskbar style and native shape. Win32-only, so it is
         safe from any thread (never touches the .NET Form object)."""
         self._remove_from_taskbar()
-        self._apply_native_shape()
+        return self._apply_native_shape()
 
     def _style_at_birth(self):
         """Root fix for the blank-taskbar-window bug: the panel HWND is born
@@ -688,8 +710,7 @@ class Desktop:
             if self.closing:
                 return
             hwnd = _find_hwnd()
-            if hwnd:
-                self._style_window()
+            if hwnd and self._style_window():
                 self.service.log.info('panel_style_set_at_birth')
                 return
             time.sleep(0.1)
@@ -725,7 +746,7 @@ class Desktop:
                 return
         if reason in ('user', 'blur', 'focus', 'complete'):
             self._relay_restore = None
-        if not self.window or not self.visible:
+        if not self.window or (not self.visible and reason != 'repair'):
             return
         self.visible = False
         self._shown_at = 0.0
@@ -798,11 +819,27 @@ class Desktop:
                 self._relay_pinned = False
             width, height = self._physical_size(hwnd)
             self._place_at_tray(width, height)
-            self._apply_native_shape()
+            if not self._apply_native_shape():
+                self.hide(reason='shape')
+                if relay_operation_id:
+                    self._retry_relay_restore(relay_operation_id)
+                return
             form.Show()
+            # A recreated HWND does not inherit the old window's region.
+            shown_hwnd = _find_hwnd()
+            if shown_hwnd != hwnd:
+                if not shown_hwnd or not self._apply_native_shape():
+                    self.hide(reason='shape')
+                    if relay_operation_id:
+                        self._retry_relay_restore(relay_operation_id)
+                    return
+                hwnd = shown_hwnd
             form.Activate()
             self._post_script(script)
-            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            user32 = ctypes.windll.user32
+            user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+            user32.SetForegroundWindow.restype = wt.BOOL
+            user32.SetForegroundWindow(hwnd)
             if relay_operation_id:
                 # Show() may recreate the HWND; pin the current visible handle.
                 hwnd = _find_hwnd() or hwnd
@@ -942,7 +979,10 @@ class Desktop:
             pt.x = (icon_rect[0] + icon_rect[2]) // 2
             pt.y = (icon_rect[1] + icon_rect[3]) // 2
         if icon_rect or ctypes.windll.user32.GetCursorPos(ctypes.byref(pt)):
-            monitor = ctypes.windll.user32.MonitorFromPoint(pt, 2)
+            user32 = ctypes.windll.user32
+            user32.MonitorFromPoint.argtypes = [wt.POINT, wt.DWORD]
+            user32.MonitorFromPoint.restype = ctypes.c_void_p
+            monitor = user32.MonitorFromPoint(pt, 2)
             self.tray_monitor = monitor or None
         if self.visible:
             self.hide()
@@ -1065,7 +1105,7 @@ class Desktop:
         self.window = webview.create_window('ChatGPTnx', html=panel, js_api=Bridge(self.service, self),
                                             width=size[0], height=size[1], min_size=(300, 96),
                                             frameless=True, easy_drag=False, shadow=False,
-                                            hidden=True, resizable=False,
+                                            hidden=True, resizable=False, transparent=False,
                                             on_top=True,
                                             background_color=background)
         self.window.events.closing += self.on_closing
