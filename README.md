@@ -1,66 +1,68 @@
+**简体中文** | [English](README.en.md)
+
 <div align="center">
 <img src="docs/images/nx-mark.png" width="88" alt="ChatGPTnx">
 <h1>ChatGPTnx</h1>
-<p><b>Automatic handoff · Task continuation · Configure n accounts for your workload</b></p>
-<p>Keep a long task moving across the accounts you own. Switch accounts when quota runs out, then attempt to continue the original task.</p>
+<p><b>自动接力 · 任务接续 · 按用量配置 n×</b></p>
+<p>用 n 个 Plus 账号，接力推进一个长任务。自动切号，继续原任务。</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
 <img src="docs/images/badges/version.svg" alt="v1.0.0" height="20">
-<img src="docs/images/badges/license.svg" alt="Source available to inspect; rights reserved" height="20">
+<img src="docs/images/badges/license.svg" alt="源码可查看 · 保留权利" height="20">
 </div>
 
-ChatGPTnx is a lightweight Windows desktop utility that reduces the waiting and manual steps when a long task is interrupted by an account's usage limit. It brings account handoff, task continuation, quota information, and usage statistics into one tray app.
+ChatGPTnx 是一款轻量的 Windows 桌面工具，通过多账号自动接力与任务接续，减少长任务因额度耗尽而中断后的等待和手动操作。
 
-## Features
+## 功能
 
-- **Automatic handoff:** Switch to a participating account with available quota when the current account runs out. You can also switch manually and choose which accounts join the rotation.
-- **Task continuation:** After a switch, attempt to resume the original desktop task. You can configure a continuation message and review the result for each task.
-- **Quotas and usage:** See each account's remaining quota, reset times, and token usage to plan the next handoff and decide how many accounts to configure.
-- **Lightweight desktop controls:** Keep the app in the Windows tray, with notifications, keyboard shortcuts, and light and dark themes.
+- **自动接力**：额度耗尽时切换到有可用额度的参与账号，支持手动接力和自定义参与账号。
+- **任务接续**：切换账号后接续原桌面任务，支持自定义接续消息和查看接续记录。
+- **额度与用量**：集中查看各账号的剩余额度、重置时间和 Token 用量，为接力安排和账号数量配置提供参考。
+- **轻量化**：常驻 Windows 托盘，面板用完即收起，支持通知、快捷键和深浅外观。
 
-### Keeping long tasks moving
+### 持续任务能力
 
-Automatic handoff and task continuation are separate settings. When the current account reaches its limit, handoff switches to an eligible account. Continuation then checks the original desktop task and attempts to resume it there. Continuation depends on the task's state and may wait or report a failure; it cannot guarantee that every task will resume.
+ChatGPTnx 的核心，是让多个 Plus 账号接力推进同一个长任务。当前账号额度耗尽时，**自动接力**切换到下一个可用账号，**任务接续**随后继续原桌面任务，减少手动切号和重新接续的操作。
 
-**n is the number of your own accounts you choose to configure for your workload.** Start with a few and adjust the participating accounts as your usage changes. For example, five Plus accounts can take turns in a rotation so a long task spends less time waiting for one account's quota to reset.
+**n× 代表可以按实际用量自由配置的账号数量。** 你可以从少量账号开始，根据任务强度和使用频率增加账号，或调整参与接力的账号。例如，配置 5 个 Plus 账号，就可以让它们轮流参与接力，让长任务更少因单个账号的额度限制而停下来等待。
 
-The quota overview and usage statistics help you see which account is available and how much capacity you actually use.
+自动接力和任务接续共同提供持续任务能力；额度总览、用量统计与轻量桌面操作为它们提供配套支持，让你看清可用额度、判断实际用量，并更方便地安排下一棒。
 
-## Screenshots
+## 界面
 
-### Account handoff and task continuation
+### 账号接力与任务接续
 
-| Home · Current account and next handoff | Account handoff · Confirm the next account | Task continuation · Review results |
+| 首页 · 当前账号与下一棒 | 账号接力 · 确认下一棒 | 任务接续 · 查看记录 |
 | --- | --- | --- |
-| <img src="docs/images/home-live.png" width="260" alt="Home: current account, remaining quota, and next handoff"> | <img src="docs/images/relay-confirm-live.png" width="260" alt="Confirm the next account and start handoff"> | <img src="docs/images/resume-live.png" width="260" alt="Task continuation records"> |
+| <img src="docs/images/home-live.png" width="260" alt="首页：当前账号、剩余额度与下一棒"> | <img src="docs/images/relay-confirm-live.png" width="260" alt="账号接力：确认下一棒并开始接力"> | <img src="docs/images/resume-live.png" width="260" alt="任务接续记录"> |
 
-### Quotas and usage
+### 额度与用量
 
-| Quota overview | Personal usage | Account details |
+| 额度总览 | 个人用量 | 账号详情 |
 | --- | --- | --- |
-| <img src="docs/images/quota-live.png" width="260" alt="Quota overview for all accounts"> | <img src="docs/images/usage-live.png" width="260" alt="Personal token usage and trends"> | <img src="docs/images/detail-live.png" width="260" alt="Account details"> |
+| <img src="docs/images/quota-live.png" width="260" alt="各账号额度总览"> | <img src="docs/images/usage-live.png" width="260" alt="个人 Token 用量与趋势"> | <img src="docs/images/detail-live.png" width="260" alt="账号详情"> |
 
-### Settings and appearance
+### 设置与外观
 
-| Settings | Dark theme | Add an account |
+| 设置 | 深色外观 | 添加账号 |
 | --- | --- | --- |
-| <img src="docs/images/settings-live.png" width="260" alt="Settings for handoff and task continuation"> | <img src="docs/images/home-dark-current.png" width="260" alt="Home screen in dark theme"> | <img src="docs/images/add-account-live.png" width="260" alt="Add an account: open the desktop sign-in window and confirm the account"> |
+| <img src="docs/images/settings-live.png" width="260" alt="设置：接力与任务接续"> | <img src="docs/images/home-dark-current.png" width="260" alt="首页深色外观"> | <img src="docs/images/add-account-live.png" width="260" alt="添加账号：打开桌面登录窗口并确认保存"> |
 
-## Download and run
+## 下载与运行
 
-Download `ChatGPTnx.exe` from the [v1.0.0 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.0). The release also provides `ChatGPTnx-v1.0.0-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, and Microsoft Edge WebView2 Runtime.
+从 [v1.0.0 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.0) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.0.0-source.zip`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用，以及 Microsoft Edge WebView2 Runtime。
 
-1. Put the EXE in its own writable folder and launch it. Open the panel from the system tray.
-2. Select **Add account** and follow the prompt to open the desktop sign-in window. After signing in to an account you own, return to the panel and confirm the account to save it.
-3. Try one manual handoff with **Next account**. Then enable automatic handoff in Settings and choose the participating accounts.
-4. Enable **Automatically continue tasks after switching accounts** if you want task continuation. Configure a continuation message if needed, and check the task continuation records for results.
+1. 将 EXE 放入独立、可写的目录后启动，从托盘打开面板。
+2. 点击“添加账号”，按提示打开桌面登录窗口；登录新账号后，回到面板确认保存。
+3. 先用“下一棒”完成一次手动接力，再在设置中开启自动接力并选择参与账号。
+4. 开启“切号后自动接续任务”，根据需要配置接续消息；在任务接续记录中查看结果。
 
-Closing the panel only hides it; the app keeps running in the tray. Use the tray menu to exit completely.
+关闭面板只是收起界面，程序仍在托盘运行；需要完全退出时，使用托盘菜单。
 
-## Data and privacy
+## 数据与隐私
 
-Account and runtime data are stored next to the EXE. Keep that folder private and do not upload it publicly. Before reporting an issue, remove email addresses, tokens, task information, and local file paths.
+账号与运行数据保存在程序所在目录，请妥善保管，勿公开上传。反馈问题时请移除邮箱、令牌、任务信息和本机路径。
 
-## License
+## 授权
 
-The source is available to inspect. Use and redistribution are governed by the [LICENSE](LICENSE); all rights are reserved. ChatGPTnx is an independent tool and is not affiliated with or endorsed by OpenAI.
+源码可下载查看，使用与授权条款见 [LICENSE](LICENSE)。本项目与 OpenAI 没有隶属或认可关系。
