@@ -14,6 +14,7 @@ THREAD_ID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 
 
 from .history_store import latest_database, read_only as _read_only
+from .resume_policy import message_resume_eligible, turn_failure_reason
 from .storage import fingerprint
 
 
@@ -201,13 +202,9 @@ def observe_start(home, item, stop, *, expected_auth, expected_turn=None,
                 return 'failed', 'action_outcome_unknown'
             if matches_ack and (is_new or allow_same_turn):
                 status = after.get('status')
-                if is_new and status == 'failed':
+                if status == 'failed':
                     item['observed_turn_id'] = new_id
-                    error = after.get('error')
-                    message = str(error.get('message', '')) if isinstance(error, dict) else ''
-                    reason = ('resume_auth_failed' if '401' in message or
-                              'unauthorized' in message.lower() else 'resumed_turn_failed')
-                    return 'failed', reason
+                    return 'failed', turn_failure_reason(after.get('error'))
                 if (status in ('inProgress', 'completed') and
                         number(after.get('started_at')) and after['started_at'] > 0):
                     item['observed_turn_id'] = new_id
@@ -217,31 +214,48 @@ def observe_start(home, item, stop, *, expected_auth, expected_turn=None,
     return 'failed', 'start_not_observed'
 
 
+def continuation_route(record, turn_id):
+    """Choose one action from the exact queued turn ID and its current state."""
+    if not record:
+        return None, ('failed', 'history_unavailable')
+    if record['turn_id'] != turn_id:
+        return None, ('skipped', 'newer_turn')
+    status = record['status']
+    if status == 'failed':
+        if message_resume_eligible(record.get('error')):
+            return 'message', None
+        return None, ('failed', 'unrelated_failure')
+    if status in ('interrupted', 'inProgress'):
+        return 'native', None
+    return None, ('skipped', 'task_no_longer_needs_resume')
+
+
 def attempt_continuation(home, script, item, stop, log):
-    """Exactly two routes: native Continue OR one bridge message, never both."""
+    """Dispatch by ID and state; never run both actions for one queued turn."""
     thread_id, turn_id = item.get('thread_id'), item.get('turn_id')
     if stop.is_set():
         return 'failed', 'shutting_down'
     if not all(THREAD_ID.fullmatch(str(v)) for v in (thread_id, turn_id)):
         return 'failed', 'invalid_task_id'
     record = latest_turn(home, thread_id)
-    if not record:
-        return 'failed', 'history_unavailable'
-    if record['turn_id'] != turn_id:
-        return 'skipped', 'newer_turn'
-    status = record['status']
-    if status == 'failed':
-        error = record.get('error')
-        if not isinstance(error, dict) or error.get('codexErrorInfo') != 'usageLimitExceeded':
-            return 'failed', 'unrelated_failure'
+    route, outcome = continuation_route(record, turn_id)
+    if outcome:
+        return outcome
+    if route == 'message':
         if not item.get('settings_file'):
             return 'failed', 'account_guard_unavailable'
         from .app_bridge import resume_existing
         return resume_existing(home, item, stop, log)
-    stale_index = status == 'inProgress'
-    if status in ('inProgress', 'interrupted') and item.get('settings_file'):
+    return _resume_interrupted(home, script, item, stop, log,
+                               stale_index=record['status'] == 'inProgress')
+
+
+def _resume_interrupted(home, script, item, stop, log, *, stale_index):
+    """Open the exact interrupted task, then click its native Continue once."""
+    thread_id, turn_id = item['thread_id'], item['turn_id']
+    if item.get('settings_file'):
         # The local index can lag the desktop after a switch. Confirm the exact
-        # interrupted turn and open it; never send a message for this case.
+        # interrupted turn and open it before trying native Continue.
         from .desktop_location import locate_task
         located, reason = locate_task(home, thread_id, item['settings_file'],
                                       expected_turn=turn_id, stop=stop,
@@ -250,8 +264,6 @@ def attempt_continuation(home, script, item, stop, log):
             return located, reason
     elif stale_index:
         return 'failed', 'desktop_task_not_idle'
-    if not stale_index and status != 'interrupted':
-        return 'skipped', 'task_no_longer_needs_resume'
     before, reason = continuation_guard(home, item)
     if not before:
         return 'failed', reason

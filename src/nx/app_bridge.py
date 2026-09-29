@@ -117,17 +117,42 @@ def candidates():
 def discover(required=None):
     required = required or {'send_message_to_thread': {'threadId', 'prompt'},
                             'read_thread': {'threadId'}}
+    paths = candidates()
+
+    def compatible(pipe):
+        result = pipe.request('tools/list', {'threadStartKind': 'all'})
+        catalog = {t.get('name'): t for t in result.get('tools', [])
+                   if isinstance(t, dict) and t.get('namespace') == 'codex_app'}
+        return all(fields <= catalog.get(name, {}).get('inputSchema', {}).get('properties', {}).keys()
+                   for name, fields in required.items())
+
+    # The inherited endpoint belongs to the current desktop executor.  If it
+    # advertises the required tools, use it immediately; stale helper pipes
+    # from another window must not turn a valid current endpoint into a false
+    # ambiguity.
+    inherited = os.environ.get('CODEX_APP_TOOLS_PIPE_PATH', '')
+    if paths and paths[0] == inherited:
+        pipe = None
+        try:
+            pipe = Pipe(inherited, timeout=.6)
+            if compatible(pipe):
+                pipe.timeout = 20
+                selected, pipe = pipe, None
+                return selected
+        except Exception:
+            pass
+        finally:
+            if pipe:
+                pipe.close()
+        paths = paths[1:]
+
     selected = None
     try:
-        for path in candidates():
+        for path in paths:
             pipe = None
             try:
                 pipe = Pipe(path, timeout=.6)
-                result = pipe.request('tools/list', {'threadStartKind': 'all'})
-                catalog = {t.get('name'): t for t in result.get('tools', [])
-                           if isinstance(t, dict) and t.get('namespace') == 'codex_app'}
-                if all(fields <= catalog.get(name, {}).get('inputSchema', {}).get('properties', {}).keys()
-                       for name, fields in required.items()):
+                if compatible(pipe):
                     if selected is not None:
                         raise BridgeUnavailable('desktop_bridge_ambiguous')
                     pipe.timeout = 20
@@ -210,11 +235,12 @@ def dispatch_message(pipe, source, target, prompt, *, call_id):
 
 
 def resume_existing(home, item, stop, log, *, interrupted=False):
-    """Send once for a quota failure or an interruption with no native Continue."""
+    """Send once for an eligible failed turn or interruption with no Continue."""
     import hashlib
     from pathlib import Path
     from .desktop_resume import latest_turn, continuation_guard, observe_start, THREAD_ID
     from .desktop_location import canonical_task
+    from .resume_policy import message_resume_eligible
     from .storage import fingerprint
     from .settings import valid_setting
 
@@ -280,8 +306,7 @@ def resume_existing(home, item, stop, log, *, interrupted=False):
         if interrupted:
             if current.get('status') not in ('interrupted', 'inProgress'):
                 return 'failed', 'task_state_changed'
-        elif (current.get('status') != 'failed' or not isinstance(error, dict)
-                or error.get('codexErrorInfo') != 'usageLimitExceeded'):
+        elif current.get('status') != 'failed' or not message_resume_eligible(error):
             return 'failed', 'unrelated_failure'
         settings = read_settings()
         if settings.get('resume_source_thread_id') != source:
@@ -323,6 +348,7 @@ def observe_bridge_start(pipe, home, source, target, item, stop, *, expected_aut
     """Confirm a new started turn from the same desktop that accepted the send."""
     from pathlib import Path
     from .desktop_resume import THREAD_ID
+    from .resume_policy import turn_failure_reason
     from .storage import fingerprint
     for _ in range(75):
         if fingerprint(Path(home) / 'auth.json') != expected_auth:
@@ -345,10 +371,7 @@ def observe_bridge_start(pipe, home, source, target, item, stop, *, expected_aut
                     return 'failed', 'action_outcome_unknown'
                 item['observed_turn_id'] = new_id
                 if turn.get('status') == 'failed':
-                    error = turn.get('error') or {}
-                    message = str(error.get('message', '')) if isinstance(error, dict) else ''
-                    return 'failed', ('resume_auth_failed' if '401' in message or
-                                      'unauthorized' in message.lower() else 'resumed_turn_failed')
+                    return 'failed', turn_failure_reason(turn.get('error'))
                 if turn.get('status') in ('inProgress', 'completed') and turn.get('startedAt'):
                     return 'done', ('new_turn_observed' if new_id != item['turn_id']
                                     else 'native_turn_resumed')

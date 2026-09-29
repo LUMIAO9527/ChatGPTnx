@@ -50,6 +50,171 @@ class ResumeFlowTests(unittest.TestCase):
         self.assertEqual(item['attempts'], 1)
         self.assertFalse(c.retry_task('observed', self.THREAD)['ok'])
 
+    def test_followup_model_overload_requeues_from_the_failed_turn(self):
+        c = self.coordinator
+        c.sessions = [{'id': 'observed', 'phase': 'done', 'target': self.current, 'items': [
+            {'thread_id': self.THREAD, 'turn_id': self.TURN,
+             'observed_turn_id': self.OTHER, 'state': 'done',
+             'reason': 'new_turn_observed', 'attempts': 1}]}]
+        with patch('nx.resume_flow.latest_turn', return_value={
+                'turn_id': self.OTHER, 'status': 'failed',
+                'error': {'codexErrorInfo': 'serverOverloaded',
+                          'message': 'Selected model is at capacity.'}}):
+            self.assertIsNone(c._ready())
+        item = c.sessions[0]['items'][0]
+        self.assertEqual(item['reason'], 'resumed_turn_overloaded')
+        self.assertEqual(item['state'], 'waiting')
+        self.assertEqual(item['turn_id'], self.OTHER)
+        self.assertNotIn('observed_turn_id', item)
+        self.assertEqual(item['attempts'], 1)
+        self.assertFalse(c.retry_task('observed', self.THREAD)['ok'])
+
+    def test_immediate_network_failure_retries_from_the_new_turn_after_restart(self):
+        c = self.coordinator
+        ident = c.prepare('a@example.com', 'b@example.com', 'manual', [self.event()])
+        self.current = 'b@example.com'
+        c.switched(ident)
+        _, dispatched = c._ready()
+        dispatched['observed_turn_id'] = self.OTHER
+        failed = {'turn_id': self.OTHER, 'status': 'failed',
+                  'error': {'codexErrorInfo': 'other', 'message': 'network error'}}
+        with patch('nx.resume_flow.latest_turn', return_value=failed):
+            c._persist_outcome(ident, dispatched, 'failed', 'resumed_turn_network')
+        item = c.sessions[0]['items'][0]
+        self.assertEqual((item['state'], item['turn_id'], item['attempts']),
+                         ('waiting', self.OTHER, 1))
+        self.assertIsNone(c._ready())
+        replacement = self.make_coordinator()
+        self.assertEqual(replacement.sessions[0]['items'][0]['turn_id'], self.OTHER)
+        self.assertEqual(replacement.sessions[0]['items'][0]['state'], 'waiting')
+        replacement.sessions[0]['items'][0]['next_try'] = 0
+        self.assertEqual(replacement._ready()[1]['turn_id'], self.OTHER)
+
+    def test_retry_stops_after_five_retries(self):
+        c = self.coordinator
+        c.sessions = [{'id': 'observed', 'phase': 'done', 'target': self.current,
+                       'updated_at': time.time(), 'created_at': time.time(),
+                       'items': [{'thread_id': self.THREAD, 'turn_id': self.TURN,
+                                  'observed_turn_id': self.OTHER, 'state': 'done',
+                                  'reason': 'new_turn_observed', 'attempts': 6}]}]
+        failed = {'turn_id': self.OTHER, 'status': 'failed',
+                  'error': {'codexErrorInfo': 'serverOverloaded'}}
+        with patch('nx.resume_flow.latest_turn', return_value=failed):
+            self.assertIsNone(c._ready())
+        item = c.sessions[0]['items'][0]
+        self.assertEqual((item['state'], item['reason']),
+                         ('failed', 'resumed_turn_overloaded'))
+        self.assertEqual(c.sessions[0]['phase'], 'failed')
+
+    def test_new_quota_failure_does_not_repeat_on_the_same_account(self):
+        c = self.coordinator
+        c.sessions = [{'id': 'observed', 'phase': 'done', 'target': self.current,
+                       'updated_at': time.time(), 'created_at': time.time(),
+                       'items': [{'thread_id': self.THREAD, 'turn_id': self.TURN,
+                                  'observed_turn_id': self.OTHER, 'state': 'done',
+                                  'reason': 'new_turn_observed', 'attempts': 1}]}]
+        failed = {'turn_id': self.OTHER, 'status': 'failed',
+                  'error': {'codexErrorInfo': 'usageLimitExceeded'}}
+        with patch('nx.resume_flow.latest_turn', return_value=failed):
+            self.assertIsNone(c._ready())
+        item = c.sessions[0]['items'][0]
+        self.assertEqual((item['state'], item['reason']), ('failed', 'resumed_turn_limit'))
+
+    def test_retry_does_not_follow_a_turn_the_user_has_already_superseded(self):
+        c = self.coordinator
+        c.sessions = [{'id': 'observed', 'phase': 'done', 'target': self.current,
+                       'updated_at': time.time(), 'created_at': time.time(),
+                       'items': [{'thread_id': self.THREAD, 'turn_id': self.TURN,
+                                  'observed_turn_id': self.OTHER, 'state': 'done',
+                                  'reason': 'new_turn_observed', 'attempts': 1}]}]
+        failed = {'turn_id': self.OTHER, 'status': 'failed',
+                  'error': {'codexErrorInfo': 'serverOverloaded'}}
+        newer = {'turn_id': self.TURN, 'status': 'inProgress'}
+        with patch('nx.resume_flow.latest_turn', side_effect=[failed, newer]):
+            self.assertIsNone(c._ready())
+        self.assertEqual(c.sessions[0]['items'][0]['state'], 'failed')
+        self.assertEqual(c.sessions[0]['items'][0]['turn_id'], self.TURN)
+
+    def test_manual_retry_after_budget_checks_exact_latest_failed_turn(self):
+        c = self.coordinator
+        c.sessions = [{'id': 'observed', 'phase': 'failed', 'target': self.current,
+                       'updated_at': time.time(), 'created_at': time.time(),
+                       'items': [{'thread_id': self.THREAD, 'turn_id': self.TURN,
+                                  'observed_turn_id': self.OTHER, 'state': 'failed',
+                                  'reason': 'resumed_turn_overloaded', 'attempts': 6}]}]
+        failed = {'turn_id': self.OTHER, 'status': 'failed',
+                  'error': {'codexErrorInfo': 'serverOverloaded'}}
+        with patch('nx.resume_flow.latest_turn', return_value=failed):
+            self.assertTrue(c.retry_task('observed', self.THREAD)['ok'])
+        item = c.sessions[0]['items'][0]
+        self.assertEqual((item['state'], item['turn_id'], item['attempts']),
+                         ('waiting', self.OTHER, 0))
+        self.assertNotIn('observed_turn_id', item)
+        self.assertEqual(c._ready()[1]['turn_id'], self.OTHER)
+
+    def test_manual_retry_rejects_a_newer_user_turn(self):
+        c = self.coordinator
+        c.sessions = [{'id': 'observed', 'phase': 'failed', 'target': self.current,
+                       'updated_at': time.time(), 'created_at': time.time(),
+                       'items': [{'thread_id': self.THREAD, 'turn_id': self.TURN,
+                                  'observed_turn_id': self.OTHER, 'state': 'failed',
+                                  'reason': 'resumed_turn_overloaded', 'attempts': 6}]}]
+        failed = {'turn_id': self.OTHER, 'status': 'failed',
+                  'error': {'codexErrorInfo': 'serverOverloaded'}}
+        newer = {'turn_id': self.TURN, 'status': 'inProgress'}
+        with patch('nx.resume_flow.latest_turn', side_effect=[failed, newer]):
+            self.assertFalse(c.retry_task('observed', self.THREAD)['ok'])
+        self.assertEqual(c.sessions[0]['items'][0]['state'], 'failed')
+
+    def test_existing_generic_failure_is_explained_from_exact_observed_turn(self):
+        c = self.coordinator
+        c.sessions = [{'id': 'observed', 'phase': 'failed', 'updated_at': time.time(),
+                       'created_at': time.time(), 'items': [
+            {'thread_id': self.THREAD, 'turn_id': self.TURN,
+             'observed_turn_id': self.OTHER, 'state': 'failed',
+             'reason': 'resumed_turn_failed', 'attempts': 1}]}]
+        with patch('nx.resume_flow.latest_turn', return_value={
+                'turn_id': self.OTHER, 'status': 'failed',
+                'error': {'codexErrorInfo': 'serverOverloaded'}}) as read, \
+             patch('nx.resume_flow.title_prefixes', return_value={}):
+            shown = c.details()
+        read.assert_called_once_with(self.paths.home, self.THREAD, self.OTHER)
+        self.assertEqual(shown[0]['items'][0]['reason'], 'resumed_turn_overloaded')
+        self.assertEqual(c.sessions[0]['items'][0]['reason'], 'resumed_turn_failed')
+
+    def test_existing_confirmed_overload_requeues_on_restart(self):
+        c = self.coordinator
+        c.sessions = [{'id': 'legacy', 'phase': 'failed', 'target': self.current,
+                       'updated_at': time.time(), 'created_at': time.time(),
+                       'items': [{'thread_id': self.THREAD, 'turn_id': self.TURN,
+                                  'observed_turn_id': self.OTHER, 'state': 'failed',
+                                  'reason': 'resumed_turn_failed', 'attempts': 1}]}]
+        c._save()
+        failed = {'turn_id': self.OTHER, 'status': 'failed',
+                  'error': {'codexErrorInfo': 'serverOverloaded'}}
+        with patch('nx.resume_flow.latest_turn', return_value=failed):
+            replacement = self.make_coordinator()
+        item = replacement.sessions[0]['items'][0]
+        self.assertEqual((replacement.sessions[0]['phase'], item['state'], item['turn_id']),
+                         ('resuming', 'waiting', self.OTHER))
+        self.assertGreater(item['next_try'], time.time())
+
+    def test_existing_generic_failure_does_not_retry_when_newer_turn_exists(self):
+        c = self.coordinator
+        c.sessions = [{'id': 'legacy', 'phase': 'failed', 'target': self.current,
+                       'updated_at': time.time(), 'created_at': time.time(),
+                       'items': [{'thread_id': self.THREAD, 'turn_id': self.TURN,
+                                  'observed_turn_id': self.OTHER, 'state': 'failed',
+                                  'reason': 'resumed_turn_failed', 'attempts': 1}]}]
+        c._save()
+        failed = {'turn_id': self.OTHER, 'status': 'failed',
+                  'error': {'codexErrorInfo': 'serverOverloaded'}}
+        newer = {'turn_id': self.TURN, 'status': 'inProgress'}
+        with patch('nx.resume_flow.latest_turn', side_effect=[failed, newer]):
+            replacement = self.make_coordinator()
+        self.assertEqual(replacement.sessions[0]['phase'], 'failed')
+        self.assertEqual(replacement.sessions[0]['items'][0]['state'], 'failed')
+
     def test_followup_does_not_attribute_another_turn_failure(self):
         c = self.coordinator
         c.sessions = [{'id': 'observed', 'phase': 'done', 'items': [
@@ -84,7 +249,7 @@ class ResumeFlowTests(unittest.TestCase):
         self.assertEqual(session['items'][0]['state'], 'failed')
         self.assertEqual(session['items'][1]['state'], 'acting')
 
-    def test_later_switch_retries_only_proven_pre_dispatch_failure(self):
+    def test_later_switch_does_not_duplicate_queued_pre_dispatch_retry(self):
         c = self.coordinator
         first = c.prepare('a@example.com', 'b@example.com', 'manual', [self.event()])
         self.current = 'b@example.com'
@@ -93,9 +258,11 @@ class ResumeFlowTests(unittest.TestCase):
         c._persist_outcome(first, item, 'failed', 'desktop_bridge_unavailable')
         second = c.prepare('a@example.com', 'b@example.com', 'manual', [self.event()])
         c.switched(second)
+        self.assertIsNone(c._ready())
+        c.sessions[0]['items'][0]['next_try'] = 0
         ready = c._ready()
         self.assertIsNotNone(ready)
-        self.assertEqual(ready[0], second)
+        self.assertEqual(ready[0], first)
 
     def test_later_switch_never_replays_uncertain_send(self):
         c = self.coordinator

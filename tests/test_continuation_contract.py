@@ -16,7 +16,8 @@ from unittest.mock import Mock, patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'src'))
 from nx import app_bridge
-from nx.desktop_resume import continuation_guard, observe_start, attempt_continuation, title_prefix
+from nx.desktop_resume import (continuation_guard, observe_start, attempt_continuation,
+                               continuation_route, title_prefix)
 from nx.desktop_location import canonical_task
 from nx.resume_flow import ResumeCoordinator
 from nx.storage import Paths, atomic_bytes, account_identity_key, fingerprint
@@ -115,6 +116,48 @@ class ContinuationContractTests(unittest.TestCase):
         self.assertEqual(saved['sessions'][0]['items'][0]['observed_turn_id'], NEW)
         self.assertEqual(saved['sessions'][0]['items'][0]['attempts'], 1)
         self.assertEqual(len(saved['claims']), 1)
+
+    def test_quota_handoff_then_overload_recovers_with_second_exact_turn(self):
+        c = self.coordinator(); ident = self.queue(c)
+
+        def pipe_for(original, status, next_turn, ordinal):
+            pipe = Mock()
+            def request(method, params, **kwargs):
+                self.assertEqual(params['arguments']['threadId'], TASK)
+                if params['tool'] == 'read_thread':
+                    return reply({'thread': {'id': TASK, 'kind': 'codex',
+                                             'status': {'type': 'idle'}},
+                                  'turns': [{'id': original, 'status': status}]})
+                self.assertEqual(params['tool'], 'send_message_to_thread')
+                self.add_turn(next_turn, 'inProgress', ordinal)
+                return reply({'threadId': TASK, 'turnId': next_turn})
+            pipe.request.side_effect = request
+            return pipe
+
+        _, first = c._ready()
+        with patch('nx.app_bridge.discover', return_value=pipe_for(TURN, 'failed', NEW, 2)):
+            state, reason = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
+                                                 first, self.fast_stop, self.log)
+        self.assertEqual((state, reason), ('done', 'new_turn_observed'))
+        c._persist_outcome(ident, first, state, reason)
+        with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
+            db.execute('UPDATE thread_turns SET status=?, error_json=? WHERE turn_id=?',
+                       ('failed', json.dumps({'codexErrorInfo': 'serverOverloaded'}), NEW))
+        db.close()
+        self.assertIsNone(c._ready())
+        queued = c.sessions[0]['items'][0]
+        self.assertEqual((queued['state'], queued['turn_id']), ('waiting', NEW))
+        queued['next_try'] = 0
+        _, second = c._ready()
+        with patch('nx.app_bridge.discover', return_value=pipe_for(NEW, 'failed', OTHER, 3)):
+            state, reason = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
+                                                 second, self.fast_stop, self.log)
+        self.assertEqual((state, reason), ('done', 'new_turn_observed'))
+        c._persist_outcome(ident, second, state, reason)
+        saved = json.loads(c.path.read_text())
+        self.assertEqual(saved['sessions'][0]['items'][0]['observed_turn_id'], OTHER)
+        self.assertEqual(saved['sessions'][0]['items'][0]['attempts'], 2)
+        self.assertEqual(len(saved['claims']), 2)
 
     def test_archived_configured_source_can_send_to_active_target(self):
         with sqlite3.connect(self.paths.home/'state_1.sqlite') as db:
@@ -231,6 +274,24 @@ class ContinuationContractTests(unittest.TestCase):
         self.assertEqual(result, ('failed', 'invalid_task_id'))
         discover.assert_not_called(); native.assert_not_called()
 
+    def test_route_is_selected_only_from_exact_turn_and_status(self):
+        quota = {'turn_id': TURN, 'status': 'failed',
+                 'error': {'codexErrorInfo': 'usageLimitExceeded'}}
+        self.assertEqual(continuation_route(quota, TURN), ('message', None))
+        self.assertEqual(continuation_route({**quota, 'status': 'interrupted'}, TURN),
+                         ('native', None))
+        self.assertEqual(continuation_route({**quota, 'status': 'inProgress'}, TURN),
+                         ('native', None))
+        self.assertEqual(continuation_route(quota, NEW),
+                         (None, ('skipped', 'newer_turn')))
+        self.assertEqual(continuation_route({**quota, 'error': {'codexErrorInfo': 'serverOverloaded'}}, TURN),
+                         ('message', None))
+        self.assertEqual(continuation_route({**quota, 'error': {
+            'codexErrorInfo': 'other', 'message': 'network error'}}, TURN), ('message', None))
+        self.assertEqual(continuation_route({**quota, 'error': {
+            'codexErrorInfo': 'other', 'message': 'unauthorized 401'}}, TURN),
+            (None, ('failed', 'unrelated_failure')))
+
     def test_interrupted_task_uses_bridge_only_when_native_button_is_missing(self):
         with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
             db.execute("UPDATE thread_turns SET status='interrupted'")
@@ -278,7 +339,18 @@ class ContinuationContractTests(unittest.TestCase):
     def test_immediate_new_turn_failure_is_stored_not_success(self):
         self.add_turn(NEW, 'failed', 2)
         self.assertEqual(observe_start(self.paths.home, self.item, self.fast_stop,
-            expected_auth=fingerprint(self.paths.auth)), ('failed', 'resumed_turn_failed'))
+            expected_auth=fingerprint(self.paths.auth)), ('failed', 'resumed_turn_limit'))
+        self.assertEqual(self.item['observed_turn_id'], NEW)
+
+    def test_new_turn_overload_is_not_misreported_as_routing_failure(self):
+        self.add_turn(NEW, 'failed', 2)
+        with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
+            db.execute('UPDATE thread_turns SET error_json=? WHERE turn_id=?',
+                       (json.dumps({'codexErrorInfo': 'serverOverloaded',
+                                    'message': 'Selected model is at capacity.'}), NEW))
+        db.close()
+        self.assertEqual(observe_start(self.paths.home, self.item, self.fast_stop,
+            expected_auth=fingerprint(self.paths.auth)), ('failed', 'resumed_turn_overloaded'))
         self.assertEqual(self.item['observed_turn_id'], NEW)
 
     def test_alias_collision_against_exact_id_is_ambiguous(self):
@@ -316,11 +388,13 @@ class ContinuationContractTests(unittest.TestCase):
         self.assertEqual(replacement.sessions[0]['items'][0]['reason'], 'action_outcome_unknown')
         self.assertFalse(replacement.retry_task(ident, ALIAS)['ok'])
 
-    def test_preflight_failure_is_not_automatically_retried(self):
+    def test_preflight_failure_is_retried_after_a_delay_without_replaying_unknown_effects(self):
         c = self.coordinator(); ident = self.queue(c); _, item = c._ready()
         c._persist_outcome(ident, item, 'failed', 'desktop_bridge_unavailable')
+        self.assertEqual(c.sessions[0]['items'][0]['state'], 'waiting')
+        self.assertGreater(c.sessions[0]['items'][0]['next_try'], 0)
         for _ in range(3): self.assertIsNone(c._ready())
-        self.assertTrue(c.retry_task(ident, ALIAS)['ok'])
+        c.sessions[0]['items'][0]['next_try'] = 0
         self.assertIsNotNone(c._ready())
         self.assertEqual(len(c.claims), 1)
 
@@ -370,6 +444,18 @@ class BridgeCatalogTests(unittest.TestCase):
             selected = app_bridge.discover()
         self.assertIs(selected, live)
         self.assertEqual(live.request.call_count, 1)
+
+    def test_current_executor_pipe_wins_over_other_compatible_pipes(self):
+        current, other = Mock(), Mock()
+        current.request.return_value = other.request.return_value = self.catalog()
+        inherited = r'\\.\pipe\codex-browser-use-11111111-1111-4111-8111-111111111111'
+        with patch.dict('nx.app_bridge.os.environ', {'CODEX_APP_TOOLS_PIPE_PATH': inherited}), \
+             patch('nx.app_bridge.candidates', return_value=[inherited, 'another-live-pipe']), \
+             patch('nx.app_bridge.Pipe', side_effect=[current, other]):
+            selected = app_bridge.discover()
+        self.assertIs(selected, current)
+        current.close.assert_not_called()
+        other.request.assert_not_called()
 
     def test_multiple_compatible_pipes_are_closed_and_rejected(self):
         first, second = Mock(), Mock()

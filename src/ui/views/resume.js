@@ -45,11 +45,14 @@ window.NXViews.resume = context => {
       unrelated_failure:'任务因其他原因停止',
       task_already_running:'任务已在运行',
       newer_turn:'已有新回合',
-      new_turn_observed:'已在原任务启动新回合'
-      ,resume_auth_failed:'接续回合账号认证失败（401）'
-      ,resumed_turn_failed:'接续回合失败'
-      ,resumed_turn_completed:'接续回合已完成'
-      ,resumed_turn_interrupted:'接续后被中断'
+      new_turn_observed:'已在原任务启动新回合',
+      resume_auth_failed:'接续回合账号认证失败（401）',
+      resumed_turn_overloaded:'接续回合遇到模型繁忙',
+      resumed_turn_network:'接续回合遇到网络错误',
+      resumed_turn_limit:'接续回合再次遇到额度限制',
+      resumed_turn_failed:'接续回合失败',
+      resumed_turn_completed:'接续回合已完成',
+      resumed_turn_interrupted:'接续后被中断'
     };
     if(!sessions.length)return '<div class="empty"><h3>暂无接续记录</h3></div>';
     const day=new Date();day.setHours(0,0,0,0);
@@ -72,9 +75,11 @@ window.NXViews.resume = context => {
       const progressMarkup=(progress,failed=false)=>progress==='0/1'&&failed?'<span class="resume-zero">0</span>/1':esc(progress);
       const rows=expanded?s.items.map(i=>{
         const reason=i.state==='failed'?(reasons[i.reason]||'接续失败，请查看原任务')
-          :i.state==='skipped'?(reasons[i.reason]||'已跳过'):'';
+          :i.state==='skipped'?(reasons[i.reason]||'已跳过')
+          :i.state==='waiting'&&i.reason?(reasons[i.reason]||'稍后自动重试'):'';
         const retry=i.state==='failed'&&window.NX_RESUME_POLICY.retryable.includes(i.reason);
-        const status={waiting:'等待中',acting:'接续中'}[i.state]||(!['done','failed','skipped'].includes(i.state)?'处理中':'');
+        const status=i.state==='waiting'&&i.reason?'等待重试':
+          ({waiting:'等待中',acting:'接续中'}[i.state]||(!['done','failed','skipped'].includes(i.state)?'处理中':''));
         const accessibleState=i.state==='done'?'成功':i.state==='failed'?'失败':i.state==='skipped'?'已跳过':status;
         const hint=`${i.title} · ${accessibleState}${reason&&reason!==accessibleState?' · '+reason:''}`;
         return `<div class="resume-task-row"><button class="resume-task" data-action="open-resume-task" data-value="${esc(i.thread_id)}" title="${esc(hint)}" aria-label="${esc(hint)}"><span class="resume-task-copy"><strong>${esc(i.title)}</strong>${reason?`<small class="${i.state==='failed'?'resume-failure-reason':''}">· ${esc(reason)}</small>`:''}</span>${status?`<em class="resume-progress">${esc(status)}</em>`:''}${icon('external')}</button>${retry?`<button class="resume-retry" data-action="retry-resume-task" data-session="${esc(s.id)}" data-value="${esc(i.thread_id)}">重新接续</button>`:''}</div>`;

@@ -19,13 +19,9 @@ HISTORY_SECONDS = 7 * 86400
 ACTIVE_SECONDS = 86400
 FAILURE_BANNER_SECONDS = 86400
 PENDING_SECONDS = 300
-SAFE_PRE_DISPATCH_FAILURES = frozenset({
-    'desktop_bridge_unavailable', 'resume_source_unavailable',
-    'desktop_task_not_idle',
-})
-
-
-from .resume_policy import ATTENTION_REASONS, RETRYABLE_REASONS
+from .resume_policy import (ATTENTION_REASONS, RETRYABLE_REASONS,
+                            AUTO_RETRY_PRE_DISPATCH, AUTO_RETRY_TURN_FAILURES,
+                            auto_retry_delay, turn_failure_reason)
 
 class ResumeCoordinator:
     """One NX worker acts in the existing desktop window, never an app-server."""
@@ -61,7 +57,8 @@ class ResumeCoordinator:
         # Migrate prior attempts before retention/clear can remove their history.
         self.claims.update(self._claim_key(i) for session in self.sessions
                            for i in session['items']
-                           if i.get('state') == 'acting' or i.get('attempts', 0) > 0
+                           if i.get('state') == 'acting' or
+                           (i.get('state') in TERMINAL and i.get('attempts', 0) > 0)
                            or i.get('reason') in ('action_outcome_unknown', 'start_not_observed',
                                                   'new_turn_observed', 'native_turn_resumed'))
         self._committed = copy.deepcopy((self.sessions, self.pending, self.claims))
@@ -162,7 +159,7 @@ class ResumeCoordinator:
                     if self._claim_key(old) == self._claim_key(item)
                     and old.get('attempts', 0) > 0]
         return bool(previous) and all(old.get('state') == 'failed' and
-                                      old.get('reason') in SAFE_PRE_DISPATCH_FAILURES
+                                      old.get('reason') in AUTO_RETRY_PRE_DISPATCH
                                       for old in previous)
 
     def _target_identity(self, target):
@@ -290,6 +287,19 @@ class ResumeCoordinator:
                     if current != session.get('target'):
                         self._fail_remaining(session, 'account_changed')
                         session_changed = True
+                if session.get('phase') == 'failed' and current == session.get('target'):
+                    for item in session.get('items', []):
+                        if (item.get('state') != 'failed' or
+                                item.get('reason') != 'resumed_turn_failed'):
+                            continue
+                        observed = item.get('observed_turn_id')
+                        if not THREAD_ID.fullmatch(str(observed)):
+                            continue
+                        record = latest_turn(self.paths.home, item['thread_id'], observed)
+                        if record and self._queue_automatic_retry(
+                                session, item, turn_failure_reason(record.get('error')),
+                                time.time(), record):
+                            session_changed = True
                 if session.get('phase') == 'resuming' and session.get('items') and all(i['state'] in TERMINAL for i in session['items']):
                     session['phase'] = 'failed' if any(i['state'] == 'failed' for i in session['items']) else 'done'
                     session_changed = True
@@ -529,6 +539,40 @@ class ResumeCoordinator:
             if changed or self.pending:
                 self._save()
 
+    def _queue_automatic_retry(self, session, item, reason, now, record=None):
+        """Retry only a proven no-send failure or a confirmed terminal turn."""
+        delay = auto_retry_delay(reason, item.get('attempts'))
+        if (delay is None or self.blocked or session.get('phase') == 'cancelled' or
+                not self.settings().get('task_continuation') or
+                self.current_email() != session.get('target')):
+            return False
+        observed = item.get('observed_turn_id')
+        if reason in AUTO_RETRY_TURN_FAILURES:
+            if (not THREAD_ID.fullmatch(str(observed)) or not record or
+                    record.get('turn_id') != observed or record.get('status') != 'failed' or
+                    turn_failure_reason(record.get('error')) != reason):
+                return False
+            latest = latest_turn(self.paths.home, item['thread_id'])
+            if not latest or latest.get('turn_id') != observed:
+                return False  # The user or another workflow already continued it.
+            previous = item['turn_id']
+            item['turn_id'] = observed
+            item.pop('observed_turn_id', None)
+            # Native Continue can fail on the same turn ID. The terminal
+            # failure is explicit proof that a new attempt is now allowed.
+            item['retry_authorized'] = observed == previous
+        elif reason in AUTO_RETRY_PRE_DISPATCH:
+            if observed:
+                return False
+            item['retry_authorized'] = True
+        else:
+            return False
+        item.update(state='waiting', reason=reason, next_try=now + delay)
+        session.update(phase='resuming', updated_at=now, seen_at=None)
+        self.log.info('resume_retry_queued reason=%s attempts=%d delay=%d',
+                      reason, item['attempts'], delay)
+        return True
+
     def _ready(self):
         now = time.time()
         with self.lock:
@@ -542,15 +586,14 @@ class ResumeCoordinator:
                     if not record or record['turn_id'] != observed:
                         continue
                     if record['status'] == 'failed':
-                        error = record.get('error') or {}
-                        message = str(error.get('message', '')) if isinstance(error, dict) else ''
-                        reason = 'resume_auth_failed' if '401' in message or 'unauthorized' in message.lower() else 'resumed_turn_failed'
-                        item.update(state='failed', reason=reason)
-                        session.update(updated_at=now, seen_at=None)
-                        if (session.get('phase') != 'cancelled' and
-                                all(i['state'] in TERMINAL for i in session['items'])):
-                            session['phase'] = 'failed'
-                        self.log.info('resume_followup_failed reason=%s', reason)
+                        reason = turn_failure_reason(record.get('error'))
+                        if not self._queue_automatic_retry(session, item, reason, now, record):
+                            item.update(state='failed', reason=reason)
+                            session.update(updated_at=now, seen_at=None)
+                            if (session.get('phase') != 'cancelled' and
+                                    all(i['state'] in TERMINAL for i in session['items'])):
+                                session['phase'] = 'failed'
+                            self.log.info('resume_followup_failed reason=%s', reason)
                         changed = True
                     elif record['status'] in ('completed', 'interrupted'):
                         item['reason'] = 'resumed_turn_completed' if record['status'] == 'completed' else 'resumed_turn_interrupted'
@@ -649,9 +692,11 @@ class ResumeCoordinator:
                     observed = item.get('observed_turn_id')
                     if isinstance(observed, str) and THREAD_ID.fullmatch(observed):
                         live['observed_turn_id'] = observed
-                    # Readiness failures are terminal too. Only the user may
-                    # explicitly recheck a known pre-action failure.
                     live.update(state=state if state in TERMINAL else 'failed', reason=reason)
+                    if state == 'failed':
+                        record = (latest_turn(self.paths.home, live['thread_id'], observed)
+                                  if reason in AUTO_RETRY_TURN_FAILURES and observed else None)
+                        self._queue_automatic_retry(session, live, reason, time.time(), record)
                 session['updated_at'] = time.time()
                 if all(i['state'] in TERMINAL for i in session['items']):
                     session['phase'] = 'failed' if any(i['state'] == 'failed'
@@ -727,6 +772,15 @@ class ResumeCoordinator:
         for session in sessions:
             for item in session.get('items', []):
                 item['title'] = titles.get(item['thread_id']) or item['thread_id'][-8:]
+                # Older versions stored every later turn failure under one
+                # generic label. Reclassify the exact observed turn for display
+                # without rewriting the durable history or replaying an action.
+                if (item.get('state') == 'failed' and
+                        item.get('reason') == 'resumed_turn_failed' and
+                        THREAD_ID.fullmatch(str(item.get('observed_turn_id', '')))):
+                    record = latest_turn(self.paths.home, item['thread_id'], item['observed_turn_id'])
+                    if record and record.get('status') == 'failed':
+                        item['reason'] = turn_failure_reason(record.get('error'))
         return sorted(sessions, key=lambda s: s.get('updated_at', 0), reverse=True)
 
     def clear_history(self):
@@ -750,7 +804,7 @@ class ResumeCoordinator:
         return {'ok': True}
 
     def retry_task(self, session_id, thread_id):
-        """Explicit recheck of a known-not-invoked item; never replay uncertain effects."""
+        """Explicitly retry a safe pre-dispatch failure or a confirmed failed turn."""
         with self.lock:
             if self.blocked:
                 return {'ok': False, 'error': '接续记录无法验证，请先恢复记录备份'}
@@ -758,16 +812,35 @@ class ResumeCoordinator:
             if not session or session.get('phase') != 'failed':
                 return {'ok': False, 'error': '这次接续记录已变化'}
             item = next((i for i in session['items'] if i.get('thread_id') == thread_id
-                         and i.get('state') == 'failed'
-                         and i.get('reason') in RETRYABLE_REASONS), None)
+                         and i.get('state') == 'failed'), None)
             if not item:
                 return {'ok': False, 'error': '该任务不能重试'}
             if not self.settings().get('task_continuation'):
                 return {'ok': False, 'error': '请先开启自动接续任务'}
             if self.current_email() != session.get('target'):
                 return {'ok': False, 'error': '请先切回接续时使用的账号'}
+            reason = item.get('reason')
+            observed = item.get('observed_turn_id')
+            record = (latest_turn(self.paths.home, thread_id, observed)
+                      if THREAD_ID.fullmatch(str(observed)) else None)
+            if reason == 'resumed_turn_failed' and record and record.get('status') == 'failed':
+                reason = turn_failure_reason(record.get('error'))
+            if reason not in RETRYABLE_REASONS:
+                return {'ok': False, 'error': '该任务不能重试'}
+            if reason in AUTO_RETRY_TURN_FAILURES:
+                current = latest_turn(self.paths.home, thread_id)
+                if (not record or record.get('status') != 'failed' or
+                        turn_failure_reason(record.get('error')) != reason or
+                        not current or current.get('turn_id') != observed):
+                    return {'ok': False, 'error': '原任务状态已变化，请打开原任务查看'}
+                item['retry_authorized'] = True
+                item['turn_id'] = observed
+                item.pop('observed_turn_id', None)
+                item['attempts'] = 0
+            else:
+                item['retry_authorized'] = True
             item.pop('deferred_since', None)
-            item.update(state='waiting', next_try=0, reason='', retry_authorized=True)
+            item.update(state='waiting', next_try=0, reason='')
             session.update(phase='resuming', updated_at=time.time(), seen_at=None)
             self._save()
         self.wake.set()

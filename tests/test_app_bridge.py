@@ -142,6 +142,21 @@ class BridgeResumeTests(unittest.TestCase):
         self.record['error']['codexErrorInfo'] = 'other'
         self.assertEqual(self.run_resume(), ('failed', 'unrelated_failure'))
 
+    def test_confirmed_server_overload_can_start_a_new_message_turn(self):
+        self.record['error'] = {'codexErrorInfo': 'serverOverloaded'}
+        result = self.run_resume(records=[self.record, {
+            'turn_id': '55555555-5555-4555-8555-555555555555',
+            'status': 'inProgress', 'started_at': 1900000000}])
+        self.assertEqual(result, ('done', 'new_turn_observed'))
+        self.assertEqual(self.pipe.request.call_count, 2)
+
+    def test_confirmed_network_failure_can_start_a_new_message_turn(self):
+        self.record['error'] = {'codexErrorInfo': 'other', 'message': 'network error'}
+        result = self.run_resume(records=[self.record, {
+            'turn_id': '55555555-5555-4555-8555-555555555555',
+            'status': 'inProgress', 'started_at': 1900000000}])
+        self.assertEqual(result, ('done', 'new_turn_observed'))
+
     def test_invalid_message_is_not_sent(self):
         self.settings.write_text(json.dumps({'settings': {'resume_source_thread_id': self.SOURCE, 'task_continuation': True, 'resume_message': ''}}))
         self.assertEqual(self.run_resume(), ('failed', 'invalid_resume_message'))
