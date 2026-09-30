@@ -58,7 +58,7 @@ add(G,'usage-identity-changed','个人用量 · 身份变化',route='usage',scen
 
 G='06 · 设置与参与账号'
 add(G,'settings','设置 · 三个一级分组',route='settings')
-add(G,'purchase-account','购买账号 · 微信联系',route='purchase')
+add(G,'purchase-account','购买账号 · QQ联系',route='purchase')
 add(G,'settings-automation','接力与接续 · 默认',route='automation')
 add(G,'automation-on','接力与接续 · 已开启',route='automation',scenario='automation-on')
 add(G,'automation-off','接力与接续 · 全关闭',route='automation',scenario='automation-off')

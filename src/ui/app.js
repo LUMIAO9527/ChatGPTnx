@@ -574,8 +574,8 @@
       case 'feedback-details':{clearNotification();break;}
       case 'settings':show('settings');break;
       case 'purchase-account':show('purchase');break;
-      case 'copy-purchase-wechat':{
-        const field=$('#purchase-wechat');if(!field)break;
+      case 'copy-purchase-qq':{
+        const field=$('#purchase-qq');if(!field)break;
         let copied=false;
         try {if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(field.value);copied=true;}}catch{}
         if(!navigation.current(ticket))break;
@@ -584,7 +584,7 @@
           try {copied=document.execCommand('copy');}catch{}
           if(copied&&b.isConnected)b.focus({preventScroll:true});
         }
-        notify(copied?'微信号已复制':'复制未完成，请选中微信号手动复制',{tone:copied?'success':'error'});
+        notify(copied?'QQ号已复制':'复制未完成，请选中QQ号手动复制',{tone:copied?'success':'error'});
         break;
       }
       case 'automation':show('automation');break;

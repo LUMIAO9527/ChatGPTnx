@@ -56,7 +56,7 @@ body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-sh
 .purchase-service h3, .purchase-contact h3 { font-size: var(--font-title); font-weight: 600; }
 .purchase-service p { margin-top: 5px; color: var(--muted); font-size: var(--font-body); }
 .purchase-contact { padding: 20px; background: var(--surface); border-radius: var(--radius-card); text-align: center; }
-.purchase-wechat { display: block; width: 100%; margin: 12px 0 18px; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: var(--font-display); font-weight: 650; text-align: center; cursor: text; }
+.purchase-qq { display: block; width: 100%; margin: 12px 0 18px; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: var(--font-display); font-weight: 650; text-align: center; cursor: text; }
 .purchase-contact p { margin-top: 11px; color: var(--muted); font-size: var(--font-body); }
 .purchase-note { color: var(--muted); font-size: var(--font-body); line-height: var(--line-normal); text-align: center; }
 .muted { color: var(--muted); }

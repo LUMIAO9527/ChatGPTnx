@@ -59,10 +59,10 @@ window.NXViews.purchase = () => ({
       <div class="purchase-service"><h3>接码服务</h3><p>适用平台与服务咨询</p></div>
     </section>
     <section class="purchase-contact" aria-labelledby="purchase-contact-title">
-      <h3 id="purchase-contact-title">微信联系</h3>
-      <input id="purchase-wechat" class="purchase-wechat" aria-label="微信号" value="lusen1007" readonly spellcheck="false">
-      <button class="btn primary fill" data-action="copy-purchase-wechat">复制微信号</button>
+      <h3 id="purchase-contact-title">QQ联系</h3>
+      <input id="purchase-qq" class="purchase-qq" aria-label="QQ号" value="210037309" readonly spellcheck="false">
+      <button class="btn primary fill" data-action="copy-purchase-qq">复制QQ号</button>
       <p>添加时请备注“ChatGPTnx”</p>
     </section>
-    <p class="purchase-note">具体价格与服务内容请通过微信咨询。</p>`
+    <p class="purchase-note">具体价格与服务内容请通过QQ咨询。</p>`
 });
