@@ -19,6 +19,7 @@ window.NXViews.resume = context => {
       task_state_changed:'原任务状态已变化，未执行接续',
       resume_state_unavailable:'接续记录无法验证，已停止自动接续',legacy_route_removed:'旧接续路径已停用，请查看原任务',
       duplicate_attempt:'该回合已处理，未重复操作',
+      subagent_task:'后台子任务，不单独接续',
       desktop_bridge_ambiguous:'存在多个桌面桥接，未发送消息',
       resume_source_unavailable:'无法确认接续来源任务',
       native_turn_resumed:'原任务已恢复运行',
@@ -63,6 +64,7 @@ window.NXViews.resume = context => {
     const row=s=>{
       const attention=i=>window.NX_RESUME_POLICY.attention.includes(i.reason);
       const done=s.items.filter(i=>i.state==='done').length,failed=s.items.filter(i=>i.state==='failed').length;
+      const skipped=s.items.filter(i=>i.state==='skipped').length,pending=s.items.length-done-failed-skipped;
       const active=activePhases.includes(s.phase);
       const expanded=ui.resumeExpanded.has(s.id);
       const account=data.accounts.find(a=>a.email===(s.target||s.origin));
@@ -77,16 +79,24 @@ window.NXViews.resume = context => {
         const reason=i.state==='failed'?(reasons[i.reason]||'接续失败，请查看原任务')
           :i.state==='skipped'?(reasons[i.reason]||'已跳过')
           :i.state==='waiting'&&i.reason?(reasons[i.reason]||'稍后自动重试'):'';
-        const retry=i.state==='failed'&&window.NX_RESUME_POLICY.retryable.includes(i.reason);
+        const subagent=i.is_subagent===true;
+        const parent=subagent&&i.parent_thread_id!==i.thread_id&&typeof i.parent_thread_id==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(i.parent_thread_id)?i.parent_thread_id:null;
+        const target=subagent?parent:i.thread_id;
+        const title=i.title||(subagent?'后台子任务':'任务 '+String(i.thread_id||'').slice(-8));
+        const retry=!subagent&&i.state==='failed'&&window.NX_RESUME_POLICY.retryable.includes(i.reason);
         const status=i.state==='waiting'&&i.reason?'等待重试':
           ({waiting:'等待中',acting:'接续中'}[i.state]||(!['done','failed','skipped'].includes(i.state)?'处理中':''));
         const accessibleState=i.state==='done'?'成功':i.state==='failed'?'失败':i.state==='skipped'?'已跳过':status;
-        const hint=`${i.title} · ${accessibleState}${reason&&reason!==accessibleState?' · '+reason:''}`;
-        return `<div class="resume-task-row"><button class="resume-task" data-action="open-resume-task" data-value="${esc(i.thread_id)}" title="${esc(hint)}" aria-label="${esc(hint)}"><span class="resume-task-copy"><strong>${esc(i.title)}</strong>${reason?`<small class="${i.state==='failed'?'resume-failure-reason':''}">· ${esc(reason)}</small>`:''}</span>${status?`<em class="resume-progress">${esc(status)}</em>`:''}${icon('external')}</button>${retry?`<button class="resume-retry" data-action="retry-resume-task" data-session="${esc(s.id)}" data-value="${esc(i.thread_id)}">重新接续</button>`:''}</div>`;
+        const navigation=subagent?(parent?'打开所属主任务'+(i.parent_title?'：'+i.parent_title:''):'所属主任务未确认，不能独立打开'):'';
+        const hint=`${title} · ${accessibleState}${reason&&reason!==accessibleState?' · '+reason:''}${subagent?' · 后台子任务，当前版本不单独接续 · '+navigation:''}`;
+        const action=target?`data-action="open-resume-task" data-value="${esc(target)}"`:'disabled';
+        return `<div class="resume-task-row${subagent?' is-subagent':''}"><button class="resume-task" ${action} title="${esc(hint)}" aria-label="${esc(hint)}"><span class="resume-task-copy"><strong>${esc(title)}</strong>${reason?`<small class="${i.state==='failed'?'resume-failure-reason':''}">· ${esc(reason)}</small>`:''}${subagent&&!parent?'<small>所属主任务未确认，不能独立打开</small>':''}</span>${status?`<em class="resume-progress">${esc(status)}</em>`:''}${target?icon('external'):''}</button>${retry?`<button class="resume-retry" data-action="retry-resume-task" data-session="${esc(s.id)}" data-value="${esc(i.thread_id)}">重新接续</button>`:''}</div>`;
       }).join(''):'';
       const progress=`${done}/${s.items.length}`;
-      const hint=`${account?name(account):'账号接力'} · ${time} · ${progress}${failed?` · ${failed} 项需要查看`:''}`;
-      return `<section class="resume-session"><button class="resume-summary" data-action="resume-toggle" data-value="${esc(s.id)}" aria-expanded="${expanded}" title="${esc(hint)}" aria-label="${esc(hint)}"><span>${esc(account?name(account):'账号接力')} · ${esc(time)}</span><strong class="resume-progress mono">${progressMarkup(progress,s.items.some(i=>i.state==='failed'&&!attention(i)))}</strong>${icon('chevron')}</button>${expanded?`<div class="resume-tasks">${rows}</div>`:''}</section>`;
+      const counts=`成功 ${done} · 跳过 ${skipped} · 需查看 ${failed}${pending?' · 待处理 '+pending:''}`;
+      const hint=`${account?name(account):'账号接力'} · ${time} · 已接续 ${progress} · ${counts}`;
+      const explanation=s.items.some(i=>i.is_subagent===true)?'<p class="resume-subagent-note">后台子任务，当前版本不单独接续；可点击的记录打开所属主任务。原处理结果保留如下。</p>':'';
+      return `<section class="resume-session"><button class="resume-summary" data-action="resume-toggle" data-value="${esc(s.id)}" aria-expanded="${expanded}" title="${esc(hint)}" aria-label="${esc(hint)}"><span>${esc(account?name(account):'账号接力')} · ${esc(time)}</span><strong class="resume-progress mono">已接续 ${progressMarkup(progress,s.items.some(i=>i.state==='failed'&&!attention(i)))}</strong>${icon('chevron')}</button>${expanded?`<div class="resume-tasks"><div class="resume-session-stats">${esc(counts)}</div>${explanation}${rows}</div>`:''}</section>`;
     };
     return groups.filter(([,items])=>items.length).map(([label,items])=>`<section class="resume-group"><div class="resume-group-head"><strong>${label}</strong><span>${items.length} 次</span></div>${items.map(row).join('')}</section>`).join('');
   }

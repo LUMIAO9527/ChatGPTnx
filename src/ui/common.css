@@ -541,3 +541,11 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .resume-task:hover:not(:disabled)::after {opacity:0;}
 .resume-task {border-radius:0;}
 .resume-session:has(.resume-task-row:hover) {box-shadow:var(--hover-shadow);}
+.resume-session-stats { padding:8px 12px; color:var(--muted); font-size:var(--font-small); }
+.resume-subagent-note { margin:0; padding:0 12px 8px; color:var(--muted); font-size:var(--font-small); line-height:1.5; }
+.resume-task-row.is-subagent,.is-subagent > .resume-task { height:auto; min-height:54px; }
+.is-subagent .resume-task-copy { flex-direction:column; align-items:stretch; gap:2px; }
+.is-subagent .resume-task-copy > * { white-space:nowrap; }
+.is-subagent > .resume-task:disabled { opacity:1; cursor:default; }
+/* Read-only support preview stays selectable and inside the narrow panel. */
+.diagnostics-preview { width:100%; min-height:280px; box-sizing:border-box; resize:vertical; font:12px/1.6 Consolas,monospace; color:inherit; background:transparent; border:1px solid currentColor; border-radius:8px; padding:10px; white-space:pre; }

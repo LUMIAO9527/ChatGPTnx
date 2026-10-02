@@ -40,7 +40,7 @@ window.NXViews.settings = c => {
   const x=window.NXSettingsContent,n=data.accounts.filter(a=>!(data.settings.auto_relay_excluded||[]).includes(a.email)).length;
   const options=[['system','系统'],['light','浅色'],['dark','深色']];
   const appearance=x.disclosure(c,'appearance','外观',segmented({label:'外观',action:'pref',key:'appearance',options,value:data.settings.appearance,className:'compact'}),options.find(([v])=>v===data.settings.appearance)?.[1]||'系统');
-  const body=settingsGroup('系统',systemSettings(data.settings)+appearance+x.disclosure(c,'notifications','通知',notificationSettings(data.settings)))
+  const body=settingsGroup('系统',systemSettings(data.settings)+appearance+x.disclosure(c,'notifications','通知',notificationSettings(data.settings))+link('','诊断摘要','diagnostics'))
     +settingsGroup('接力与接续',autoRelaySetting(data.settings)
       +x.disclosure(c,'relay','参与自动接力的账号',x.relay(c),`${n}/${data.accounts.length}`)
       +taskContinuationSetting(data.settings)

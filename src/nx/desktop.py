@@ -331,6 +331,8 @@ class Bridge:
     def __init__(self, service, host):
         self._service, self._host = service, host
     def get_data(self): return self._service.get_data()
+    def get_diagnostics(self): return self._service.get_diagnostics()
+    def retry_query(self, email): return self._service.retry_query(email)
     def dismiss_error(self, error_id): return self._service.dismiss_error(error_id)
     def get_resume_details(self): return self._service.get_resume_details()
     def clear_resume_history(self): return self._service.clear_resume_history()
@@ -341,9 +343,15 @@ class Bridge:
         from .desktop_resume import THREAD_ID, navigate_existing_task
         if not THREAD_ID.fullmatch(str(thread_id)):
             return {'ok': False, 'error': '任务编号不合法'}
-        if not any(item['thread_id'] == thread_id for session in self._service.get_resume_details()
-                   for item in session['items']):
+        items = [item for session in self._service.get_resume_details() for item in session['items']]
+        matched = next((item for item in items if item['thread_id'] == thread_id or
+                        (item.get('is_subagent') and item.get('parent_thread_id') == thread_id)), None)
+        if not matched:
             return {'ok': False, 'error': '任务记录已过期'}
+        if matched.get('is_subagent'):
+            thread_id = matched.get('parent_thread_id')
+            if not THREAD_ID.fullmatch(str(thread_id)):
+                return {'ok': False, 'error': '无法确认所属主任务，请在桌面端查看'}
         if not self._service.desktop_gate.acquire(blocking=False):
             return {'ok': False, 'error': '正在切换或接续，请稍后打开'}
         try:
@@ -1050,20 +1058,22 @@ class Desktop:
                 self.icon.title = ('ChatGPTnx · 操作未完成 · ' + data['last_error']['message'])[:127]
 
     def _notify_stale_credentials(self, data):
-        """Balloon once per account when a refresh was rejected as 401/403."""
+        """Notify auth loss and access denial separately, without guessing bans."""
         fresh = time.time() - (data.get('updated') or 0) <= 1800
         if not fresh:
             return
         for account in data['accounts']:
             code = account.get('error_code')
-            if code not in (401, 403):
+            if code not in (401, 403, 'reauth_required'):
                 continue
             who = account.get('alias') or account['email'].split('@')[0]
             note_key = ('credential', account['email'], code)
             if note_key in self.noticed:
                 continue
             self.noticed.add(note_key)
-            self.icon.notify(f'账号 {who} 的登录凭据已失效，请重新登录后刷新。', 'ChatGPTnx')
+            message = (f'账号 {who} 的查询被拒绝，已暂停；确认权限后可恢复查询。'
+                       if code == 403 else f'账号 {who} 的登录凭据已失效，请重新登录后刷新。')
+            self.icon.notify(message, 'ChatGPTnx')
             self.service.log.info('credential_stale_notified account_index=%d', data['accounts'].index(account))
 
     def _notify_reset_expiry(self, data):

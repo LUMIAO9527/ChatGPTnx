@@ -22,6 +22,7 @@ from .resume_flow import ResumeCoordinator
 from .version import APP_VERSION
 from .quota_policy import fresh_windows
 from .settings import valid_setting
+from .diagnostics import Diagnostics, query_summary
 
 
 def relay_candidates(accounts, current, excluded=()):
@@ -99,6 +100,7 @@ class Service:
         handler = RotatingFileHandler(paths.data / 'run.log', maxBytes=128 * 1024, backupCount=1, encoding='utf-8')
         handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
         self.log.addHandler(handler)
+        self.diagnostics = Diagnostics(self.log)
         if isinstance(self.query, Query):
             self.query.log = self.log
             removed, failed = self.query.cleanup_orphans()
@@ -198,6 +200,7 @@ class Service:
                                 'created_at': time.time(), 'seen': False}
                 self.log.info('operation_completed kind=%s source=%s', kind, source or 'direct')
             except Exception as error:
+                self.diagnostics.operation_failed(kind, error)
                 message = str(error) if isinstance(error, (ValueError, RuntimeError)) else '操作失败；原数据未被主动删除，请重试'
                 with self.lock:
                     self.last_error = {'id': ident, 'kind': kind, 'target': target, 'message': message[:180], 'created_at': time.time(), 'seen': False}
@@ -230,6 +233,11 @@ class Service:
         subscriptions = self.state.get('subscriptions', {})
         for email in emails:
             item = copy.deepcopy(indexed.get(email, {'email': email, 'ok': False, 'err': '等待首次查询', 'windows': [], 'plan': 'unknown'}))
+            if isinstance(self.query, Query):
+                policy = self.query.status(email, email == current_email)
+                if not policy.get('ready', True):
+                    from .diagnostics_http import message
+                    item.update(policy, ok=False, err=message(policy.get('error_code')))
             item['alias'] = meta.get(email, {}).get('alias', '')
             auth_path = self.paths.auth if current_email == email else self.paths.snapshot(email)
             item['identity_key'] = account_identity_key(auth_path, email)
@@ -268,6 +276,7 @@ class Service:
         recommended = next((a for a in ranked if a['email'] == settings['relay_pick']),
                            ranked[0] if ranked else None)
         return {'version': APP_VERSION, 'updated': cache.get('updated'), 'accounts': accounts,
+                'monitor_health': self.diagnostics.snapshot()['monitor'],
                 'current': current_email, 'operation': op,
                 'switching': op['target'] if op and op['kind'] == 'switch' else None,
                 'refreshing': bool(op and op['kind'] == 'refresh'),
@@ -287,6 +296,29 @@ class Service:
                 'pending': pending,
                 'usage_revision': self.state.get('usage_revision', 0),
                 'resume': self.resumer.summary()}
+
+    def get_diagnostics(self):
+        """Preview only: creates no file and never reads credential/log bodies."""
+        data = self.get_data()
+        result = {'version': APP_VERSION, 'generated_at': int(time.time()),
+                  'auto_relay': data['settings']['auto_relay'],
+                  'task_continuation': data['settings']['task_continuation'],
+                  **self.diagnostics.snapshot(),
+                  'accounts': [query_summary(a, i + 1) for i, a in enumerate(data['accounts'])]}
+        return {'ok': True, 'text': json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False)}
+
+    def retry_query(self, email):
+        if email not in self.accounts.all():
+            return {'ok': False, 'error': '账号不存在'}
+        def work():
+            if isinstance(self.query, Query):
+                if not self.query.resume(email):
+                    raise RuntimeError('查询仍暂停，请检查保护状态、登录状态或等待冷却结束')
+            self._refresh(email)
+        return self.begin('refresh', email, work, interruptible=True)
+
+    def _query_ready(self, email, current):
+        return not isinstance(self.query, Query) or self.query.ready(email, email == current)
 
     def visible_error(self):
         with self.lock:
@@ -395,8 +427,15 @@ class Service:
         Account detail refresh remains deliberately scoped to that account."""
         if email is not None and email not in self.accounts.all():
             return {'ok': False, 'error': '账号不存在'}
+        targets = email
+        if background:
+            current = self.accounts.current()
+            targets = [e for e in ([email] if email else self.accounts.all())
+                       if self._query_ready(e, current)]
+            if not targets:
+                return {'ok': True, 'accepted': False, 'reason': 'query_paused'}
         cancel = threading.Event()
-        return self.begin('refresh', email, lambda: self._refresh(email, cancel),
+        return self.begin('refresh', email, lambda: self._refresh(targets, cancel),
                           background=background, interruptible=True, cancel_event=cancel)
 
     def switch(self, email):
@@ -422,6 +461,11 @@ class Service:
                 raise RuntimeError('目标账号需要重新登录；当前账号没有切换')
             if not target.get('ok'):
                 raise RuntimeError('目标账号在线状态尚未确认；当前账号没有切换')
+            warning = target.get('query_warning') or {}
+            if ((warning.get('scope') != 'reset_credits' and
+                    (warning.get('paused') or (warning.get('retry_at') or 0) > time.time()))
+                    or not self._query_ready(email, previous)):
+                raise RuntimeError('目标账号查询已暂停；当前账号没有切换')
             if self.stop.is_set() or cancel.is_set():
                 raise RuntimeError('操作已取消；当前账号没有切换')
             if source in ('auto', 'auto-limit'):
@@ -530,7 +574,8 @@ class Service:
         excluded = set((data.get('settings') or {}).get('auto_relay_excluded') or [])
         now = time.time()
         targets = [a['email'] for a in data.get('accounts', [])
-                   if a['email'] not in excluded and not fresh_windows(a, now)]
+                   if a['email'] not in excluded and not fresh_windows(a, now)
+                   and self._query_ready(a['email'], data.get('current'))]
         if not targets:
             return False
         # Failed requests must not create a refresh storm on every UI update.
@@ -561,7 +606,7 @@ class Service:
         if target:
             result = self._switch(target, 'auto-limit', failure_events=events)
             if result.get('accepted'):
-                self.log.info('auto_relay_limit_event current=%s', observed_current)
+                self.log.info('auto_relay_limit_event')
             return result
         reset_confirmed = bool(events and all(
             event.get('refreshed') and
@@ -1010,9 +1055,12 @@ class Service:
             watcher = UsageLimitWatcher(self.paths.home)
             if not watcher.prime():
                 self.log.info('usage_limit_watch_unavailable')
-            while not self.stop.wait(1):
+            delay = 1
+            while not self.stop.wait(delay):
                 try:
                     watcher.poll(self._record_usage_limit_events)
+                    if not watcher.available:
+                        raise RuntimeError('history_unavailable')
                     for origin, group in self.resumer.limit_groups().items():
                         if origin != self.accounts.current():
                             self.resumer.defer_limit(origin, 5)
@@ -1043,8 +1091,11 @@ class Service:
                             self.resumer.discard_origin(origin)
                         else:
                             self.resumer.defer_limit(origin, 30)
+                    self.diagnostics.monitor_ok()
+                    delay = 1
                 except Exception as error:
-                    self.log.warning('limit_watch_iteration_failed type=%s', type(error).__name__)
+                    delay = self.diagnostics.monitor_failed(error, watcher.failure if not watcher.available else None)
+                    self.notify()
         threading.Thread(target=watch_usage_limit, name='nx-limit-watch', daemon=True).start()
 
         def loop():

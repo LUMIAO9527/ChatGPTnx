@@ -58,6 +58,10 @@ add(G,'usage-identity-changed','个人用量 · 身份变化',route='usage',scen
 
 G='06 · 设置与参与账号'
 add(G,'settings','设置 · 三个一级分组',route='settings')
+add(G,'diagnostics','诊断摘要 · 预览后复制',route='diagnostics',steps=[click('diagnostics-refresh')])
+add(G,'query-forbidden','权限拒绝 · 暂停查询',scenario='query-forbidden')
+add(G,'query-cooling','请求过频 · 等待冷却',scenario='query-cooling')
+add(G,'monitor-degraded','任务监控 · 延迟重试',scenario='monitor-degraded')
 add(G,'purchase-account','购买账号 · QQ联系',route='purchase')
 add(G,'settings-automation','接力与接续 · 默认',route='automation')
 add(G,'automation-on','接力与接续 · 已开启',route='automation',scenario='automation-on')

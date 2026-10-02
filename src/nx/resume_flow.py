@@ -9,7 +9,8 @@ import threading
 import time
 import uuid
 
-from .desktop_resume import attempt_continuation, title_prefixes, latest_turn, THREAD_ID
+from .desktop_resume import attempt_continuation, title_prefixes, latest_turn, THREAD_ID, desktop_task_events
+from .task_metadata import task_metadata
 from .quota_policy import number
 from .storage import atomic_bytes, load_owned_document, account_identity_key
 
@@ -331,6 +332,7 @@ class ResumeCoordinator:
             self._prune()
             all_events = list(active) + list(failures)
             all_events += [p for p in self.pending if p.get('origin') == origin]
+            all_events = desktop_task_events(self.paths.home, all_events)
             unique = {}
             for event in all_events:
                 key = self._key(event)
@@ -386,6 +388,7 @@ class ResumeCoordinator:
         return matches[0] if len(matches) == 1 else None
 
     def note_limit_events(self, events, origin, auto_enabled):
+        events = desktop_task_events(self.paths.home, events)
         if not events:
             return
         now = time.time()
@@ -428,9 +431,32 @@ class ResumeCoordinator:
             self._save()
         self.wake.set()
 
+    def _skip_subagent_work(self):
+        """Retire queued background-agent work without changing old outcomes."""
+        waiting = [(session, item) for session in self.sessions
+                   if session.get('phase') in ('switching', 'resuming')
+                   for item in session.get('items', []) if item.get('state') == 'waiting']
+        ids = [item['thread_id'] for _, item in waiting] + [p['thread_id'] for p in self.pending]
+        if not ids:
+            return
+        metadata = task_metadata(self.paths.home, ids)
+        hidden = {key for key, value in metadata.items() if value.get('kind') == 'subagent'}
+        if not hidden:
+            return
+        self.pending = [p for p in self.pending if p['thread_id'] not in hidden]
+        for session, item in waiting:
+            if item['thread_id'] in hidden:
+                item.update(state='skipped', reason='subagent_task', next_try=0,
+                            retry_authorized=False)
+                session['updated_at'] = time.time()
+                if all(i['state'] in TERMINAL for i in session['items']):
+                    session['phase'] = 'failed' if any(i['state'] == 'failed' for i in session['items']) else 'done'
+        self._save()
+
     def limit_groups(self):
         now = time.time()
         with self.lock:
+            self._skip_subagent_work()
             if self._prune():
                 self._save()
             groups = {}
@@ -541,6 +567,8 @@ class ResumeCoordinator:
 
     def _queue_automatic_retry(self, session, item, reason, now, record=None):
         """Retry only a proven no-send failure or a confirmed terminal turn."""
+        if task_metadata(self.paths.home, [item.get('thread_id')]).get(item.get('thread_id'), {}).get('kind') == 'subagent':
+            return False
         delay = auto_retry_delay(reason, item.get('attempts'))
         if (delay is None or self.blocked or session.get('phase') == 'cancelled' or
                 not self.settings().get('task_continuation') or
@@ -600,6 +628,7 @@ class ResumeCoordinator:
                         changed = True
             if changed:
                 self._save()
+            self._skip_subagent_work()
             if not self.settings().get('task_continuation') or self.desktop_transitioning():
                 return None
             for session in self.sessions:
@@ -767,11 +796,33 @@ class ResumeCoordinator:
             waiting = self._waiting_session()
             if waiting:
                 sessions.append(waiting)
-        titles = title_prefixes(self.paths.home, [item['thread_id'] for session in sessions
-                    for item in session.get('items', [])])
+        ids = [item['thread_id'] for session in sessions for item in session.get('items', [])]
+        metadata = task_metadata(self.paths.home, ids)
+        parent_ids = [m['parent_id'] for m in metadata.values() if m.get('parent_id')]
+        parents = task_metadata(self.paths.home, parent_ids) if parent_ids else {}
+        for _ in range(8):
+            ancestors = {m['parent_id'] for m in parents.values()
+                         if m.get('kind') == 'subagent' and m.get('parent_id')} - parents.keys()
+            if not ancestors:
+                break
+            parents.update(task_metadata(self.paths.home, ancestors))
+        titles = title_prefixes(self.paths.home, ids)
         for session in sessions:
             for item in session.get('items', []):
-                item['title'] = titles.get(item['thread_id']) or item['thread_id'][-8:]
+                info = metadata.get(item['thread_id'], {})
+                item['is_subagent'] = info.get('kind') == 'subagent'
+                parent, visited = info.get('parent_id'), set()
+                while parent and parent not in visited and parents.get(parent, {}).get('kind') == 'subagent':
+                    visited.add(parent)
+                    parent = parents[parent].get('parent_id')
+                parent_info = parents.get(parent, {})
+                item['parent_thread_id'] = parent_info.get('canonical_id') if parent_info.get('kind') == 'task' else None
+                item['parent_title'] = parent_info.get('title') if item['parent_thread_id'] else None
+                if item['is_subagent']:
+                    agent = (info.get('agent_path') or '').rstrip('/').rsplit('/', 1)[-1]
+                    item['title'] = '后台子任务' + ('：' + agent if agent else '')
+                else:
+                    item['title'] = info.get('title') or titles.get(item['thread_id']) or item['thread_id'][-8:]
                 # Older versions stored every later turn failure under one
                 # generic label. Reclassify the exact observed turn for display
                 # without rewriting the durable history or replaying an action.
@@ -805,6 +856,8 @@ class ResumeCoordinator:
 
     def retry_task(self, session_id, thread_id):
         """Explicitly retry a safe pre-dispatch failure or a confirmed failed turn."""
+        if task_metadata(self.paths.home, [thread_id]).get(thread_id, {}).get('kind') == 'subagent':
+            return {'ok': False, 'error': '后台子任务不单独接续，请查看所属主任务'}
         with self.lock:
             if self.blocked:
                 return {'ok': False, 'error': '接续记录无法验证，请先恢复记录备份'}

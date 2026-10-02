@@ -16,8 +16,9 @@ ChatGPTnx is a lightweight Windows desktop utility that reduces the waiting and 
 ## Features
 
 - **Automatic handoff:** Switch to a participating account with available quota when the current account runs out. You can also switch manually and choose which accounts join the rotation.
-- **Task continuation:** After a switch, attempt to resume the original desktop task. You can configure a continuation message and review the result for each task.
-- **Quotas and usage:** See each account's remaining quota, reset times, and token usage to plan the next handoff and decide how many accounts to configure.
+- **Task continuation:** After a switch, attempt to resume the original desktop task. Configure a continuation message and review successful, skipped, and unresolved results separately. Identified background agents do not trigger independent desktop continuation.
+- **Quotas and usage:** See each account's remaining quota, reset times, and token usage. Queries pause or wait longer according to the error type, avoiding repeated requests during failures.
+- **Credential protection and diagnostics:** Protect account snapshots with Windows current-user encryption, and preview or copy a redacted diagnostic summary.
 - **Lightweight desktop controls:** Keep the app in the Windows tray, with notifications, keyboard shortcuts, and light and dark themes.
 
 ### Keeping long tasks moving
@@ -61,7 +62,11 @@ Closing the panel only hides it; the app keeps running in the tray. Use the tray
 
 ## Data and privacy
 
-Account and runtime data are stored next to the EXE. Keep that folder private and do not upload it publicly. Before reporting an issue, remove email addresses, tokens, task information, and local file paths.
+Account snapshots, archived snapshots, and transaction recovery backups use Windows current-user encryption and restricted file permissions. Encrypted snapshots cannot be copied directly to another Windows user. The official desktop app's active authentication file keeps its existing format.
+
+Account and runtime data are stored next to the EXE. Keep that folder private and do not upload it publicly. When reporting an issue, use the diagnostic summary in Settings. It excludes email addresses, tokens, task content, and local paths, and is never uploaded automatically.
+
+See [USAGE.md](USAGE.md) (Chinese) for query recovery, continuation behavior, and rollback instructions. Before restoring an executable that cannot read encrypted snapshots, restore the credential format using the documented recovery tool.
 
 ## License
 

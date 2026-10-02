@@ -16,6 +16,17 @@ THREAD_ID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 from .history_store import latest_database, read_only as _read_only
 from .resume_policy import message_resume_eligible, turn_failure_reason
 from .storage import fingerprint
+from .task_metadata import task_metadata
+
+
+def desktop_task_events(home, events):
+    """Exclude only explicitly identified background agents, not unknown tasks."""
+    events = list(events)
+    if not events:
+        return events
+    metadata = task_metadata(home, [event.get('thread_id') for event in events])
+    return [event for event in events
+            if metadata.get(event.get('thread_id'), {}).get('kind') != 'subagent']
 
 
 def _history(home):
@@ -65,8 +76,8 @@ def active_turns(home):
                               ('inProgress', int(time.time()) - 86400)).fetchall()
     except (OSError, sqlite3.Error):
         return []
-    return [{'thread_id': thread, 'turn_id': turn, 'was_active': True}
-            for thread, turn in rows]
+    return desktop_task_events(home, [{'thread_id': thread, 'turn_id': turn, 'was_active': True}
+            for thread, turn in rows])
 
 
 def title_prefixes(home, thread_ids):
@@ -237,6 +248,8 @@ def attempt_continuation(home, script, item, stop, log):
         return 'failed', 'shutting_down'
     if not all(THREAD_ID.fullmatch(str(v)) for v in (thread_id, turn_id)):
         return 'failed', 'invalid_task_id'
+    if task_metadata(home, [thread_id]).get(thread_id, {}).get('kind') == 'subagent':
+        return 'skipped', 'subagent_task'
     record = latest_turn(home, thread_id)
     route, outcome = continuation_route(record, turn_id)
     if outcome:

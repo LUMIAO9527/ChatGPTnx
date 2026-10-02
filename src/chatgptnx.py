@@ -53,6 +53,16 @@ def main():
     elif not args.once:
         raise SystemExit('桌面应用需要 Windows + WebView2；浏览器预览请打开 demo.html。')
     paths = Paths(root, resource_root=resources)
+    from nx.credentials import protect_store
+    try:
+        protect_store(paths)
+    except Exception:
+        # No error interpolation: file/OS errors may contain account filenames.
+        if os.name == 'nt':
+            ctypes.windll.user32.MessageBoxW(None,
+                '凭据保护未完成，程序已停止。请保留现有文件，检查目录权限后重试。',
+                'ChatGPTnx', 0x10)
+        raise SystemExit('Credential protection failed; no service started') from None
     service = Service(paths)
     if args.acceptance_relay:
         from nx.acceptance import relay_once

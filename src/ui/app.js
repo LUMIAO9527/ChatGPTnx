@@ -102,7 +102,10 @@
   const dateTime=ts=>new Date(ts*1000).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
   function failure(a) {
     const code=a?.error_code;
-    if(code==='reauth_required'||code===401||code===403)return {title:'登录需要恢复',detail:'重新登录后更新额度',action:'reauth',label:'重新登录'};
+    if(code==='query_policy_unavailable')return {title:'查询保护暂不可用',detail:'检查目录权限后，点击恢复查询',action:'retry-query',label:'恢复查询'};
+    if(code==='reauth_required'||code===401)return {title:'登录需要恢复',detail:'重新登录后更新额度',action:'reauth',label:'重新登录'};
+    if(code===403)return {title:'查询已暂停',detail:'服务拒绝访问；确认权限恢复后再试',action:'retry-query',label:'恢复查询'};
+    if(a?.retry_at>now())return {title:code===429?'请求过频，已暂停':'连接异常，稍后再试',detail:`下次查询：${dateTime(a.retry_at)}`};
     if(code===-32603||code==='-32603')return {title:'查询暂未完成',detail:'查询服务暂时不可用',action:'refresh-one',label:'重试'};
     if(code===-32601||code==='-32601')return {title:'暂不支持额度查询',detail:'请检查桌面端版本'};
     if(code==='timeout')return {title:'查询超时',detail:'请稍后重试',action:'refresh-one',label:'重试'};
@@ -154,6 +157,7 @@
     if(data.reauth)return statusBar({text:'等待完成重新登录',action:'reauth',symbol:'user',attrs:`data-email="${esc(data.reauth.email)}"`});
     if(data.adding)return statusBar({text:'正在添加账号，返回完成',action:'add',symbol:'user'});
     if(data.operation&&data.operation.kind!=='refresh')return statusBar({text:data.operation.phase,tone:'progress'});
+    if(data.monitor_health?.state==='degraded')return statusBar({text:'任务监控暂不可用 · 正在延迟重试',tone:'warning',action:'diagnostics'});
     if(data.resume)return resumeNotice();
     if(data.last_error)return statusBar({text:data.last_error.message||'上次操作未完成',tone:'error'});
     const c=current();
@@ -265,6 +269,7 @@
       }).join('');
       if(count>items.length) content+=`<p>另有 ${count-items.length} 次未提供逐项详情。</p>`;
     }
+    if(a.query_warning?.scope==='reset_credits'&&a.query_warning.paused) content+=`<p>重置详情查询已暂停，主额度查询正常。</p><button class="btn secondary" data-action="retry-query" data-email="${esc(a.email)}">恢复详情查询</button>`;
     return `<div class="detail-reset"><button class="detail-line detail-action reset-summary" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div class="reset-credit-details">${content}</div>`:''}</div>`;
   }
   function scopeUsage() {
@@ -316,6 +321,10 @@
       }
       case 'settings':
         ({title,body,cls}=window.NXViews.settings(viewContext()));break;
+      case 'diagnostics':
+        title='诊断摘要';cls='diagnostics-body';
+        body=`<p class="note">仅含版本、错误类别和匿名账号序号。先检查内容，再决定是否分享。</p><textarea class="diagnostics-preview" aria-label="脱敏诊断摘要" readonly spellcheck="false">${esc(ui.diagnostics||'正在读取…')}</textarea>`;
+        foot='<button class="btn secondary" data-action="diagnostics-refresh">重新读取</button><button class="btn primary" data-action="copy-diagnostics">复制摘要</button>';break;
       case 'purchase':
         ({title,body,cls}=window.NXViews.purchase(viewContext()));break;
       case 'resume':
@@ -389,6 +398,7 @@
       clear:()=>{const draft=ui.metaDrafts.get(email);if(draft){delete draft[field];if(!Object.keys(draft).length)ui.metaDrafts.delete(email);}}});
   }
   const actionLabels={
+    retry_query:'正在恢复查询…',
     launch_chatgpt:'正在打开 ChatGPT…',refresh:'正在刷新…',refresh_one:'正在刷新…',
     set_preferences:'正在保存…',set_account_meta:'正在保存…',set_auto_relay_account:'正在保存…',
     set_relay_pick:'正在设置…',set_account_hotkey:'正在保存…',adopt_current:'正在保存…',
@@ -567,6 +577,23 @@
       case 'refresh-state':{const token=feedback.begin(b,'正在检测…');await poll(true);feedback.finish(token,{text:bridgeError?'':'已重新检测'});break;}
       case 'refresh':if(data.accounts.length)await run('refresh');else show('add');break;
       case 'refresh-one':await run('refresh_one',target);break;
+      case 'retry-query':await run('retry_query',target);break;
+      case 'diagnostics':
+      case 'diagnostics-refresh':{
+        if(ui.page!=='diagnostics')show('diagnostics');
+        const epoch=navigation.ticket();
+        const result=await api('get_diagnostics');
+        if(navigation.current(epoch)){ui.diagnostics=result?.text||'诊断摘要暂不可用';renderSheet(false);}
+        break;
+      }
+      case 'copy-diagnostics':{
+        const field=$('.diagnostics-preview');if(!field||!ui.diagnostics)break;
+        field.focus({preventScroll:true});field.select();
+        let copied=false;
+        try {if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(field.value);copied=true;}}catch{}
+        if(!copied){try {copied=document.execCommand('copy');}catch{}}
+        notify(copied?'诊断摘要已复制':'请选中摘要手动复制',{tone:copied?'success':'error'});break;
+      }
       case 'reauth':show('reauth',target);break;
       case 'hide':if(config.demo){app.style.opacity='.35';notify('演示：窗口已隐藏，点击任意位置恢复');app.onclick=()=>{app.style.opacity='1';app.onclick=null;};}else await api('hide');break;
       case 'dismiss-status':dismissedStatus=activeStatusKey;paintNotifications();break;

@@ -67,6 +67,8 @@ window.NXDemo = (() => {
   async function call(method,...args){
     const [email,force]=args;
     switch(method){
+      case 'get_diagnostics':return {ok:true,text:JSON.stringify({version:'1.0.0',monitor:{state:'ok'},accounts:[{account:1,ok:true,paused:false}]},null,2)};
+      case 'retry_query':return operation('refresh',email,()=>{const a=state.accounts.find(a=>a.email===email);if(a){a.ok=true;a.error_code=null;a.paused=false;a.retry_at=null;delete a.query_warning;a.fetched_at=sec();}});
       case 'get_data':{
         if(state.demo_connection_error)throw new Error('演示：本地服务暂时不可用');
         const known=new Map(state.hotkeys.map(item=>[item.email,item]));
@@ -311,6 +313,10 @@ window.NXDemo = (() => {
       if(which==='reauth-cancelling')state.operation={kind:'reauth_cancel',phase:'正在恢复原账号'};
     }
     if(which==='detail-timeout'){state.accounts[0].ok=false;state.accounts[0].error_code='timeout';}
+    if(which==='query-forbidden'){state.accounts[0].ok=false;state.accounts[0].error_code=403;state.accounts[0].paused=true;}
+    if(which==='reset-forbidden')state.accounts[0].query_warning={scope:'reset_credits',paused:true,error_code:403};
+    if(which==='query-cooling'){state.accounts[0].ok=false;state.accounts[0].error_code=429;state.accounts[0].retry_at=sec()+600;}
+    if(which==='monitor-degraded')state.monitor_health={state:'degraded',failures:3,retry_at:sec()+60};
     if(which==='detail-missing'){state.accounts[0].ok=false;state.accounts[0].error_code='missing_snapshot';}
     if(which==='detail-schema'){state.accounts[0].ok=false;state.accounts[0].error_code=-32601;}
     if(which==='usage-zero')Object.values(usages).forEach(u=>{if(u.ok){Object.keys(u.summary).forEach(k=>u.summary[k]=0);u.dailyUsageBuckets.forEach(b=>b.tokens=0);}});
@@ -330,6 +336,19 @@ window.NXDemo = (() => {
       const [reason,status]=specialResume[which],phase=which==='resume-switching'?'switching':status==='failed'?'failed':'done';
       resumeDetails=[{id:'single-resume',target:state.accounts[1].email,phase,updated_at:sec(),items:[{thread_id:'67cc833f-6330-5bae-a638-9232b5ddfa21',title:'继续处理项目中的任务',state:status,reason}]}];
       state.resume={id:'single-resume',phase,done:status==='done'?1:0,failed:status==='failed'?1:0,attention:0,total:1};
+    }
+    if(which==='resume-subagent-history'){
+      const parents=['67cc833f-6330-5bae-a638-9232b5ddfa21','ea10a953-d3a4-53b9-b010-6361794c2a22'];
+      const child=(suffix,label,state,reason,parent=parents[0])=>({thread_id:`10000000-0000-4000-8000-0000${suffix}`,title:'后台子任务：'+label,is_subagent:true,parent_thread_id:parent,parent_title:parent?'整理研究资料':null,state,reason});
+      resumeDetails=[{id:'subagent-history',target:state.accounts[1].email,phase:'failed',updated_at:sec(),items:[
+        child('00000001','资料核对','skipped','duplicate_attempt'),
+        child('00000002','规则检查','skipped','duplicate_attempt'),
+        child('00000003','来源复核','skipped','duplicate_attempt',null),
+        child('00000004','历史检查','failed','action_outcome_unknown'),
+        {thread_id:parents[0],title:'整理研究资料',state:'done',reason:'new_turn_observed'},
+        {thread_id:parents[1],title:'检查桌面应用',state:'done',reason:'new_turn_observed'}
+      ]}];
+      state.resume={id:'subagent-history',phase:'failed',done:2,failed:1,total:6};
     }
     if(which==='many')for(let i=5;i<14;i++)state.accounts.push({...clone(state.accounts[1]),email:`extra-${i}@example.com`,alias:`账号 ${i+1}`,identity_key:`extra-${i}`});
   }

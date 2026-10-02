@@ -17,6 +17,8 @@ import time
 import uuid
 
 from .settings import DEFAULTS, normalize_settings
+from .credentials import (assert_safe_path, credential_store_lock, read_credential_bytes,
+                          secure_path, write_credential_bytes)
 
 
 def autostart_enabled_safe() -> bool:
@@ -32,11 +34,15 @@ def autostart_enabled_safe() -> bool:
     except OSError:
         return False
 
-def atomic_bytes(path: Path, data: bytes) -> None:
+def atomic_bytes(path: Path, data: bytes, *, private=False) -> None:
+    if private:
+        assert_safe_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name('.' + path.name + '.' + uuid.uuid4().hex + '.tmp')
     try:
         with tmp.open('xb') as f:
+            if private:
+                secure_path(tmp)
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
@@ -125,7 +131,10 @@ def _credential_record(path: Path) -> tuple[dict, dict]:
         cached = _credential_cache.get(key)
         if cached and cached[0] == signature:
             return cached[1], cached[2]
-    data = read_json(path, {}) or {}
+    try:
+        data = json.loads(read_credential_bytes(path).decode('utf-8-sig'))
+    except (OSError, ValueError, UnicodeError):
+        data = {}
     data = data if isinstance(data, dict) else {}
     payload = {}
     try:
@@ -361,7 +370,7 @@ class Accounts:
                         if line.strip().startswith('#')]
         except FileNotFoundError:
             comments = ['# 行序 = 面板顺序 = 全局热键序号；不要放入凭据。']
-        atomic_bytes(self.paths.order, ('\n'.join(comments + emails) + '\n').encode('utf-8'))
+        atomic_bytes(self.paths.order, ('\n'.join(comments + emails) + '\n').encode('utf-8'), private=True)
         with self._order_lock:
             self._order_signature = None
             self._order_values = []
@@ -380,27 +389,36 @@ class Accounts:
         old archive cannot be removed, the account remains correctly active and
         archived() hides that stale storage record.
         """
-        self.append(email)
-        removed = self.paths.snapshots / 'removed'
-        for path in removed.glob('*.json'):
-            archived_email, _ = identity(path)
-            if archived_email and archived_email.casefold() == email.casefold():
-                try:
-                    path.unlink()
-                except OSError:
-                    pass
+        with credential_store_lock(self.paths.snapshots):
+            self.append(email)
+            removed = self.paths.snapshots / 'removed'
+            for path in removed.glob('*.json'):
+                archived_email, _ = identity(path)
+                if archived_email and archived_email.casefold() == email.casefold():
+                    try:
+                        assert_safe_path(path).unlink()
+                    except OSError:
+                        pass
 
     def archive(self, email: str) -> str:
+        with credential_store_lock(self.paths.snapshots):
+            return self._archive(email)
+
+    def _archive(self, email: str) -> str:
         if email not in self.all():
             raise ValueError('账号不在清单中')
         if self.current() == email:
             raise ValueError('请先切换到其他账号，再归档当前账号')
-        source = self.paths.snapshot(email)
-        target = self.paths.snapshots / 'removed' / f'{email}.{int(time.time())}.{uuid.uuid4().hex[:8]}.json'
+        source = assert_safe_path(self.paths.snapshot(email))
+        target = assert_safe_path(self.paths.snapshots / 'removed' / f'{email}.{int(time.time())}.{uuid.uuid4().hex[:8]}.json')
         target.parent.mkdir(parents=True, exist_ok=True)
+        secure_path(target.parent)
         moved = False
         try:
             if source.exists():
+                info = source.stat()
+                write_credential_bytes(source, read_credential_bytes(source),
+                                       preserve_times=(info.st_atime_ns, info.st_mtime_ns))
                 os.replace(source, target)
                 moved = True
             self.write([v for v in self.all() if v != email])
@@ -420,14 +438,21 @@ class Accounts:
         return result
 
     def restore(self, key: str):
+        with credential_store_lock(self.paths.snapshots):
+            return self._restore(key)
+
+    def _restore(self, key: str):
         if not isinstance(key, str) or Path(key).name != key or '/' in key or '\\' in key:
             raise ValueError('归档标识不合法')
-        source = self.paths.snapshots / 'removed' / key
+        source = assert_safe_path(self.paths.snapshots / 'removed' / key)
         email, _ = identity(source)
         safe_email(email)
-        target = self.paths.snapshot(email)
+        target = assert_safe_path(self.paths.snapshot(email))
         if email.casefold() in {v.casefold() for v in self.all()} or target.exists():
             raise ValueError('已有同名账号；不会覆盖现有凭据')
+        info = source.stat()
+        write_credential_bytes(source, read_credential_bytes(source),
+                               preserve_times=(info.st_atime_ns, info.st_mtime_ns))
         os.replace(source, target)
         try:
             self.append(email)
