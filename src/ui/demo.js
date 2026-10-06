@@ -33,7 +33,7 @@ window.NXDemo = (() => {
       membership:{status:i===0?'cached_hint':'not_provided',date:i===0?n+12*day:null,date_kind:i===0?'entitlement_hint':null,
         source:i===0?'credential_claim':'not_available',verified:false,checked_at:null,observed_at:n-day,account_checked_online:false}}));
     state={version:window.NX_CONFIG.version,accounts,current:accounts[0].email,updated:n-60,switching:null,operation:null,adding:false,reauth:null,resume:null,
-      last_error:null,last_result:null,recent_results:[],chatgpt_running:true,pending:null,
+      last_error:null,last_result:null,recent_results:[],chatgpt_running:true,pending:null,relay_wait:null,
       hotkeys:accounts.map((a,i)=>({email:a.email,shortcut:`ctrl+alt+${i+1}`,registered:true})),
       settings:{appearance:'system',autostart:false,auto_relay:false,auto_relay_excluded:[],
         task_continuation:true,resume_message:'继续',notify_credential:true,
@@ -67,7 +67,7 @@ window.NXDemo = (() => {
   async function call(method,...args){
     const [email,force]=args;
     switch(method){
-      case 'get_diagnostics':return {ok:true,text:JSON.stringify({version:'1.0.0',monitor:{state:'ok'},accounts:[{account:1,ok:true,paused:false}]},null,2)};
+      case 'get_diagnostics':return {ok:true,text:JSON.stringify({version:window.NX_CONFIG.version,monitor:{state:'ok'},accounts:[{account:1,ok:true,paused:false}]},null,2)};
       case 'retry_query':return operation('refresh',email,()=>{const a=state.accounts.find(a=>a.email===email);if(a){a.ok=true;a.error_code=null;a.paused=false;a.retry_at=null;delete a.query_warning;a.fetched_at=sec();}});
       case 'get_data':{
         if(state.demo_connection_error)throw new Error('演示：本地服务暂时不可用');
@@ -78,6 +78,12 @@ window.NXDemo = (() => {
           ||state.relay_order.find(email=>email!==state.current)||null;
         state.auto_relay_email=state.settings.auto_relay_excluded.includes(state.current)?null:
           state.relay_order.find(email=>email!==state.current&&!state.settings.auto_relay_excluded.includes(email))||null;
+        if(state.relay_wait&&state.relay_wait.origin!==state.current)state.relay_wait=null;
+        if(state.relay_wait&&!state.operation&&!state.adding&&!state.reauth&&state.chatgpt_running&&state.relay_order.includes(state.relay_wait.email)){
+          const target=state.relay_wait.email;state.relay_wait=null;
+          operation('switch',target,()=>{state.current=target;state.settings.relay_pick=null;});
+          state.operation.source='recovery';
+        }
         return clone(state);}
       case 'dismiss_error':if(state.last_error?.id===email)state.last_error=null;return {ok:true};
       case 'clear_resume_history':resumeDetails=resumeDetails.filter(s=>['switching','resuming','waiting_account'].includes(s.phase));if(state.resume&&!['switching','resuming','waiting_account'].includes(state.resume.phase))state.resume=null;return {ok:true};
@@ -106,9 +112,11 @@ window.NXDemo = (() => {
       case 'refresh':return operation('refresh',null,()=>{state.updated=sec();state.accounts.forEach(a=>{if(a.ok){a.fetched_at=sec();a.windows.forEach(w=>{if(w.resets_at<=sec())w.resets_at=sec()+600;});}});});
       case 'refresh_one':return operation('refresh',email,()=>{const a=state.accounts.find(a=>a.email===email);if(a?.ok)a.fetched_at=sec();});
       case 'switch':
+        state.relay_wait=null;
         if(state.current===email)return {ok:true,already_current:true};
         return operation('switch',email,()=>{if(failNext){failNext=false;throw new Error('模拟：凭据文件被占用，仍保留原账号。');}state.current=email;state.settings.relay_pick=null;});
       case 'relay':
+        state.relay_wait=null;
         if(state.current===email)return {ok:true,already_current:true};
         return operation('switch',email,()=>{if(failNext){failNext=false;throw new Error('模拟：凭据文件被占用，仍保留原账号。');}state.current=email;state.settings.relay_pick=null;});
       case 'remove':return operation('remove',email,()=>{if(email===state.current)throw new Error('请先切换，再归档当前账号');const a=state.accounts.find(a=>a.email===email);if(!a)throw new Error('账号不存在');archives.push({key:'archived-'+serial,email,archived_at:sec(),account:a});state.accounts=state.accounts.filter(a=>a.email!==email);});
@@ -143,7 +151,15 @@ window.NXDemo = (() => {
         const excluded=new Set(state.settings.auto_relay_excluded);
         if(args[1])excluded.delete(email);else excluded.add(email);
         state.settings.auto_relay_excluded=[...excluded];return {ok:true};}
-      case 'set_relay_pick':state.settings.relay_pick=email||null;return {ok:true};
+      case 'set_relay_pick':{
+        const a=state.accounts.find(a=>a.email===email);
+        if(email&&(!a||email===state.current))return {ok:false,error:'这个账号不能设为下一棒'};
+        if(email&&(state.operation||state.adding||state.reauth))return {ok:false,error:'请先完成当前操作'};
+        const exhausted=a?.ok&&a.windows?.some(w=>Number.isFinite(w.used)&&w.used>=100);
+        state.relay_wait=exhausted?{id:(++serial).toString(16).padStart(32,'0'),email,origin:state.current}:null;
+        state.settings.relay_pick=exhausted?null:email||null;
+        const mode=exhausted?'waiting':email?'picked':'cancelled';
+        return {ok:true,mode,message:{waiting:'已安排，额度恢复后自动接力',picked:'已设为下一棒',cancelled:'已取消'}[mode]};}
       case 'launch_chatgpt':{
         const ticket=generation;
         if(state.demo_hold_launch)return new Promise(()=>{}); // Catalog-only fixed pending sample.
@@ -185,6 +201,11 @@ window.NXDemo = (() => {
     if(which==='preference-failed')state.demo_preference_error=true;
     if(which==='preference-pending')state.demo_hold_preference=true;
     if(which==='week-exhausted-auto-off'){state.accounts[0].windows[0].used=90;state.accounts[0].windows[1].used=100;}
+    if(['relay-exhausted','relay-waiting','relay-exhausted-both'].includes(which)){
+      state.accounts[1].windows[0].used=100;
+      if(which==='relay-exhausted-both')state.accounts[1].windows[1].used=100;
+      if(which==='relay-waiting')state.relay_wait={id:'00000000000000000000000000000001',email:state.accounts[1].email,origin:state.current};
+    }
     if(which==='resume-progress'||which==='resume-failed'){
       const failed=which==='resume-failed';
       state.resume={id:'demo-resume',phase:failed?'failed':'resuming',done:failed?1:1,failed:failed?1:0,total:3};

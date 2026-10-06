@@ -234,7 +234,7 @@ class State:
         existing, self.recovery_path = load_owned_document(self.path)
         original = copy.deepcopy(existing)
         allowed_state = {'settings', 'cache', 'account_meta', 'usage', 'usage_revision',
-                         'adding', 'reauth', 'subscriptions', 'hotkeys', 'reset_expiry_notices'}
+                         'adding', 'reauth', 'subscriptions', 'hotkeys', 'reset_expiry_notices', 'relay_wait'}
         self.value = {key: value for key, value in existing.items() if key in allowed_state}
         saved_settings = existing.get('settings', {})
         saved_settings = saved_settings if isinstance(saved_settings, dict) else {}
@@ -247,6 +247,15 @@ class State:
         self.value.setdefault('usage_revision', 0)
         self.value.setdefault('adding', None)
         self.value.setdefault('reauth', None)
+        waiting = self.value.get('relay_wait')
+        if (self.recovery_path or not isinstance(waiting, dict)
+                or not isinstance(waiting.get('id'), str)
+                or not re.fullmatch(r'[0-9a-f]{32}', waiting['id'])
+                or any(not isinstance(waiting.get(key), str) or not waiting[key]
+                       for key in ('email', 'origin'))
+                or waiting['email'] == waiting['origin']):
+            waiting = None
+        self.value['relay_wait'] = {key: waiting[key] for key in ('id', 'email', 'origin')} if waiting else None
         self.value.setdefault('subscriptions', {})
         self.value.setdefault('hotkeys', {})
         notices = self.value.get('reset_expiry_notices', {})

@@ -437,6 +437,26 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   execute.click();await wait(1800);
   check('switch/confirmation-completes',window.NXDemo.state().current===target&&document.querySelector('#sheet').hidden);
 
+  const openNextDetail=()=>window.NXPreview.open(new URLSearchParams('open=detail&email=work-02@example.com'));
+  await scenario('default');await openNextDetail();await wait(80);
+  let pick=document.querySelector('.detail-actions .primary'),switchButton=document.querySelector('.detail-actions .secondary');
+  check('detail/primary-sets-next-secondary-switches',pick.dataset.action==='pick'&&pick.textContent==='设为下一棒'&&switchButton.dataset.action==='switch'&&switchButton.textContent.includes('切换到此账号')&&box(pick).width>box(switchButton).width);
+  check('detail/next-and-switch-icons-match-their-actions',pick.querySelector('path').getAttribute('d')===document.querySelector('.relay-label path').getAttribute('d')&&switchButton.querySelector('path').getAttribute('d')===document.querySelector('.relay-arrow path').getAttribute('d'));
+  pick.click();await wait(150);
+  check('detail/normal-next-can-be-cancelled',window.NXDemo.state().settings.relay_pick==='work-02@example.com'&&document.querySelector('.detail-actions .primary').textContent.startsWith('取消下一棒'));
+  document.querySelector('.detail-actions .primary').click();await wait(150);
+  check('detail/cancel-next-clears-selection',window.NXDemo.state().settings.relay_pick===null&&document.querySelector('.detail-actions .primary').textContent.startsWith('设为下一棒'));
+  await scenario('relay-exhausted');await openNextDetail();await wait(80);
+  pick=document.querySelector('.detail-actions .primary');
+  check('detail/zero-quota-offers-recovery-relay',pick.textContent.startsWith('恢复后接力')&&window.NXDemo.state().current==='work-01@example.com');
+  const before=box(pick);pick.click();await wait(150);
+  pick=document.querySelector('.detail-actions .primary');
+  check('detail/recovery-relay-is-cancellable-with-same-geometry',pick.textContent.startsWith('取消等待')&&pick.getAttribute('aria-pressed')==='true'&&window.NXDemo.state().relay_wait?.email==='work-02@example.com'&&Math.abs(box(pick).width-before.width)<1&&Math.abs(box(pick).height-before.height)<1);
+  pick.click();await wait(150);window.NXDemo.simulate('restore-quota');await window.NXPreview.refresh();await wait(1600);
+  check('detail/cancelled-recovery-does-not-switch',window.NXDemo.state().current==='work-01@example.com'&&!window.NXDemo.state().relay_wait&&!window.NXDemo.state().operation);
+  await scenario('relay-waiting');window.NXDemo.simulate('restore-quota');await window.NXPreview.refresh();await wait(1600);await window.NXPreview.refresh();
+  check('detail/verified-recovery-runs-once',window.NXDemo.state().current==='work-02@example.com'&&!window.NXDemo.state().relay_wait&&!window.NXDemo.state().operation);
+
   const math=window.NXMath,stamp=new Date(2026,8,22,12).getTime()/1000;
   const accounts=[{email:'a@example.com',identity_key:'a',activity_key:'one'},{email:'b@example.com',identity_key:'b',activity_key:'one'},{email:'c@example.com',identity_key:'c'}];
   const usage=(key,total,buckets=[])=>({ok:true,source:'account/usage/read',identity_key:key,summary:{lifetimeTokens:total},dailyUsageBuckets:buckets});

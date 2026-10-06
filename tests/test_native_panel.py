@@ -315,8 +315,8 @@ class PanelTests(unittest.TestCase):
         self.assertIn('border-radius: var(--radius-control);', css)
         self.assertIn('background: var(--bg); border-radius: var(--window-r);', css)
 
-    def test_product_geometry_and_version_stay_unchanged(self):
-        self.assertEqual(APP_VERSION, '1.0.0')
+    def test_product_geometry_and_release_version(self):
+        self.assertEqual(APP_VERSION, '1.0.1')
         self.assertEqual(PANEL_CONFIG['radius'], 16)
         self.assertEqual(PANEL_CONFIG['sizes'], {'home': [372, 520], 'workspace': [372, 520]})
 

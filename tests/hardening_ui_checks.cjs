@@ -20,7 +20,7 @@ fs.mkdirSync(output, {recursive:true});
     await page.locator('[data-action="diagnostics"]').click();
     await page.waitForFunction(()=>document.querySelector('.diagnostics-preview')?.value.includes('monitor'));
     const text=await page.locator('.diagnostics-preview').inputValue();
-    assert.equal(JSON.parse(text).version,'1.0.0');
+    assert.equal(JSON.parse(text).version,'1.0.1');
     assert(!text.includes('@'));
     const overflow=await page.locator('#sheet').evaluate(el=>el.scrollWidth>el.clientWidth+1);
     assert.equal(overflow,false);

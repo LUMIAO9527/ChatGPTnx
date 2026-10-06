@@ -160,6 +160,10 @@
     if(data.monitor_health?.state==='degraded')return statusBar({text:'任务监控暂不可用 · 正在延迟重试',tone:'warning',action:'diagnostics'});
     if(data.resume)return resumeNotice();
     if(data.last_error)return statusBar({text:data.last_error.message||'上次操作未完成',tone:'error'});
+    if(data.relay_wait&&!(ui.page==='detail'&&ui.email===data.relay_wait.email)){
+      const waiting=data.accounts.find(a=>a.email===data.relay_wait.email);
+      if(waiting)return statusBar({text:`${name(waiting)} · 等待额度恢复后接力`,action:'detail',symbol:'clock',attrs:`data-email="${esc(waiting.email)}"`});
+    }
     const c=current();
     if(!data.settings.auto_relay&&valid(c)&&c.windows.some(w=>w.used>=100))
       return statusBar({text:'额度已耗尽 · 自动接力未开启',action:'settings',symbol:'info'});
@@ -308,9 +312,13 @@
         title='账号详情';const m=a.membership||{},isCurrent=a.email===data.current;
         const manualDate=recordedDate(a.manual_subscription_date);
         const expiryNote=manualDate?`${manualDate} 到期`:m.date?`${dt(m.date)} 到期`:'未录入到期时间';
+        const waiting=data.relay_wait?.email===a.email,picked=data.settings.relay_pick===a.email;
+        const exhausted=a.ok&&a.windows?.some(w=>Number.isFinite(w.used)&&w.used>=100);
+        const pickLabel=waiting?'取消等待':picked?'取消下一棒':exhausted?'恢复后接力':'设为下一棒';
+        const pickIcon=waiting||picked?'close':exhausted?'clock':'baton';
         const actionArea=isCurrent?
           `<div class="detail-actions is-current"><button class="btn primary current-status" data-action="home" aria-label="当前使用，返回首页">${icon('check')}当前使用</button></div>`:
-          `<div class="detail-actions"><button class="btn primary" data-action="switch" ${attr} ${busy()||data.adding?'disabled':''}>切换到此账号 ${icon('arrow')}</button><button class="btn secondary" data-action="pick" ${attr}>${icon('baton')}${data.settings.relay_pick===a.email?'取消下一棒':'设为下一棒'}</button></div>`;
+          `<div class="detail-actions"><button class="btn primary" data-action="pick" ${attr} ${!waiting&&!picked&&(busy()||data.adding||data.reauth)?'disabled':''} aria-pressed="${waiting||picked}" title="${exhausted&&!waiting?'额度恢复并核验后自动接力':pickLabel}">${icon(pickIcon)}${pickLabel}</button><button class="btn secondary" data-action="switch" ${attr} ${busy()||data.adding?'disabled':''}>切换到此账号 ${icon('arrow')}</button></div>`;
         const archive=isCurrent?`<button class="danger-row unavailable" disabled title="切换到其他账号后可归档">${icon('archive')}归档账号</button>`:`<button class="danger-row" data-action="remove" ${attr}>${icon('archive')}归档账号</button>`;
         body=`${accountCard(a,true,isCurrent?'当前账号':'')}${actionArea}${link('chart','个人用量','usage-account',attr)}<div class="detail-compact">${window.NXEditors.account(viewContext(),a)}${resetCredits(a)}${detail('Credits',creditValue(a))}</div>`;
         cls=`detail-body ${isCurrent?'is-current':''} has-credits`;foot=`<div class="detail-bottom">${archive}<div class="detail-expiry-note">${esc(expiryNote)}</div></div>`;footClass='detail-footer';break;}
@@ -421,7 +429,7 @@
       const result=await api(method,...args);
       if(result?.ok===false)throw new Error(result.error||result.err||'操作未被接受');
       await poll(true);
-      feedback.finish(token,{text:actionResults[method]||''});
+      feedback.finish(token,{text:method==='set_relay_pick'?result?.message||actionResults[method]:actionResults[method]||''});
       return result;
     } catch(error) {
       feedback.finish(token);
@@ -653,7 +661,7 @@
       case 'inline-reload':await loadInline(val,true);break;
       case 'hotkeys':show('hotkeys');break;
       case 'record-hotkey':ui.recording=target;renderSheet();break;
-      case 'pick':{const clearing=data.settings.relay_pick===target;await run('set_relay_pick',clearing?null:target);break;}
+      case 'pick':{const clearing=data.settings.relay_pick===target||data.relay_wait?.email===target;await run('set_relay_pick',clearing?null:target);break;}
       case 'quota-overview':show('quota-overview');break;
       case 'quota-metric':ui.quotaMetric=val;if(val==='time'&&ui.quotaScope==='relay')ui.quotaScope='five';renderSheet();break;
       case 'quota-scope':ui.quotaScope=val;if(val==='relay')ui.quotaMetric='quota';renderSheet();break;

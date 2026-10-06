@@ -38,6 +38,8 @@ for key,label,sc,params in [
  ('detail-timeout','详情 · 查询超时','detail-timeout',{}),('detail-reauth','详情 · 需要重新登录','reauth',{'email':'remote@example.com'}),
  ('detail-missing','详情 · 登录快照缺失','detail-missing',{}),('detail-unsupported','详情 · 查询接口不支持','detail-schema',{})]:add(G,key,label,route='detail',scenario=sc,**params)
 add(G,'detail-picked','详情 · 已指定为下一棒',route='detail',email='backup@example.com',steps=[click('pick')])
+add(G,'detail-recovery','详情 · 额度为零时预约接力',route='detail',email='work-02@example.com',scenario='relay-exhausted')
+add(G,'detail-recovery-waiting','详情 · 取消恢复后接力',route='detail',email='work-02@example.com',scenario='relay-waiting')
 
 G='04 · 额度总览'
 add(G,'quota-overview','额度总览 · 接力顺序',route='quota-overview')

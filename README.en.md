@@ -7,7 +7,7 @@
 <p>Keep a long task moving across the accounts you own. Switch accounts when quota runs out, then attempt to continue the original task.</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.0.0" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.0.1" height="20">
 <img src="docs/images/badges/license.svg" alt="Source available to inspect; rights reserved" height="20">
 </div>
 
@@ -15,7 +15,7 @@ ChatGPTnx is a lightweight Windows desktop utility that reduces the waiting and 
 
 ## Features
 
-- **Automatic handoff:** Switch to a participating account with available quota when the current account runs out. You can also switch manually and choose which accounts join the rotation.
+- **Automatic handoff:** Switch to a participating account with available quota when the current account runs out. You can also switch manually, choose participating accounts, or schedule a cancellable handoff after an account's quota recovers.
 - **Task continuation:** After a switch, attempt to resume the original desktop task. Configure a continuation message and review successful, skipped, and unresolved results separately. Identified background agents do not trigger independent desktop continuation.
 - **Quotas and usage:** See each account's remaining quota, reset times, and token usage. Queries pause or wait longer according to the error type, avoiding repeated requests during failures.
 - **Credential protection and diagnostics:** Protect account snapshots with Windows current-user encryption, and preview or copy a redacted diagnostic summary.
@@ -51,7 +51,7 @@ The quota overview and usage statistics help you see which account is available 
 
 ## Download and run
 
-Download `ChatGPTnx.exe` from the [v1.0.0 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.0). The release also provides `ChatGPTnx-v1.0.0-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, and Microsoft Edge WebView2 Runtime.
+Download `ChatGPTnx.exe` from the [v1.0.1 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.1). The release also provides `ChatGPTnx-v1.0.1-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, and Microsoft Edge WebView2 Runtime.
 
 1. Put the EXE in its own writable folder and launch it. Open the panel from the system tray.
 2. Select **Add account** and follow the prompt to open the desktop sign-in window. After signing in to an account you own, return to the panel and confirm the account to save it.

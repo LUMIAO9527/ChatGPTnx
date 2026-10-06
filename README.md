@@ -7,7 +7,7 @@
 <p>用 n 个 Plus 账号，接力推进一个长任务。自动切号，继续原任务。</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.0.0" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.0.1" height="20">
 <img src="docs/images/badges/license.svg" alt="源码可查看 · 保留权利" height="20">
 </div>
 
@@ -15,7 +15,7 @@ ChatGPTnx 是一款轻量的 Windows 桌面工具，通过多账号自动接力�
 
 ## 功能
 
-- **自动接力**：额度耗尽时切换到有可用额度的参与账号，支持手动接力和自定义参与账号。
+- **自动接力**：额度耗尽时切换到有可用额度的参与账号，支持手动接力、自定义参与账号，以及可取消的“恢复后接力”预约。
 - **任务接续**：切换账号后接续原桌面任务，支持自定义接续消息，分别查看成功、跳过和需查看的记录；识别到的后台子任务不单独触发桌面接续。
 - **额度与用量**：集中查看各账号的剩余额度、重置时间和 Token 用量；按错误类别暂停查询或延长等待间隔，避免故障时反复请求。
 - **凭据保护与诊断**：使用 Windows 当前用户加密保护账号快照，提供可预览、可复制的脱敏诊断摘要。
@@ -51,7 +51,7 @@ ChatGPTnx 的核心，是让多个 Plus 账号接力推进同一个长任务。�
 
 ## 下载与运行
 
-从 [v1.0.0 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.0) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.0.0-source.zip`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用，以及 Microsoft Edge WebView2 Runtime。
+从 [v1.0.1 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.1) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.0.1-source.zip`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用，以及 Microsoft Edge WebView2 Runtime。
 
 1. 将 EXE 放入独立、可写的目录后启动，从托盘打开面板。
 2. 点击“添加账号”，按提示打开桌面登录窗口；登录新账号后，回到面板确认保存。

@@ -287,6 +287,133 @@ class TransactionTests(Fixture):
         self.assertIsNone(self.service.get_data()['settings']['relay_pick']);self.wait()
     def test_relay_pick_rejects_current_account(self):
         self.assertFalse(self.service.set_relay_pick('a@example.com')['ok'])
+    def exhaust_next(self, windows=(0,)):
+        self.refresh()
+        cache=self.service.state.get('cache')
+        target=next(a for a in cache['accounts'] if a['email']=='b@example.com')
+        for index in windows:target['windows'][index]['used']=100
+        self.service.state.update(cache=cache)
+    def recover_next(self):
+        with patch('nx.desktop.chatgpt_running',return_value=True):
+            return self.service.relay_when_recovered()
+    def test_exhausted_next_creates_persisted_recovery_request(self):
+        self.exhaust_next()
+        result=self.service.set_relay_pick('b@example.com')
+        self.assertEqual(result['mode'],'waiting')
+        waiting=self.service.get_data()['relay_wait']
+        self.assertEqual(waiting['origin'],'a@example.com')
+        self.assertEqual(waiting,State(self.paths).get('relay_wait'))
+        self.assertIsNone(self.service.get_data()['settings']['relay_pick'])
+        self.assertEqual(self.accounts.current(),'a@example.com')
+    def test_recovery_wait_can_be_cancelled_without_switching(self):
+        self.exhaust_next()
+        self.service.set_relay_pick('b@example.com')
+        self.assertEqual(self.service.set_relay_pick()['mode'],'cancelled')
+        self.refresh()
+        self.assertEqual(self.recover_next()['reason'],'no_request')
+        self.assertEqual(self.accounts.current(),'a@example.com')
+        self.assertIsNone(State(self.paths).get('relay_wait'))
+    def test_recovery_request_waits_for_both_quota_windows(self):
+        self.exhaust_next((0,1))
+        self.service.set_relay_pick('b@example.com')
+        cache=self.service.state.get('cache')
+        next(a for a in cache['accounts'] if a['email']=='b@example.com')['windows'][0]['used']=20
+        self.service.state.update(cache=cache)
+        self.assertEqual(self.recover_next()['reason'],'waiting')
+        self.assertEqual(self.accounts.current(),'a@example.com')
+        self.assertIsNotNone(self.service.state.get('relay_wait'))
+    def test_verified_recovery_relays_once_even_when_automatic_rotation_is_off(self):
+        self.exhaust_next()
+        self.service.set_relay_pick('b@example.com')
+        self.refresh()
+        self.assertFalse(self.service.state.get('settings')['auto_relay'])
+        with patch('nx.desktop.chatgpt_running',return_value=True):
+            result=self.recover_next()
+        self.assertTrue(result['accepted'])
+        self.assertEqual(result['source'],'recovery')
+        self.wait()
+        self.assertEqual(self.accounts.current(),'b@example.com')
+        self.assertIsNone(self.service.state.get('relay_wait'))
+        self.assertEqual(self.recover_next()['reason'],'no_request')
+    def test_reset_time_alone_refreshes_instead_of_switching(self):
+        self.exhaust_next()
+        self.service.set_relay_pick('b@example.com')
+        cache=self.service.state.get('cache')
+        target=next(a for a in cache['accounts'] if a['email']=='b@example.com')
+        target['windows'][0]['resets_at']=time.time()-1
+        self.service.state.update(cache=cache)
+        with patch('nx.desktop.chatgpt_running',return_value=True):
+            result=self.recover_next()
+        self.assertEqual(result['reason'],'refreshing')
+        self.wait()
+        self.assertEqual(self.accounts.current(),'a@example.com')
+        self.assertIsNotNone(self.service.state.get('relay_wait'))
+    def test_paused_query_cannot_execute_recovery_request(self):
+        self.exhaust_next()
+        self.service.set_relay_pick('b@example.com')
+        self.refresh()
+        with patch('nx.desktop.chatgpt_running',return_value=True),patch.object(self.service,'_query_ready',return_value=False):
+            self.assertEqual(self.recover_next()['reason'],'query_paused')
+        self.assertEqual(self.accounts.current(),'a@example.com')
+    def test_recovery_rechecks_online_quota_before_switching(self):
+        self.exhaust_next()
+        self.service.set_relay_pick('b@example.com')
+        self.refresh()
+        original=self.query.run
+        def exhausted_online(*args,**kwargs):
+            result=original(*args,**kwargs)
+            result['windows'][1]['used']=100
+            return result
+        with patch('nx.desktop.chatgpt_running',return_value=True),patch.object(self.query,'run',side_effect=exhausted_online):
+            self.assertTrue(self.recover_next()['accepted'])
+            self.wait()
+        self.assertFalse(self.service.last_result['ok'])
+        self.assertEqual(self.accounts.current(),'a@example.com')
+        self.assertIsNotNone(self.service.state.get('relay_wait'))
+    def test_cancelling_during_recovery_preflight_prevents_switch(self):
+        self.exhaust_next()
+        self.service.set_relay_pick('b@example.com')
+        self.refresh()
+        entered,release=threading.Event(),threading.Event()
+        original=self.query.run
+        def preflight(*args,**kwargs):
+            entered.set();release.wait(3)
+            return original(*args,**kwargs)
+        runner=Mock(side_effect=self.runner)
+        self.service.runner=runner
+        with patch('nx.desktop.chatgpt_running',return_value=True),patch.object(self.query,'run',side_effect=preflight):
+            self.assertTrue(self.recover_next()['accepted'])
+            try:
+                self.assertTrue(entered.wait(2))
+                self.assertEqual(self.service.set_relay_pick()['mode'],'cancelled')
+            finally:release.set()
+            self.wait()
+        runner.assert_not_called()
+        self.assertEqual(self.accounts.current(),'a@example.com')
+        self.assertIsNone(self.service.state.get('relay_wait'))
+    def test_switching_manually_cancels_recovery_request(self):
+        self.exhaust_next()
+        self.service.set_relay_pick('b@example.com')
+        self.assertTrue(self.service.switch('b@example.com')['accepted'])
+        self.wait()
+        self.assertIsNone(self.service.state.get('relay_wait'))
+    def test_changed_current_account_invalidates_recovery_request(self):
+        self.exhaust_next()
+        self.service.set_relay_pick('b@example.com')
+        self.runner('-To','b@example.com')
+        self.assertEqual(self.recover_next()['reason'],'request_obsolete')
+        self.assertIsNone(self.service.state.get('relay_wait'))
+    def test_archiving_target_invalidates_recovery_request(self):
+        self.exhaust_next()
+        self.service.set_relay_pick('b@example.com')
+        self.accounts.archive('b@example.com')
+        self.assertEqual(self.recover_next()['reason'],'request_obsolete')
+        self.assertIsNone(self.service.state.get('relay_wait'))
+    def test_invalid_persisted_recovery_requests_are_dropped(self):
+        for invalid in (True,{}, {'id':'bad','email':'b@example.com','origin':'a@example.com'},
+                        {'id':'0'*32,'email':'a@example.com','origin':'a@example.com'}):
+            self.service.state.update(relay_wait=invalid)
+            self.assertIsNone(State(self.paths).get('relay_wait'))
     def test_relay_path_is_distinct_and_uses_canonical_candidate(self):
         self.refresh();self.wait()
         self.assertEqual(self.service.get_data()['relay_email'],'b@example.com')

@@ -20,7 +20,7 @@ NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 from .resume_flow import ResumeCoordinator
 
 from .version import APP_VERSION
-from .quota_policy import fresh_windows
+from .quota_policy import complete_windows, fresh_windows
 from .settings import valid_setting
 from .diagnostics import Diagnostics, query_summary
 
@@ -87,6 +87,8 @@ class Service:
         self.last_result = None
         self.recent_results = []
         self.relay_pick = None  # one-shot UI choice; deliberately never persisted
+        self._relay_wait_refresh_after = 0.0
+        self._relay_wait_attempt_after = 0.0
         self.auto_relay_attempt = None
         self.auto_relay_retry_after = 0.0
         self.hotkey_status = {}
@@ -288,7 +290,7 @@ class Service:
                 'recent_results': copy.deepcopy(self.recent_results),
                 'hotkeys': [{'email': email, 'shortcut': hotkeys.get(email),
                              'registered': self.hotkey_status.get(email)} for email in emails],
-                'settings': settings,
+                'settings': settings, 'relay_wait': self.state.get('relay_wait'),
                 'relay_email': recommended.get('email') if recommended else None,
                 'auto_relay_email': ranked_auto[0]['email'] if ranked_auto and current_email not in excluded else None,
                 'relay_order': [a['email'] for a in ranked_all],
@@ -441,7 +443,7 @@ class Service:
     def switch(self, email):
         return self._switch(email, 'manual')
 
-    def _switch(self, email, source, exhaustion_key=None, failure_events=()):
+    def _switch(self, email, source, exhaustion_key=None, failure_events=(), relay_wait_id=None):
         if email not in self.accounts.all():
             return {'ok': False, 'error': '账号不在清单中'}
         if self.accounts.current() == email:
@@ -474,7 +476,7 @@ class Service:
                 excluded = set(self.state.get('settings').get('auto_relay_excluded') or [])
                 if previous in excluded or email in excluded:
                     raise RuntimeError('账号已退出自动接力；当前账号没有切换')
-            if source in ('relay', 'auto', 'auto-limit') and not relay_candidates([target], None):
+            if source in ('relay', 'recovery', 'auto', 'auto-limit') and not relay_candidates([target], None):
                 raise RuntimeError('目标账号额度已耗尽；当前账号没有切换')
             # One gate serializes desktop continuation and account replacement.
             # Snapshot after preflight, as close to stopping ChatGPT as possible.
@@ -492,6 +494,15 @@ class Service:
                 else:
                     session_id = None
                 try:
+                    if relay_wait_id:
+                        # Cancellation remains effective during online preflight.
+                        # Consume the one-shot request atomically at the switch boundary.
+                        with self.lock:
+                            waiting = self.state.get('relay_wait')
+                            if (not waiting or waiting['id'] != relay_wait_id
+                                    or waiting['email'] != email or waiting['origin'] != previous):
+                                raise RuntimeError('恢复后接力已取消；当前账号没有切换')
+                            self.state.update(relay_wait=None)
                     self.phase('保存当前账号 · 本地切换')
                     self.runner('-To', email)
                     self.phase('核验本地凭据')
@@ -516,6 +527,8 @@ class Service:
         if result.get('accepted'):
             with self.lock:
                 self.relay_pick = None
+                if not relay_wait_id:
+                    self.state.update(relay_wait=None)
             self.notify()
         return result
 
@@ -526,6 +539,37 @@ class Service:
         if not target or target != data.get('relay_email'):
             return {'ok': False, 'error': '下一棒已变化，请重新打开面板'}
         return self._switch(target, source)
+
+    def relay_when_recovered(self):
+        """Honor one explicit recovery request, independently of automatic rotation."""
+        waiting = self.state.get('relay_wait')
+        if not waiting:
+            return {'ok': True, 'accepted': False, 'reason': 'no_request'}
+        data = self.get_data()
+        target = next((a for a in data['accounts'] if a['email'] == waiting['email']), None)
+        if data.get('current') != waiting['origin'] or not target:
+            with self.lock:
+                self.state.change('relay_wait', lambda value:
+                    None if value and value['id'] == waiting['id'] else value)
+            self.notify()
+            return {'ok': True, 'accepted': False, 'reason': 'request_obsolete'}
+        if (self.operation or data.get('adding') or data.get('reauth')
+                or data.get('chatgpt_running') is False or self.stop.is_set()):
+            return {'ok': True, 'accepted': False, 'reason': 'busy'}
+        if not self._query_ready(waiting['email'], data['current']):
+            return {'ok': True, 'accepted': False, 'reason': 'query_paused'}
+        if not relay_candidates([target], None):
+            if (not fresh_windows(target) and
+                    time.monotonic() >= self._relay_wait_refresh_after):
+                self._relay_wait_refresh_after = time.monotonic() + 60
+                result = self.refresh(waiting['email'], background=True)
+                return {'ok': True, 'accepted': False, 'reason':
+                        'refreshing' if result.get('accepted') else 'waiting'}
+            return {'ok': True, 'accepted': False, 'reason': 'waiting'}
+        if time.monotonic() < self._relay_wait_attempt_after:
+            return {'ok': True, 'accepted': False, 'reason': 'cooldown'}
+        self._relay_wait_attempt_after = time.monotonic() + 60
+        return self._switch(waiting['email'], 'recovery', relay_wait_id=waiting['id'])
 
     def auto_relay_if_needed(self):
         """Start one automatic relay for one exhausted quota window.
@@ -935,12 +979,25 @@ class Service:
         return {'ok': True}
 
     def set_relay_pick(self, email=None):
-        if email is not None and (email not in self.accounts.all() or email == self.accounts.current()):
-            return {'ok': False, 'error': '这个账号不能设为下一棒'}
         with self.lock:
-            self.relay_pick = email
+            if email is not None and (email not in self.accounts.all() or email == self.accounts.current()):
+                return {'ok': False, 'error': '这个账号不能设为下一棒'}
+            if email is not None and (self.operation or self.state.get('adding') or self.state.get('reauth')):
+                return {'ok': False, 'error': '请先完成当前操作'}
+            account = next((a for a in self.get_data()['accounts'] if a['email'] == email), None)
+            exhausted = bool(account and account.get('ok') and complete_windows(account.get('windows'))
+                             and any(w['used'] >= 100 for w in account['windows']))
+            origin = self.accounts.current()
+            if exhausted and not origin:
+                return {'ok': False, 'error': '请先确认当前账号'}
+            self.state.update(relay_wait={'id': uuid.uuid4().hex, 'email': email, 'origin': origin}
+                              if exhausted else None)
+            self._relay_wait_refresh_after = self._relay_wait_attempt_after = 0.0
+            self.relay_pick = None if exhausted else email
         self.notify()
-        return {'ok': True}
+        mode = 'waiting' if exhausted else 'picked' if email else 'cancelled'
+        return {'ok': True, 'mode': mode, 'message': {
+            'waiting': '已安排，额度恢复后自动接力', 'picked': '已设为下一棒', 'cancelled': '已取消'}[mode]}
 
     def set_auto_relay_account(self, email, enabled):
         if email not in self.accounts.all() or not isinstance(enabled, bool):
@@ -1110,7 +1167,10 @@ class Service:
                 account = next((a for a in cache.get('accounts', [])
                                 if a.get('email') == current), None)
                 now = time.time()
-                if settings.get('auto_relay') and self.refresh_stale_relay_accounts(self.get_data()):
+                self.relay_when_recovered()
+                if self.operation:
+                    pass
+                elif settings.get('auto_relay') and self.refresh_stale_relay_accounts(self.get_data()):
                     pass
                 elif now - (cache.get('updated') or 0) >= interval:
                     self.refresh(background=True)
