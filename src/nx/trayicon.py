@@ -3,7 +3,6 @@ from __future__ import annotations
 import ctypes
 import struct
 import threading
-import time
 from ctypes import wintypes as wt
 
 WM_APP = 0x8000
@@ -13,6 +12,8 @@ NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO, NIF_SHOWTIP = 0x01, 0x02, 0x04, 0x10, 
 WM_LBUTTONUP, WM_LBUTTONCLK, WM_RBUTTONUP, WM_CONTEXTMENU = 0x0202, 0x0203, 0x0205, 0x007B
 WM_DESTROY = 0x0002
 WM_NULL = 0x0000
+WM_TIMER = 0x0113
+ICON_RETRY_TIMER, ICON_RETRY_MS = 1, 2000
 MF_STRING, MF_GRAYED, MF_CHECKED = 0x0000, 0x0001, 0x0008
 TPM_RIGHTBUTTON, TPM_RETURNCMD = 0x0002, 0x0100
 CLASS_NAME = 'ChatGPTnxTrayWnd'
@@ -68,12 +69,15 @@ def _load_hicon(path, target):
 
 
 class TrayIcon:
-    def __init__(self, icon_path, title, default_action, menu_provider):
+    def __init__(self, icon_path, title, default_action, menu_provider, *, log=None):
         self._user32 = ctypes.windll.user32
         self._shell = ctypes.windll.shell32
         self._icon_path, self._tip = icon_path, title
         self._default_action, self._menu_provider = default_action, menu_provider
+        self._log = log
         self._hwnd = self._hicon = None
+        self._taskbar_created = 0
+        self._retrying = False
         self._uID = 1
         self._lock = threading.Lock()
         self._ready = threading.Event()
@@ -137,7 +141,44 @@ class TrayIcon:
         data.hIcon, data.szTip = self._hicon, self._tip
         return data
 
+    def _register_icon(self, source):
+        """Rebuild Explorer's icon entry without replacing our window or thread."""
+        data = self._base_nid()
+        if data is None or not self._hicon:
+            return False
+        data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+        data.uCallbackMessage = WM_TRAYCALLBACK
+        with self._lock:
+            added = self._shell.Shell_NotifyIconW(NIM_ADD, ctypes.byref(data))
+            # TaskbarCreated can also accompany a display/DPI change while
+            # the icon still exists. Restore its callback and current tooltip.
+            if not added:
+                added = self._shell.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
+            if added:
+                version = self._base_nid()
+                version.uVersion = 4
+                self._shell.Shell_NotifyIconW(NIM_SET_VERSION, ctypes.byref(version))
+        if added:
+            self._user32.KillTimer(self._hwnd, ICON_RETRY_TIMER)
+            self._retrying = False
+            if self._log:
+                self._log.info('tray_icon_registered source=%s', source)
+        elif not self._retrying:
+            # Explorer may not accept icons immediately after startup. Keep
+            # pumping messages so retries, clicks and shutdown remain usable.
+            self._retrying = bool(self._user32.SetTimer(
+                self._hwnd, ICON_RETRY_TIMER, ICON_RETRY_MS, None))
+            if self._log:
+                self._log.warning('tray_icon_registration_pending source=%s', source)
+        return bool(added)
+
     def _wndproc(self, hwnd, message, wparam, lparam):
+        if self._taskbar_created and message == self._taskbar_created:
+            self._register_icon('taskbar')
+            return 0
+        if message == WM_TIMER and wparam == ICON_RETRY_TIMER:
+            self._register_icon('retry')
+            return 0
         if message == WM_TRAYCALLBACK:
             event = lparam & 0xFFFF
             if event in (WM_LBUTTONUP, WM_LBUTTONCLK):
@@ -149,12 +190,15 @@ class TrayIcon:
             self._user32.DestroyWindow(hwnd)
             return 0
         if message == WM_DESTROY:
+            self._user32.KillTimer(hwnd, ICON_RETRY_TIMER)
+            self._retrying = False
             data = self._base_nid()
             if data:
                 self._shell.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(data))
             if self._hicon:
                 self._user32.DestroyIcon(self._hicon)
                 self._hicon = None
+            self._hwnd = None
             self._user32.PostQuitMessage(0)
             return 0
         return self._user32.DefWindowProcW(hwnd, message, wparam, lparam)
@@ -202,6 +246,15 @@ class TrayIcon:
         user32.TrackPopupMenu.argtypes = [wt.HMENU, wt.UINT, ctypes.c_int, ctypes.c_int,
                                           ctypes.c_int, wt.HWND, ctypes.c_void_p]
         user32.DestroyMenu.argtypes = [wt.HMENU]
+        user32.RegisterWindowMessageW.argtypes = [wt.LPCWSTR]
+        user32.RegisterWindowMessageW.restype = wt.UINT
+        user32.SetTimer.argtypes = [wt.HWND, ctypes.c_size_t, wt.UINT, ctypes.c_void_p]
+        user32.SetTimer.restype = ctypes.c_size_t
+        user32.KillTimer.argtypes = [wt.HWND, ctypes.c_size_t]
+        user32.KillTimer.restype = wt.BOOL
+        shell.Shell_NotifyIconW.argtypes = [wt.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
+        shell.Shell_NotifyIconW.restype = wt.BOOL
+        self._taskbar_created = user32.RegisterWindowMessageW('TaskbarCreated')
         wc = WNDCLASSW()
         wc.lpfnWndProc = WNDPROC(self._wndproc)
         self._wndproc_keepalive = wc.lpfnWndProc
@@ -220,17 +273,7 @@ class TrayIcon:
         if not self._hwnd:
             self._ready.set()
             return
-        data = self._base_nid()
-        data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
-        data.uCallbackMessage = WM_TRAYCALLBACK
-        if not shell.Shell_NotifyIconW(NIM_ADD, ctypes.byref(data)):
-            time.sleep(2)
-            if not shell.Shell_NotifyIconW(NIM_ADD, ctypes.byref(data)):
-                self._ready.set()
-                return
-        version = NOTIFYICONDATAW()
-        version.cbSize, version.hWnd, version.uID, version.uVersion = ctypes.sizeof(version), self._hwnd, self._uID, 4
-        shell.Shell_NotifyIconW(NIM_SET_VERSION, ctypes.byref(version))
+        self._register_icon('startup')
         self._ready.set()
         msg = wt.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:

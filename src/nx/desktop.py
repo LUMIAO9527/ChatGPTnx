@@ -1136,7 +1136,7 @@ class Desktop:
         # plus the foreground-event repair in watch_focus().
         from .trayicon import TrayIcon
         self.icon = TrayIcon(str(self.service.paths.resources / 'nx.ico'), 'ChatGPTnx',
-                             self.toggle, self.tray_menu)
+                             self.toggle, self.tray_menu, log=self.service.log)
         self.icon.run_detached()
         self.service.start_poll()
         # Style the panel the instant its HWND exists (ready() is too early).
