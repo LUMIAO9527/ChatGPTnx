@@ -13,6 +13,12 @@
 
 ChatGPTnx is a lightweight Windows desktop utility that reduces the waiting and manual steps when a long task is interrupted by an account's usage limit. It brings account handoff, task continuation, quota information, and usage statistics into one tray app.
 
+## Video introduction
+
+Chinese narration and subtitles.
+
+https://github.com/user-attachments/assets/e1d24f80-0716-4bba-a024-7058e5c0b2e0
+
 ## Features
 
 - **Automatic handoff:** Switch to a participating account with available quota when the current account runs out. You can also switch manually, choose participating accounts, or schedule a cancellable handoff after an account's quota recovers.
