@@ -18,7 +18,7 @@ from .storage import atomic_bytes, load_owned_document, account_identity_key
 TERMINAL = {'done', 'failed', 'skipped'}
 HISTORY_SECONDS = 7 * 86400
 ACTIVE_SECONDS = 86400
-FAILURE_BANNER_SECONDS = 86400
+FAILURE_BANNER_SECONDS = 300
 PENDING_SECONDS = 300
 from .resume_policy import (ATTENTION_REASONS, RETRYABLE_REASONS,
                             AUTO_RETRY_PRE_DISPATCH, AUTO_RETRY_TURN_FAILURES,
@@ -744,18 +744,22 @@ class ResumeCoordinator:
             if self._prune():
                 self._save()
             waiting = self._waiting_session()
-            candidates = [s for s in reversed(self.sessions) if s.get('items')]
-            candidates.sort(key=lambda s: s.get('phase') not in ('switching', 'resuming'))
+            candidates = sorted(self.sessions,
+                                key=lambda s: s.get('updated_at', 0), reverse=True)
+            active_sessions = [s for s in candidates if s.get('items')
+                               and s.get('phase') in ('switching', 'resuming')]
             if waiting and not any(s.get('phase') in ('switching', 'resuming')
                                    for s in candidates):
                 return {'id': waiting['id'], 'phase': 'waiting_account',
                         'done': 0, 'failed': 0, 'total': len(waiting['items'])}
-            for session in candidates:
+            # A notice is the latest result, not an unread-history queue.
+            # Reading, dismissing or expiring it must not expose an older one.
+            for session in active_sessions[:1] or candidates[:1]:
                 if session.get('phase') == 'cancelled':
-                    continue
+                    return None
                 items = session.get('items', [])
                 if not items:
-                    continue
+                    return None
                 active = session['phase'] in ('switching', 'resuming')
                 failed = sum(i['state'] == 'failed' for i in items)
                 if not active and (session.get('seen_at') or
@@ -850,7 +854,11 @@ class ResumeCoordinator:
             if not session:
                 return {'ok': False, 'error': '记录已过期'}
             if session['phase'] not in ('switching', 'resuming'):
-                session['seen_at'] = time.time()
+                now, stamp = time.time(), session.get('updated_at', 0)
+                for item in self.sessions:
+                    if (item.get('phase') not in ('switching', 'resuming')
+                            and item.get('updated_at', 0) <= stamp):
+                        item['seen_at'] = item.get('seen_at') or now
                 self._save()
         return {'ok': True}
 

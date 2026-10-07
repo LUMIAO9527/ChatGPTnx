@@ -5,6 +5,9 @@ import json
 import sys
 import tempfile
 import threading
+import time
+import socket
+import ssl
 import unittest
 import urllib.error
 from pathlib import Path
@@ -246,9 +249,10 @@ class HTTPQueryTests(unittest.TestCase):
         self.assertEqual(self.q.run('a@example.com',True,cancel=cancel)['error_code'],'cancelled')
         self.client.get.assert_not_called()
 
-    def test_each_network_wait_is_bounded_for_switch_cancellation(self):
-        self.q.run('a@example.com',True)
-        self.assertTrue(all(0<c.args[3]<=5 for c in self.client.get.call_args_list))
+    def test_query_wait_uses_configured_budget_and_subtracts_primary_elapsed_time(self):
+        with patch('nx.quota_http.time.monotonic',side_effect=[100,100,110]):
+            self.assertTrue(self.q.run('a@example.com',True)['ok'])
+        self.assertEqual([c.args[3] for c in self.client.get.call_args_list],[45,35])
 
     def test_optional_reset_failure_preserves_available_count(self):
         self.client.get.side_effect=[response(),RPCError('not available',403)]
@@ -280,18 +284,32 @@ class HTTPQueryTests(unittest.TestCase):
         self.assertEqual(result['banked_resets']['available_count'],3)
         self.assertNotIn('query_warning',result)
 
-    def test_optional_transient_failures_still_defer_account_queries(self):
-        for code in (429,'network',503):
+    def test_optional_transient_failures_defer_only_the_optional_endpoint(self):
+        for code in (429,'network','timeout',503):
             with self.subTest(code=code):
                 self.now+=10000
                 self.saved['tokens']['access_token']='optional-fixture-'+str(code);self.write()
                 self.client.get.reset_mock();self.client.get.side_effect=[response(),RPCError('temporary',code)]
                 result=self.q.run('a@example.com',True)
                 self.assertTrue(result['ok'])
-                self.assertNotIn('scope',result['query_warning'])
-                self.assertFalse(self.q.ready('a@example.com',True))
-                self.q.run('a@example.com',True)
-                self.assertEqual(self.client.get.call_count,2)
+                self.assertEqual(result['query_warning']['scope'],'reset_credits')
+                self.assertFalse(result['paused'])
+                self.assertTrue(self.q.ready('a@example.com',True))
+                self.assertTrue(self.q.policy.status('unaffected@example.com','f'*64)['ready'])
+                self.client.get.side_effect=lambda endpoint,*args: response() if endpoint=='/wham/usage' else self.fail('optional endpoint retried during cooldown')
+                self.assertTrue(self.q.run('a@example.com',True)['ok'])
+                self.assertEqual(self.client.get.call_count,3)
+                self.assertFalse(self.q.policy._read()['network'].get('retry_at'))
+
+    def test_primary_failure_still_blocks_query_and_retains_transport_evidence(self):
+        error=RPCError('private host and token','timeout')
+        error.diagnostics={'transport_error':'timeout','timeout_ms':45000,'elapsed_ms':45001}
+        self.q.log=Mock();self.client.get.side_effect=error
+        result=self.q.run('a@example.com',True)
+        self.assertFalse(result['ok']);self.assertFalse(self.q.ready('a@example.com',True))
+        self.assertEqual(result['transport_error'],'timeout')
+        self.assertEqual(self.new_query().status('a@example.com',True)['timeout_ms'],45000)
+        self.assertNotIn('private',str(self.q.log.warning.call_args))
 
     def test_reset_401_is_not_hidden_by_successful_quota(self):
         self.client.get.side_effect=[response(),RPCError('invalid','reauth_required')]
@@ -316,6 +334,64 @@ class HTTPQueryTests(unittest.TestCase):
 
 
 class HTTPTransportTests(unittest.TestCase):
+    def test_cancellation_returns_promptly_and_discards_inflight_readonly_response(self):
+        client=HTTPClient();cancel=threading.Event();entered=threading.Event();release=threading.Event();ended=threading.Event();result={}
+        def blocked(*args):
+            entered.set();release.wait(2);ended.set();return {'ok':True}
+        def call():
+            try:result['value']=client.get('/wham/usage','fixture','account',45,cancel)
+            except RPCError as e:result['error']=e.code
+        with patch.object(client,'_get',side_effect=blocked):
+            caller=threading.Thread(target=call);caller.start()
+            self.assertTrue(entered.wait(1));start=time.monotonic();cancel.set();caller.join(1)
+            try:
+                self.assertFalse(caller.is_alive());self.assertLess(time.monotonic()-start,1)
+                self.assertEqual(result,{'error':'cancelled'})
+            finally:release.set();ended.wait(1);caller.join(2)
+
+    def test_cancelled_waiting_query_does_not_start_a_third_network_request(self):
+        client=HTTPClient();release=threading.Event();both=threading.Event();lock=threading.Lock();calls=[];results=[]
+        def blocked(*args):
+            with lock:
+                calls.append(args)
+                if len(calls)==2:both.set()
+            release.wait(2);return {}
+        def call(cancel=None):
+            try:client.get('/wham/usage','fixture','account',5,cancel)
+            except RPCError as error:results.append(error.code)
+        with patch.object(client,'_get',side_effect=blocked):
+            threads=[threading.Thread(target=call) for _ in range(2)]
+            for thread in threads:thread.start()
+            self.assertTrue(both.wait(1))
+            cancel=threading.Event();third=threading.Thread(target=call,args=(cancel,));third.start();cancel.set();third.join(1)
+            try:
+                self.assertFalse(third.is_alive());self.assertEqual(len(calls),2)
+                self.assertEqual(results,['cancelled'])
+            finally:
+                release.set()
+                for thread in threads:thread.join(2)
+
+    def test_deadline_returns_timeout_without_waiting_for_blocked_response(self):
+        client=HTTPClient();release=threading.Event()
+        with patch.object(client,'_get',side_effect=lambda *a:(release.wait(1),{})[1]):
+            try:
+                with self.assertRaises(RPCError) as caught:client.get('/wham/usage','fixture','account',.05)
+                self.assertEqual(caught.exception.code,'timeout')
+                self.assertEqual(caught.exception.diagnostics['transport_error'],'timeout')
+            finally:release.set()
+
+    def test_transport_diagnostics_distinguish_timeout_dns_and_certificate_without_private_text(self):
+        cases=((TimeoutError('fixture secret'),'timeout','timeout'),
+               (socket.gaierror('fixture secret'),'network','dns'),
+               (ssl.SSLCertVerificationError('fixture secret'),'network','tls_certificate'))
+        for reason,code,category in cases:
+            with self.subTest(category=category),patch('urllib.request.build_opener') as factory:
+                factory.return_value.open.side_effect=urllib.error.URLError(reason)
+                with self.assertRaises(RPCError) as caught:HTTPClient().get('/wham/usage','fixture','account',1)
+                self.assertEqual(caught.exception.code,code)
+                self.assertEqual(caught.exception.diagnostics['transport_error'],category)
+                self.assertNotIn('secret',json.dumps(caught.exception.diagnostics))
+
     def test_errors_are_sanitized_and_not_retried(self):
         for status,expected in ((401,'reauth_required'),(403,403),(429,429),(500,500)):
             with self.subTest(status=status),patch('urllib.request.build_opener') as factory:

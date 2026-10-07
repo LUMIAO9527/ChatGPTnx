@@ -114,7 +114,7 @@ class QueryPolicy:
                 retry_at = math.ceil(max(now + delay, _number(details.get('retry_after_at'))))
             data['accounts'][key] = {**safe_fields(details), 'credential': credential, 'error_code': code,
                 'paused': paused, 'retry_at': retry_at, 'attempts': attempts, 'updated_at': int(now)}
-            if code in ('network', 'timeout'):
+            if scope == 'account' and code in ('network', 'timeout'):
                 network = data['network']
                 recent = {k: v for k, v in network.get('recent', {}).items() if now - 60 <= v <= now}
                 recent[key] = now

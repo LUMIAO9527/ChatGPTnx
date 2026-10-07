@@ -18,6 +18,9 @@ LOCAL_CODES = frozenset(('reauth_required', 'network', 'timeout', 'schema', 'can
     'response_too_large', 'missing_snapshot', 'identity_mismatch', 'credential_unreadable',
     'query_policy_unavailable', 'unexpected'))
 PHASES = frozenset(('credentials', 'quota', 'usage', 'reset_credits', 'subscription', 'policy'))
+TRANSPORT_ERRORS = frozenset(('timeout', 'dns', 'tls_certificate', 'tls',
+    'connection_refused', 'connection_reset', 'connection_closed',
+    'incomplete_response', 'http_protocol', 'connection_error'))
 _REQUEST_ID = re.compile(r'(?:req_[A-Za-z0-9_-]{8,96}|[0-9a-fA-F]{16,64}|'
                          r'[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\Z')
 
@@ -32,10 +35,18 @@ def safe_fields(raw):
     raw = raw if isinstance(raw, dict) else {}
     status, request, code = raw.get('http_status'), raw.get('request_id'), raw.get('server_error_code')
     phase = raw.get('phase')
-    return {'http_status': status if type(status) is int and 100 <= status <= 599 else None,
+    result = {'http_status': status if type(status) is int and 100 <= status <= 599 else None,
             'request_id': request if isinstance(request, str) and _REQUEST_ID.fullmatch(request) else None,
             'server_error_code': code if isinstance(code, str) and code in SERVER_CODES else None,
             'phase': phase if isinstance(phase, str) and phase in PHASES else 'policy'}
+    transport = raw.get('transport_error')
+    if isinstance(transport, str) and transport in TRANSPORT_ERRORS:
+        result['transport_error'] = transport
+    for key in ('timeout_ms', 'elapsed_ms'):
+        value = raw.get(key)
+        if type(value) is int and 0 <= value <= 600000:
+            result[key] = value
+    return result
 
 
 def retry_after(value, now):

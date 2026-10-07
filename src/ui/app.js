@@ -604,7 +604,13 @@
       }
       case 'reauth':show('reauth',target);break;
       case 'hide':if(config.demo){app.style.opacity='.35';notify('演示：窗口已隐藏，点击任意位置恢复');app.onclick=()=>{app.style.opacity='1';app.onclick=null;};}else await api('hide');break;
-      case 'dismiss-status':dismissedStatus=activeStatusKey;paintNotifications();break;
+      case 'dismiss-status':
+        dismissedStatus=activeStatusKey;paintNotifications();
+        if(data.resume&&!['switching','resuming','waiting_account'].includes(data.resume.phase)){
+          try{await api('mark_resume_seen',data.resume.id);await poll(true);}
+          catch(error){notify(error.message||'提示收起未保存，请稍后重试');}
+        }
+        break;
       case 'dismiss-feedback':clearNotification();break;
       case 'feedback-details':{clearNotification();break;}
       case 'settings':show('settings');break;

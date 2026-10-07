@@ -438,8 +438,49 @@ class ResumeFlowTests(unittest.TestCase):
         self.coordinator.mark_seen(ident)
         self.assertIsNone(self.coordinator.summary())
         self.coordinator.sessions[-1]['seen_at'] = None
-        self.coordinator.sessions[-1]['updated_at'] = time.time() - 86401
+        self.coordinator.sessions[-1]['updated_at'] = time.time() - 301
         self.assertIsNone(self.coordinator.summary())
+
+    def test_reading_latest_result_never_exposes_older_unread_results_and_keeps_history(self):
+        c=self.coordinator;now=time.time()
+        c.sessions=[{'id':'old','phase':'failed','updated_at':now-60,'items':[{'state':'failed'}]},
+                    {'id':'new','phase':'failed','updated_at':now,'items':[{'state':'failed'}]}]
+        self.assertEqual(c.summary()['id'],'new')
+        with patch.object(c,'_save') as save:c.mark_seen('new')
+        save.assert_called_once()
+        self.assertIsNone(c.summary());self.assertEqual(len(c.sessions),2)
+        self.assertTrue(all(s.get('seen_at') for s in c.sessions))
+
+    def test_expired_or_already_seen_latest_result_does_not_fall_back_to_older_failure(self):
+        now=time.time();c=self.coordinator
+        for seen,age in ((None,31),(now,0)):
+            with self.subTest(seen=bool(seen)):
+                c.sessions=[{'id':'old','phase':'failed','updated_at':now-60,'items':[{'state':'failed'}]},
+                            {'id':'new','phase':'done','seen_at':seen,'updated_at':now-age,'items':[{'state':'done'}]}]
+                self.assertIsNone(c.summary())
+
+    def test_active_progress_remains_visible_and_reading_history_does_not_hide_it(self):
+        now=time.time();c=self.coordinator
+        c.sessions=[{'id':'active','phase':'resuming','created_at':now-100,
+                     'updated_at':now-100,'items':[{'state':'waiting'}]},
+                    {'id':'new','phase':'failed','updated_at':now,'items':[{'state':'failed'}]}]
+        with patch.object(c,'_prune',return_value=False),patch.object(c,'_save'):
+            self.assertEqual(c.summary()['id'],'active')
+            c.mark_seen('new')
+            self.assertEqual(c.summary()['id'],'active')
+        self.assertIsNone(c.sessions[0].get('seen_at'))
+
+    def test_updated_result_is_selected_by_time_after_old_session_changes(self):
+        now=time.time();c=self.coordinator
+        c.sessions=[{'id':'updated','phase':'failed','updated_at':now,'items':[{'state':'failed'}]},
+                    {'id':'later-created','phase':'done','updated_at':now-20,'items':[{'state':'done'}]}]
+        self.assertEqual(c.summary()['id'],'updated')
+
+    def test_latest_switch_with_no_tasks_supersedes_old_unread_failure(self):
+        now=time.time();c=self.coordinator
+        c.sessions=[{'id':'old','phase':'failed','updated_at':now-20,'items':[{'state':'failed'}]},
+                    {'id':'no-tasks','phase':'done','updated_at':now,'items':[]}]
+        self.assertIsNone(c.summary())
 
     def test_pending_limit_events_are_deduplicated_and_bounded(self):
         event = self.event(started_at=int(time.time()) - 20, completed_at=int(time.time()))

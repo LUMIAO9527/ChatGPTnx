@@ -5,6 +5,9 @@ import hashlib
 import http.client
 import json
 import shutil
+import socket
+import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -41,8 +44,66 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 class HTTPClient:
     def __init__(self, clock=None):
         self.clock = clock or time.time
+        self._slots = threading.BoundedSemaphore(2)
 
     def get(self, endpoint, token, account_id, timeout, cancel=None):
+        """Wait within the query budget while cancellation stays responsive.
+
+        At most two read-only requests may remain in flight. Cancellation
+        discards their results; it never starts another request or refreshes
+        credentials. A blocked socket retains its own bounded timeout.
+        """
+        started = time.monotonic()
+        deadline = started + timeout
+        abort, done, outcome = threading.Event(), threading.Event(), {}
+
+        def check():
+            if cancel and cancel.is_set():
+                abort.set()
+                raise RPCError('后台查询已暂停', 'cancelled')
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                abort.set()
+                error = RPCError('查询超时', 'timeout')
+                error.diagnostics = {'transport_error': 'timeout',
+                                     'timeout_ms': round(timeout * 1000),
+                                     'elapsed_ms': round((time.monotonic() - started) * 1000)}
+                raise error
+            return remaining
+
+        while not self._slots.acquire(timeout=min(.05, check())):
+            pass
+        try:
+            remaining = check()
+        except Exception:
+            self._slots.release()
+            raise
+
+        def request():
+            try:
+                outcome['result'] = self._get(endpoint, token, account_id, remaining, abort)
+            except Exception as error:
+                outcome['error'] = error
+            finally:
+                self._slots.release()
+                done.set()
+
+        worker = threading.Thread(target=request, daemon=True, name='nx-quota-http')
+        try:
+            worker.start()
+        except Exception:
+            self._slots.release()
+            raise
+        while not done.wait(min(.05, check())):
+            pass
+        if cancel and cancel.is_set():
+            abort.set()
+            raise RPCError('后台查询已暂停', 'cancelled')
+        if 'error' in outcome:
+            raise outcome['error']
+        return outcome['result']
+
+    def _get(self, endpoint, token, account_id, timeout, cancel=None):
         if endpoint not in ENDPOINTS:
             raise RPCError('查询地址不受支持', 'schema')
         if cancel and cancel.is_set():
@@ -51,6 +112,7 @@ class HTTPClient:
             'Authorization': 'Bearer ' + token,
             'ChatGPT-Account-Id': account_id,
             'Accept': 'application/json', 'User-Agent': 'ChatGPTnx/' + APP_VERSION})
+        started = time.monotonic()
         try:
             # Redirects must never forward account credentials to another URL.
             with urllib.request.build_opener(NoRedirect()).open(request, timeout=timeout) as response:
@@ -69,8 +131,21 @@ class HTTPClient:
             failure = RPCError(message(code), code)
             failure.diagnostics = details
             raise failure from None
-        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException):
-            raise RPCError('查询连接失败或超时', 'network') from None
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as error:
+            reason = getattr(error, 'reason', error)
+            kinds = ((TimeoutError, 'timeout'), (socket.gaierror, 'dns'),
+                     (ssl.SSLCertVerificationError, 'tls_certificate'), (ssl.SSLError, 'tls'),
+                     (ConnectionRefusedError, 'connection_refused'),
+                     (ConnectionResetError, 'connection_reset'),
+                     (http.client.RemoteDisconnected, 'connection_closed'),
+                     (http.client.IncompleteRead, 'incomplete_response'),
+                     (http.client.BadStatusLine, 'http_protocol'))
+            category = next((kind for cls, kind in kinds if isinstance(reason, cls)), 'connection_error')
+            code = 'timeout' if category == 'timeout' else 'network'
+            failure = RPCError(message(code), code)
+            failure.diagnostics = {'transport_error': category, 'timeout_ms': round(timeout * 1000),
+                                   'elapsed_ms': round((time.monotonic() - started) * 1000)}
+            raise failure from None
         except (ValueError, UnicodeError):
             raise RPCError('查询结构无法识别', 'schema') from None
 
@@ -194,6 +269,11 @@ class Query:
                 'retry_at': (policy or {}).get('retry_at')}
 
     def _record_failure(self, email, credential, code, details, scope='account'):
+        if self.log:
+            safe = safe_fields(details)
+            self.log.warning('query_failed phase=%s code=%s transport=%s timeout_ms=%s elapsed_ms=%s',
+                safe['phase'], safe_code(code), safe.get('transport_error', 'none'),
+                safe.get('timeout_ms'), safe.get('elapsed_ms'))
         try:
             return self.policy.failed(email, credential, code, details, scope=scope)
         except (OSError, ValueError, TypeError):
@@ -251,7 +331,7 @@ class Query:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise RPCError('查询超时', 'timeout')
-                return self.client.get(endpoint, token, account_id, min(5, remaining), cancel)
+                return self.client.get(endpoint, token, account_id, remaining, cancel)
             raw = get('/wham/usage')
             if raw.get('account_id') != account_id or str(raw.get('email', '')).casefold() != email.casefold():
                 raise RPCError('查询身份与账号清单不一致', 'identity_mismatch')
@@ -276,11 +356,11 @@ class Query:
                         # access to the successful primary quota endpoint.
                         code = safe_code(error.code)
                         details = failure_details(error, phase)
-                        scope = 'reset_credits' if code == 403 else 'account'
-                        state = self._record_failure(email, credential, code, details, scope=scope)
+                        state = self._record_failure(email, credential, code, details, scope='reset_credits')
                         warning = self._failure(email, code, details, state)
                 if warning:
                     warning.pop('email', None)
+                    warning['scope'] = 'reset_credits'
                     if warning['error_code'] == 403:
                         warning.update(scope='reset_credits', err='额度重置详情不可用，已暂停该接口；主额度查询继续')
                 result = normalize_limits(payload, email)
