@@ -22,6 +22,7 @@ https://github.com/user-attachments/assets/e1d24f80-0716-4bba-a024-7058e5c0b2e0
 ## Features
 
 - **Automatic handoff:** Switch to a participating account with available quota when the current account runs out. You can also switch manually, choose participating accounts, or schedule a cancellable handoff after an account's quota recovers.
+- **Start windows early:** Choose Plus accounts and start their five-hour windows with a tiny request when desktop work begins, without changing the desktop login. Off by default, with no repeat requests within the same window.
 - **Task continuation:** After a switch, attempt to resume the original desktop task. Configure a continuation message and review successful, skipped, and unresolved results separately. Identified background agents do not trigger independent desktop continuation.
 - **Quotas and usage:** See each account's remaining quota, reset times, and token usage. Queries pause or wait longer according to the error type, avoiding repeated requests during failures.
 - **Credential protection and diagnostics:** Protect account snapshots with Windows current-user encryption, and preview or copy a redacted diagnostic summary.

@@ -23,6 +23,13 @@ window.NXSettingsContent = (()=>{
       return `<div class="hotkey-row collection-row"><strong class="collection-name" title="${esc(a.email)}">${esc(name(a))}</strong><button class="keycap ${recording?'recording':''}" data-action="record-hotkey" data-email="${esc(a.email)}" title="${h.registered===false?'快捷键被占用':esc(a.email)}">${recording?'请按组合键':esc(hotkeyLabel(h.shortcut))}</button></div>`;
     })}</div><p class="inline-help">点击录制 · Backspace 清除 · Esc 取消</p>`;
   }
+  function earlyAnchor(c) {
+    const {data,esc,name,plan}=c,selected=new Set(data.settings.early_anchor_accounts||[]);
+    const accounts=data.accounts.filter(a=>a.plan==='plus');
+    return `<div class="toggle-line"><span>开始工作时自动计时</span><button class="switch" role="switch" aria-label="开始工作时自动计时" aria-checked="${!!data.settings.early_anchor}" data-action="toggle" data-key="early_anchor"><i></i></button></div>`
+      +'<p class="inline-help">为所选 Plus 提前启动 5 小时窗口，消耗极少额度。正在使用或已开始计时的账号会跳过。</p>'
+      +`<div class="relay-account-list">${collection(c,'early-anchor',accounts,a=>`<div class="relay-account-row collection-row"><span class="relay-account-identity"><span class="relay-account-name" title="${esc(name(a))}">${esc(name(a))}</span><span class="badge">${esc(plan(a.plan))}</span></span><button class="switch" role="switch" aria-label="${esc(name(a))}提前计时" aria-checked="${selected.has(a.email)}" data-action="early-anchor-account" data-email="${esc(a.email)}"><i></i></button></div>`)}</div>`;
+  }
   function archives(c) {
     const {ui,esc,dt}=c;
     if(ui.inlineLoading.archives==='loading')return '<div class="inline-empty" role="status">正在读取…</div>';
@@ -33,7 +40,7 @@ window.NXSettingsContent = (()=>{
     return window.NXEditors.row({id:'resume-message',label:'接续消息',value:String(c.ui.messageDraft??c.data.settings.resume_message).replace(/\r\n?|\n/g,' '),action:'save-resume-message'})
       +'<span id="form-error" class="field-feedback" role="alert"></span>';
   }
-  return {disclosure,relay,hotkeys,archives,message};
+  return {disclosure,relay,hotkeys,archives,message,earlyAnchor};
 })();
 window.NXViews.settings = c => {
   const {data,ui,settingsGroup,systemSettings,autoRelaySetting,taskContinuationSetting,notificationSettings,segmented,link}=c;
@@ -42,6 +49,7 @@ window.NXViews.settings = c => {
   const appearance=x.disclosure(c,'appearance','外观',segmented({label:'外观',action:'pref',key:'appearance',options,value:data.settings.appearance,className:'compact'}),options.find(([v])=>v===data.settings.appearance)?.[1]||'系统');
   const body=settingsGroup('系统',systemSettings(data.settings)+appearance+x.disclosure(c,'notifications','通知',notificationSettings(data.settings))+link('','诊断摘要','diagnostics'))
     +settingsGroup('接力与接续',autoRelaySetting(data.settings)
+      +x.disclosure(c,'early-anchor','提前开始 5h 计时',x.earlyAnchor(c),data.settings.early_anchor?`${(data.settings.early_anchor_accounts||[]).length} 个账号`:'未开启')
       +x.disclosure(c,'relay','参与自动接力的账号',x.relay(c),`${n}/${data.accounts.length}`)
       +taskContinuationSetting(data.settings)
       +x.disclosure(c,'message','接续消息',x.message(c))

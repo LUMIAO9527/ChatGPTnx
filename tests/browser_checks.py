@@ -241,10 +241,12 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   await scenario('archived');
   document.querySelector('[data-action="usage-all"]').click();await wait(100);
   const archivedRow=document.querySelector('.account-usage-row[data-email="archived@example.com"]');
-  check('usage/archived-history-keeps-one-label',!!archivedRow&&archivedRow.querySelector('strong')?.textContent.includes('已归档')&&
-        archivedRow.querySelector('small')?.textContent.indexOf('已归档')===-1&&archivedRow.querySelector('.usage-number')?.textContent.includes('万'));
+  check('usage/archived-history-keeps-plan-and-subtle-style',!!archivedRow&&archivedRow.classList.contains('archived')&&
+        archivedRow.querySelector('strong')?.textContent.includes('已归档')&&archivedRow.querySelector('small')?.textContent.trim()==='Plus'&&
+        archivedRow.querySelector('.usage-number')?.textContent.includes('万'));
   archivedRow?.click();await wait(70);
-  check('usage/archived-detail-is-read-only',document.querySelector('.usage-top .badge')?.textContent==='已归档'&&
+  check('usage/archived-detail-is-read-only',document.querySelector('.usage-top .badge')?.textContent==='Plus'&&
+        document.querySelector('.usage-top .identity-title strong')?.textContent.includes('已归档')&&
         !document.querySelector('[data-action="usage-refresh"]')&&document.querySelector('.usage-total')?.textContent.includes('万'));
   document.querySelector('[data-action="back"]').click();await wait(40);
 

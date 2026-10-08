@@ -382,6 +382,8 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .usage-accounts,.usage-account-details { position:relative; margin-top:10px; border-top:1px solid transparent; padding-top:6px; }
 .usage-accounts .section-title,.usage-account-details .section-title { min-height:28px; }
 .account-usage-row:hover { background:var(--surface); }
+.account-usage-row.archived .archive-mark { color: var(--muted); font-size: .9em; font-weight: 400; }
+.account-usage-row.archived .avatar { background: transparent; border: 1px solid var(--line); color: var(--muted); }
 .usage-footnote { margin:9px 2px 0; color:var(--muted); font-size:var(--font-caption); line-height:var(--line-normal); }
 
 /* Full-panel onboarding: no empty roster/footer behind the first-use flow. */

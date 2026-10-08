@@ -22,7 +22,8 @@ check('roster/weekly-only-has-no-five-hour-slot',()=>assert.deepEqual(values(acc
 check('roster/five-only-has-no-week-slot',()=>assert.deepEqual(values(account([{label:'5h',used:0}])),['100%']));
 check('roster/exhausted-is-real-zero',()=>assert.deepEqual(values(account([{label:'5h',used:100},{label:'周',used:100}])),['0%','0%']));
 check('roster/decimal-rounding-is-bounded',()=>assert.deepEqual(values(account([{label:'5h',used:66.6666667},{label:'周',used:99.96}])),['33.3%','0%']));
-check('roster/unavailable-does-not-render-stale-cache',()=>assert.deepEqual(values({ok:false,windows:[{label:'5h',used:25},{label:'周',used:25}]}),[]));
+check('roster/auth-failure-does-not-render-stale-cache',()=>assert.deepEqual(values({ok:false,error_code:'reauth_required',windows:[{label:'5h',used:25},{label:'周',used:25}]}),[]));
+check('roster/transient-refresh-failure-keeps-known-quota',()=>assert.deepEqual(values({ok:false,error_code:'network',windows:[{label:'5h',used:100},{label:'周',used:25}]}),['0%','75%']));
 check('roster/invalid-values-never-become-zero',()=>{
  for(const used of [null,undefined,NaN,Infinity,-1,101,true,'33'])assert.deepEqual(values(account([{label:'5h',used}])),[]);
 });

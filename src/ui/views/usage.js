@@ -7,7 +7,7 @@ window.NXViews.usage = c => {
   const record=all?null:u?.rows?.[0],summary=!all&&['ready','missing_total'].includes(record?.status)?record.usage?.summary||{}:{};
   const lifetime=ui.days==='all',totalValue=!u?null:lifetime?(all?u.total_tokens:summary.lifetimeTokens):u.period.recorded_tokens;
   const totalFormat=math.compact(totalValue);
-  const identity=all?`<div class="identity usage-source">${brandMark('usage-brand')}<div class="identity-copy"><span class="identity-title"><strong>所有账号</strong></span><small>${u?.unique_accounts??data.accounts.length} 个账号</small></div></div>`:accountIdentity(account);
+  const identity=all?`<div class="identity usage-source">${brandMark('usage-brand')}<div class="identity-copy"><span class="identity-title"><strong>所有账号</strong></span><small>${u?.unique_accounts??data.accounts.length} 个账号</small></div></div>`:accountIdentity(account?.archived?{...account,archived:false,alias:name(account)+' · 已归档'}:account);
   const filters=segmented({label:'用量时间范围',action:'usage-period',options:[[7,'7天'],[30,'30天'],[180,'180天'],['all','全部']],value:ui.days,className:'usage-filter quota-slot'});
   const header=`<section class="usage-context" aria-label="账号与时间范围"><div class="current-identity detail-profile usage-top">${identity}${account?.archived?'':tool('refresh','usage-refresh','刷新个人用量',disabled(),data.operation?.kind==='usage'?'spinner':'')}</div>${filters}</section>`;
   const hero=`<div class="usage-hero"><div class="eyebrow">累计 Tokens</div><div class="usage-total mono" aria-label="${math.exact(totalValue)} Tokens">${totalFormat.main}<span>${totalFormat.unit}</span></div></div>`;
@@ -24,14 +24,14 @@ window.NXViews.usage = c => {
   const report=header+`<section class="usage-summary" aria-label="用量统计">${hero}${chart}</section>`;
   let lower;
   if(all){
-    const rows=(ui.usage?.rows||[]).map(r=>{
-      const a=data.accounts.find(a=>a.email===r.email)||r,value=lifetime?(r.included?r.tokens:null):r.period_tokens;
+    const rows=(ui.usage?.rows||[]).filter(r=>lifetime||r.period_tokens!==null).map(r=>{
+      const a=data.accounts.find(a=>a.email===r.email)||r;
+      const value=lifetime?(r.included?r.tokens:null):r.period_tokens;
       const share=value!==null&&totalValue&&math.count(totalValue)>0n?Number((BigInt(value)*1000n/BigInt(totalValue)))/10:null;
-      const status=lifetime?statuses[r.status]:value===null?'区间无记录':r.status==='ready'?'已记录':statuses[r.status]||'已记录';
-      return `<button class="account-usage-row" data-action="usage-account" data-email="${esc(r.email)}">${avatar(a)}<span class="identity-copy"><strong>${esc(name(a))}${r.archived?' · 已归档':''}</strong><small>${r.archived?'':esc(plan(a?.plan))+' · '}${esc(status)}</small></span><span class="usage-number mono">${value!==null?short(value):'—'}<small>${share==null?'查看详情':share.toFixed(1)+'%'}</small></span>${icon('chevron')}</button>`;
+      const rowClass=r.archived?'account-usage-row archived':'account-usage-row';
+      return `<button class="${rowClass}" data-action="usage-account" data-email="${esc(r.email)}">${avatar(a)}<span class="identity-copy"><strong>${esc(name(a))}${r.archived?' <span class="archive-mark">· 已归档</span>':''}</strong><small>${esc(plan(a?.plan))}</small></span><span class="usage-number mono">${value!==null?short(value):'—'}<small>${share==null?'查看详情':share.toFixed(1)+'%'}</small></span>${icon('chevron')}</button>`;
     }).join('');
-    const count=lifetime?u?.included_accounts:(u?.rows||[]).filter(r=>r.period_tokens!==null).length;
-    lower=`<section class="usage-accounts"><div class="section-title"><h3>账号</h3><span>${u?`${count}/${u.unique_accounts} ${lifetime?'已计入':'有记录'}`:'读取中'}</span></div><div class="account-usage-list">${rows||'<div class="inline-empty">暂无账号记录</div>'}</div></section>`;
+    lower=`<section class="usage-accounts"><div class="section-title"><h3>账号</h3></div><div class="account-usage-list">${rows||'<div class="inline-empty">暂无账号记录</div>'}</div></section>`;
   }else{
     const peak=(u?.daily||[]).reduce((m,d)=>math.count(d.tokens)>m?math.count(d.tokens):m,0n),span=u?.period?.span_days||0;
     const days=u?.daily||[],currentStreak=record?.usage?.summary?.currentStreakDays;

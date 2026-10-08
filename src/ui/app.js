@@ -17,7 +17,7 @@
   const {esc, icon, tool, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
          notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity} = window.NXComponents;
   const defaults = {appearance:'system', autostart:false,
-    auto_relay:false, auto_relay_excluded:[], task_continuation:true, resume_message:'继续',
+    auto_relay:false, auto_relay_excluded:[], early_anchor:false, early_anchor_accounts:[], task_continuation:true, resume_message:'继续',
     notify_credential:true, notify_low:false, notify_reset_expiry:true, relay_pick:null};
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[]};
   let workflowResume = false;
@@ -32,9 +32,14 @@
   let notification=null,notificationTimer=null,dismissedStatus=null,activeStatusKey='',lastAnnouncedStatus='';
   const statusDock=window.NXFeedback.createDock({root:app});
   function settingValue(key,source=data) {
+    if(key.startsWith('anchor:'))return (source.settings.early_anchor_accounts||[]).includes(key.slice(7));
     return key.startsWith('account:')?!(source.settings.auto_relay_excluded||[]).includes(key.slice(8)):source.settings[key];
   }
   function projectSetting(key,value,target=data) {
+    if(key.startsWith('anchor:')){
+      const selected=new Set(target.settings.early_anchor_accounts||[]),email=key.slice(7);
+      value?selected.add(email):selected.delete(email);target.settings.early_anchor_accounts=[...selected];return;
+    }
     if(key.startsWith('account:')){
       const excluded=new Set(target.settings.auto_relay_excluded||[]),email=key.slice(8);
       value?excluded.delete(email):excluded.add(email);target.settings.auto_relay_excluded=[...excluded];
@@ -42,7 +47,7 @@
   }
   const preferences=window.NXPreferences.create({
     read:key=>settingValue(key),project:projectSetting,
-    write:(key,value)=>key.startsWith('account:')?api('set_auto_relay_account',key.slice(8),value):api('set_preferences',{[key]:value}),
+    write:(key,value)=>key.startsWith('anchor:')?api('set_early_anchor_account',key.slice(7),value):key.startsWith('account:')?api('set_auto_relay_account',key.slice(8),value):api('set_preferences',{[key]:value}),
     changed:()=>{applyAppearance(data.settings.appearance);render();},
     failed:error=>notify(error.message||'设置未保存，已恢复原状态',{tone:'error'}),
     settled:()=>poll(true)
@@ -530,7 +535,7 @@
       if(navigation.current(ticket))renderSheet();
     }
   }
-  const settingDisclosureKeys=new Set(['appearance','notifications','relay','message','hotkeys','archives']);
+  const settingDisclosureKeys=new Set(['appearance','notifications','relay','early-anchor','message','hotkeys','archives']);
   function selectSettingDisclosure(key) {
     for(const k of settingDisclosureKeys)if(k!==key)ui.disclosures.delete(k);
     ui.disclosures.add(key);
@@ -662,6 +667,7 @@
       case 'execute-switch':await executeSwitch(target,b);break;
       case 'toggle':preferences.set(b.dataset.key,!data.settings[b.dataset.key]);break;
       case 'auto-relay-account':preferences.set('account:'+target,b.getAttribute('aria-checked')!=='true');break;
+      case 'early-anchor-account':preferences.set('anchor:'+target,b.getAttribute('aria-checked')!=='true');break;
       case 'pref':preferences.set(b.dataset.key,val);break;
       case 'collection-more':ui.fullCollections.has(val)?ui.fullCollections.delete(val):ui.fullCollections.add(val);renderSheet();break;
       case 'inline-reload':await loadInline(val,true);break;

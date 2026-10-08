@@ -36,6 +36,7 @@ window.NXDemo = (() => {
       last_error:null,last_result:null,recent_results:[],chatgpt_running:true,pending:null,relay_wait:null,
       hotkeys:accounts.map((a,i)=>({email:a.email,shortcut:`ctrl+alt+${i+1}`,registered:true})),
       settings:{appearance:'system',autostart:false,auto_relay:false,auto_relay_excluded:[],
+        early_anchor:false,early_anchor_accounts:[],
         task_continuation:true,resume_message:'继续',notify_credential:true,
         notify_low:false,notify_reset_expiry:true,relay_pick:null}};
     usages={};const totals=[18420680,26480300,60241200,9421800,5483200];
@@ -151,6 +152,11 @@ window.NXDemo = (() => {
         const excluded=new Set(state.settings.auto_relay_excluded);
         if(args[1])excluded.delete(email);else excluded.add(email);
         state.settings.auto_relay_excluded=[...excluded];return {ok:true};}
+      case 'set_early_anchor_account':{
+        if(!state.accounts.some(a=>a.email===email&&a.plan==='plus'))return {ok:false,error:'请选择 Plus 账号'};
+        const selected=new Set(state.settings.early_anchor_accounts||[]);
+        if(args[1])selected.add(email);else selected.delete(email);
+        state.settings.early_anchor_accounts=[...selected];return {ok:true};}
       case 'set_relay_pick':{
         const a=state.accounts.find(a=>a.email===email);
         if(email&&(!a||email===state.current))return {ok:false,error:'这个账号不能设为下一棒'};

@@ -66,6 +66,35 @@ class Fixture(unittest.TestCase):
         atomic_bytes(self.paths.auth,auth('a@example.com'))
         self.query=FakeQuery()
         self.service=Service(self.paths,self.query,self.runner)
+    def test_early_anchor_selection_persists_only_plus_and_stays_optional(self):
+        atomic_bytes(self.paths.snapshot('b@example.com'),
+                     auth('b@example.com', {'chatgpt_plan_type': 'plus'}))
+        before = self.paths.auth.read_bytes()
+        self.assertFalse(self.service.state.get('settings')['early_anchor'])
+        self.assertTrue(self.service.set_early_anchor_account('b@example.com', True)['ok'])
+        self.assertFalse(self.service.set_early_anchor_account('a@example.com', True)['ok'])
+        self.assertFalse(self.service.set_early_anchor_account('b@example.com', 'yes')['ok'])
+        self.assertFalse(self.service._anchor_allowed('b@example.com'))
+        self.assertTrue(self.service.set_preferences({'early_anchor': True})['ok'])
+        self.assertTrue(self.service._anchor_allowed('b@example.com'))
+        self.assertFalse(self.service._anchor_allowed('a@example.com'))
+        self.assertEqual(State(self.paths).get('settings')['early_anchor_accounts'], ['b@example.com'])
+        self.assertEqual(self.paths.auth.read_bytes(), before)
+
+    def test_early_anchor_quota_update_preserves_other_accounts_and_reset_details(self):
+        original = normalize_limits(limits(), 'a@example.com')
+        original['banked_resets'] = {'available_count': 1, 'items': [{'title': 'fixture'}]}
+        self.service.state.change('cache', lambda old: {'updated': 123, 'accounts': [
+            original, {'email': 'b@example.com', 'ok': True}]})
+        newer = normalize_limits(limits(), 'a@example.com')
+        newer['windows'][0]['used'] = 0
+        self.service._record_anchor_limits(newer)
+        result = self.service.state.get('cache')
+        self.assertEqual(result['updated'], 123)
+        self.assertEqual(result['accounts'][0]['banked_resets'], original['banked_resets'])
+        self.assertEqual(result['accounts'][0]['windows'][0]['used'], 0)
+        self.assertEqual(result['accounts'][1], {'email': 'b@example.com', 'ok': True})
+
     def tearDown(self):
         self.service.stop.set()
         self.wait()

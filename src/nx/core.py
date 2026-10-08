@@ -14,7 +14,7 @@ import threading
 import time
 import uuid
 import unicodedata
-from .storage import Accounts, Paths, State, credential_metadata, identity, account_identity_key, activity_identity_key
+from .storage import Accounts, Paths, State, credential_metadata, identity, account_identity_key, activity_identity_key, claims
 from .quota import Query
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 from .resume_flow import ResumeCoordinator
@@ -112,6 +112,9 @@ class Service:
                                          self.notify, self.desktop_gate,
                                          lambda: self.state.get('settings'),
                                          self.desktop_transitioning)
+        from .early_anchor import EarlyAnchor
+        self.early_anchor = EarlyAnchor(paths, self.accounts.current, self._record_anchor_limits,
+                                       self._anchor_allowed)
         if self.state.recovery_path or self.resumer.recovery_path:
             self.last_error = {'id': uuid.uuid4().hex, 'kind': 'recovery', 'target': None,
                 'message': '本地状态文件损坏，已保留原文件并恢复；请检查设置与接续记录',
@@ -907,8 +910,10 @@ class Service:
                 continue
             archived_emails.add(email.casefold())
             path = self.paths.snapshots / 'removed' / archived['key']
+            archived_auth = claims(path).get('https://api.openai.com/auth') or {}
+            archived_plan = archived_auth.get('chatgpt_plan_type') if isinstance(archived_auth, dict) else None
             accounts.append({'email': email, 'alias': meta.get(email, {}).get('alias', ''),
-                             'plan': 'unknown', 'archived': True,
+                             'plan': archived_plan if isinstance(archived_plan, str) else 'unknown', 'archived': True,
                              'identity_key': account_identity_key(path, email),
                              'activity_key': activity_identity_key(path, email)})
         return aggregate(accounts, self.state.get('usage'), days=days)
@@ -960,7 +965,7 @@ class Service:
         if not isinstance(changes, dict):
             return {'ok': False, 'error': '设置格式不合法'}
         writable = {'appearance', 'notify_low', 'notify_reset_expiry', 'notify_credential',
-                    'auto_relay', 'task_continuation', 'resume_message'}
+                    'auto_relay', 'early_anchor', 'task_continuation', 'resume_message'}
         if any(key not in writable or not valid_setting(key, value) for key, value in changes.items()):
             return {'ok': False, 'error': '设置项或值不合法'}
         allowed = changes
@@ -1013,6 +1018,41 @@ class Service:
                                           self.state.get('settings').get('auto_relay'))
         self.notify()
         return {'ok': True}
+
+    def set_early_anchor_account(self, email, enabled):
+        if email not in self.accounts.all() or type(enabled) is not bool:
+            return {'ok': False, 'error': '提前计时账号设置不合法'}
+        auth = claims(self.paths.snapshot(email)).get('https://api.openai.com/auth') or {}
+        if auth.get('chatgpt_plan_type') != 'plus':
+            return {'ok': False, 'error': '提前计时适用于 Plus 账号'}
+        def toggle(settings):
+            selected = set(settings.get('early_anchor_accounts') or [])
+            selected.add(email) if enabled else selected.discard(email)
+            settings['early_anchor_accounts'] = sorted(selected)
+            return settings
+        self.state.change('settings', toggle)
+        self.notify()
+        return {'ok': True}
+
+    def _anchor_allowed(self, email):
+        settings = self.state.get('settings')
+        return (not self.stop.is_set() and settings.get('early_anchor')
+                and email in (settings.get('early_anchor_accounts') or [])
+                and email in self.accounts.all() and email != self.accounts.current())
+
+    def _record_anchor_limits(self, value):
+        def merge(cache):
+            accounts = cache.get('accounts', [])
+            previous = next((a for a in accounts if a.get('email') == value['email']), {})
+            # This request reads quota only; keep separately queried reset details.
+            quota = {key: item for key, item in value.items() if key != 'banked_resets'}
+            updated = {**previous, **quota}
+            cache['accounts'] = [updated if a.get('email') == value['email'] else a for a in accounts]
+            if not previous:
+                cache['accounts'].append(updated)
+            return cache
+        self.state.change('cache', merge)
+        self.notify()
 
     def resolved_hotkeys(self, emails=None):
         emails = emails or self.accounts.all()
@@ -1090,6 +1130,21 @@ class Service:
 
     def start_poll(self):
         self.resumer.start()
+        def watch_work():
+            delay = 2
+            while not self.stop.wait(delay):
+                try:
+                    results = self.early_anchor.tick(self.state.get('settings'), busy=bool(
+                        self.operation or self.state.get('adding') or self.state.get('reauth')))
+                    if results:
+                        self.log.info('early_anchor_batch sent=%d failed=%d',
+                            sum(r['status'] in ('started', 'sent') for r in results),
+                            sum(r['status'] == 'failed' for r in results))
+                    delay = 2
+                except Exception as error:
+                    self.log.warning('early_anchor_watch_failed type=%s', type(error).__name__)
+                    delay = 30
+        threading.Thread(target=watch_work, name='nx-work-watch', daemon=True).start()
         def watch_login():
             """Announce a new login only after its credential has stayed stable."""
             observed = announced = None

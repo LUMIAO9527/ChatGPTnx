@@ -375,6 +375,7 @@ class Bridge:
     def set_account_hotkey(self, email, shortcut=None): return self._service.set_account_hotkey(email, shortcut)
     def set_relay_pick(self, email=None): return self._service.set_relay_pick(email)
     def set_auto_relay_account(self, email, enabled): return self._service.set_auto_relay_account(email, enabled)
+    def set_early_anchor_account(self, email, enabled): return self._service.set_early_anchor_account(email, enabled)
     def set_preferences(self, changes):
         if not isinstance(changes, dict):
             return {'ok': False, 'error': '设置格式不合法'}

@@ -73,7 +73,9 @@ window.NXComponents = (() => {
     const label=accountName(account);
     return `${avatar(account)}<span class="account-choice-copy"><span class="account-title"><strong title="${esc(label)}">${esc(label)}</strong>${showCurrent&&account.email===currentEmail?'<span class="current-chip">当前</span>':''}</span><span class="account-secondary"><span class="account-plan">${esc(planLabel(account.plan))}</span><span class="choice-quotas">${quotaSummary(account)}</span></span></span>`;
   }
-  const displayWindows = account => account?.ok && Array.isArray(account.windows)
+  const transientQuotaFailure = account => !account?.ok &&
+    ['network','timeout',429,'-32603',-32603,'query_policy_unavailable'].includes(account?.error_code);
+  const displayWindows = account => (account?.ok || transientQuotaFailure(account)) && Array.isArray(account.windows)
     ? account.windows.filter(w => w && Number.isFinite(w.used) && w.used>=0 && w.used<=100) : [];
   const remaining = window => Math.round((100-window.used)*10)/10;
   const quotaSummary = account => {
