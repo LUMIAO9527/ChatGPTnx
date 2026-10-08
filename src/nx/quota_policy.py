@@ -27,7 +27,9 @@ def usable_windows(account, now=None, *, require_timestamp=True):
     if not known_windows(account):
         return False
     stamp = account.get('fetched_at')
-    if not (stamp is None and not require_timestamp) and (not number(stamp) or not 0 <= stamp <= now + 60):
+    if stamp is None and not require_timestamp:
+        age = 0
+    elif not number(stamp) or not -60 <= now - stamp <= (900 if account.get('ok') is not True else 600):
         return False
     return all(w['resets_at'] > now for w in account['windows'])
 

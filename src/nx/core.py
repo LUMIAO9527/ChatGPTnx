@@ -618,7 +618,7 @@ class Service:
         account = next((a for a in data['accounts'] if a['email'] == data.get('current')), None)
         if data.get('current') in set(settings.get('auto_relay_excluded') or []):
             return {'ok': True, 'accepted': False, 'reason': 'excluded'}
-        if not account or not usable_windows(account):
+        if not account or not fresh_windows(account):
             return {'ok': True, 'accepted': False, 'reason': 'quota_unavailable'}
         now = time.time()
         exhausted = [w for w in account['windows']

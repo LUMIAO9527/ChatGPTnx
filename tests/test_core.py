@@ -150,7 +150,7 @@ class Fixture(unittest.TestCase):
         for a in cache['accounts']:
             a['fetched_at']=time.time()-601
         self.service.state.update(cache=cache)
-        self.assertEqual(self.service.get_data()['relay_email'], 'b@example.com')
+        self.assertIsNone(self.service.get_data()['relay_email'])
         before=len(self.query.calls)
         self.assertTrue(self.service.refresh_stale_relay_accounts(self.service.get_data()))
         self.wait()
@@ -754,6 +754,15 @@ class TransactionTests(Fixture):
                   account('stale@example.com',now-601,now+3600),
                   account('fresh@example.com',now,now+3600)]
         self.assertEqual(relay_candidate(accounts,None)['email'],'fresh@example.com')
+
+    def test_temporary_failure_can_use_recent_known_quota_but_old_cache_cannot(self):
+        now = int(time.time())
+        recent = {'email':'recent@example.com','ok':False,'error_code':'network','fetched_at':now-601,
+                  'windows':[{'label':'5h','used':20,'resets_at':now+3600}]}
+        old = {'email':'old@example.com','ok':False,'error_code':'network','fetched_at':now-901,
+               'windows':[{'label':'5h','used':20,'resets_at':now+3600}]}
+        self.assertEqual(relay_candidate([recent],None), recent)
+        self.assertIsNone(relay_candidate([old],None))
     def test_meta_validated(self):
         self.assertFalse(self.service.set_account_meta('a@example.com','test','not-date')['ok'])
         self.assertTrue(self.service.set_account_meta('a@example.com','Work','2027-01-01')['ok'])
