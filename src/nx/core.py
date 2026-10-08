@@ -1,6 +1,7 @@
 """One operation coordinator; small stable bridge; no UI dependencies."""
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 import copy
 from datetime import date
 import json
@@ -114,7 +115,7 @@ class Service:
                                          self.desktop_transitioning)
         from .early_anchor import EarlyAnchor
         self.early_anchor = EarlyAnchor(paths, self.accounts.current, self._record_anchor_limits,
-                                       self._anchor_allowed)
+                                       self._anchor_allowed, dispatch=self._anchor_dispatch)
         if self.state.recovery_path or self.resumer.recovery_path:
             self.last_error = {'id': uuid.uuid4().hex, 'kind': 'recovery', 'target': None,
                 'message': '本地状态文件损坏，已保留原文件并恢复；请检查设置与接续记录',
@@ -412,6 +413,7 @@ class Service:
                     result = {**old, **result, 'fetched_at': old.get('fetched_at'),
                               'attempted_at': int(time.time())}
                 result.update(credential_metadata(self.paths.auth if email == current else self.paths.snapshot(email)))
+                self.early_anchor.observe_limits(result)
                 indexed[email] = result
                 results[email] = copy.deepcopy(result)
                 count += 1
@@ -969,11 +971,11 @@ class Service:
         if any(key not in writable or not valid_setting(key, value) for key, value in changes.items()):
             return {'ok': False, 'error': '设置项或值不合法'}
         allowed = changes
-        if allowed.get('task_continuation') is False:
+        with self.lock:
             self.state.setting(**allowed)
+        if allowed.get('task_continuation') is False:
             self.resumer.cancel_active()
         else:
-            self.state.setting(**allowed)
             if allowed.get('task_continuation') is True:
                 self.resumer.wake.set()
         if 'auto_relay' in allowed:
@@ -1030,15 +1032,29 @@ class Service:
             selected.add(email) if enabled else selected.discard(email)
             settings['early_anchor_accounts'] = sorted(selected)
             return settings
-        self.state.change('settings', toggle)
+        with self.lock:
+            self.state.change('settings', toggle)
         self.notify()
         return {'ok': True}
 
     def _anchor_allowed(self, email):
         settings = self.state.get('settings')
-        return (not self.stop.is_set() and settings.get('early_anchor')
+        return (not self.stop.is_set() and not self.operation and not self.desktop_transitioning()
+                and settings.get('early_anchor')
                 and email in (settings.get('early_anchor_accounts') or [])
                 and email in self.accounts.all() and email != self.accounts.current())
+
+    @contextmanager
+    def _anchor_dispatch(self, email):
+        """Serialize the final POST write with switching and preference changes."""
+        with self.lock:
+            if not self._anchor_allowed(email) or not self.desktop_gate.acquire(blocking=False):
+                yield False
+                return
+            try:
+                yield True
+            finally:
+                self.desktop_gate.release()
 
     def _record_anchor_limits(self, value):
         def merge(cache):
@@ -1136,7 +1152,7 @@ class Service:
                 try:
                     results = self.early_anchor.tick(self.state.get('settings'), busy=bool(
                         self.operation or self.state.get('adding') or self.state.get('reauth')))
-                    if results:
+                    if any(r['status'] in ('started', 'sent', 'failed') for r in results):
                         self.log.info('early_anchor_batch sent=%d failed=%d',
                             sum(r['status'] in ('started', 'sent') for r in results),
                             sum(r['status'] == 'failed' for r in results))

@@ -95,6 +95,30 @@ class Fixture(unittest.TestCase):
         self.assertEqual(result['accounts'][0]['windows'][0]['used'], 0)
         self.assertEqual(result['accounts'][1], {'email': 'b@example.com', 'ok': True})
 
+    def test_preheat_dispatch_yields_to_switch_and_resume_without_waiting(self):
+        self.service.state.setting(early_anchor=True, early_anchor_accounts=['b@example.com'])
+        with self.service._anchor_dispatch('b@example.com') as ready:
+            self.assertTrue(ready)
+            self.assertTrue(self.service.desktop_gate.locked())
+        self.assertFalse(self.service.desktop_gate.locked())
+        self.service.operation = {'kind': 'switch'}
+        with self.service._anchor_dispatch('b@example.com') as ready:
+            self.assertFalse(ready)
+        self.service.operation = None
+        self.service.desktop_gate.acquire()
+        try:
+            with self.service._anchor_dispatch('b@example.com') as ready:
+                self.assertFalse(ready)
+        finally:
+            self.service.desktop_gate.release()
+
+    def test_normal_refresh_updates_preheat_schedule(self):
+        with patch.object(self.service.early_anchor, 'observe_limits') as observe:
+            self.service._refresh(['b@example.com'])
+        self.assertEqual(observe.call_count, 1)
+        self.assertEqual(observe.call_args.args[0]['email'], 'b@example.com')
+        self.assertTrue(observe.call_args.args[0]['ok'])
+
     def tearDown(self):
         self.service.stop.set()
         self.wait()

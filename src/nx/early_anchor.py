@@ -1,6 +1,7 @@
 """Optional tiny requests to start unused Plus windows, without desktop login."""
 from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 import http.client
 import json
 import ssl
@@ -12,10 +13,12 @@ import uuid
 
 from .credentials import read_credential_bytes
 from .storage import atomic_bytes, read_json, identity, claims, fingerprint, account_identity_key
-from .quota import normalize_limits, RPCError
+from .quota import normalize_limits, numeric, RPCError
 from .quota_http import limits_payload
 from .history_store import latest_database, read_only
-from .desktop_resume import desktop_task_events
+from .task_metadata import task_metadata
+from .desktop import chatgpt_running
+from . import app_bridge
 
 MODEL = 'gpt-6-luna'
 WINDOW = 18000
@@ -35,6 +38,7 @@ def request_body():
 class Backend:
     """One verified HTTPS connection, one POST, zero request/stream retries."""
     def __init__(self, token, account_id):
+        self.may_have_run = False
         self.headers = {'Authorization': 'Bearer ' + token, 'ChatGPT-Account-Id': account_id,
                         'User-Agent': 'ChatGPTnx/1.0.1', 'Originator': 'ChatGPTnx'}
         proxy = urllib.request.getproxies().get('https')
@@ -59,13 +63,27 @@ class Backend:
             raise RPCError('额度响应无法识别', 'schema')
         return json.loads(raw)
 
-    def send(self):
+    def send(self, before_send=lambda: True, dispatch=lambda: nullcontext(True)):
         if self.conn.sock is None:
             raise RPCError('查询连接已断开', 'network')
-        self.conn.request('POST', '/backend-api/codex/responses', body=request_body(),
-                          headers={**self.headers, 'Content-Type': 'application/json', 'Accept': 'text/event-stream'})
+        body = request_body()
+        # Coordinate only the packet write, never the response wait. Switching
+        # and settings changes use the same service gate; GETs hold no gate.
+        with dispatch() as ready:
+            if not ready or not before_send():
+                raise RPCError('工作或账号状态已变化', 'cancelled')
+            self.conn.sock.settimeout(2)
+            try:
+                self.may_have_run = True
+                self.conn.request('POST', '/backend-api/codex/responses', body=body,
+                    headers={**self.headers, 'Content-Type': 'application/json', 'Accept': 'text/event-stream'})
+            finally:
+                if self.conn.sock is not None:
+                    self.conn.sock.settimeout(25)
         with self.conn.getresponse() as response:
             if response.status != 200:
+                if response.status in (400, 401, 403, 404, 422, 429):
+                    self.may_have_run = False  # Explicit rejection, no inference.
                 raise RPCError('提前计时请求未完成', 'reauth_required' if response.status == 401 else 'anchor_request')
             deadline = time.monotonic() + 60
             total, parts = 0, []
@@ -94,50 +112,159 @@ class Backend:
 
 
 class WorkWatcher:
-    """Read only start/status metadata. Completed old work and subagents don't trigger."""
-    def __init__(self, home, clock=time.time):
-        self.home, self.clock = home, clock
-        self.cursor, self.seen = int(clock()), set()
+    """Latest main turns are candidates; the live desktop confirms actual work."""
+    def __init__(self, home, clock=time.time, running=chatgpt_running):
+        self.home, self.running = home, running
+        self.lock = threading.Lock()
 
     def poll(self):
+        if not self.running():
+            return []
         path = latest_database(self.home, 'thread_history_*.sqlite')
         if not path:
             return []
-        now = int(self.clock())
         with read_only(path) as db:
-            rows = db.execute('SELECT thread_id,turn_id,started_at,status FROM thread_turns '
-                'WHERE started_at>=? OR (status=? AND completed_at IS NULL AND started_at>=?) '
-                'ORDER BY started_at DESC LIMIT 128', (self.cursor, 'inProgress', now - 86400)).fetchall()
-        events = desktop_task_events(self.home, [
-            {'thread_id': thread, 'turn_id': turn, 'started_at': started}
-            for thread, turn, started, status in rows if status in ('inProgress', 'completed')
-            and (thread, turn) not in self.seen])
-        self.seen.update((e['thread_id'], e['turn_id']) for e in events)
-        if rows:
-            newest = max(int(r[2] or 0) for r in rows)
-            if newest > self.cursor:
-                self.cursor = newest
-                self.seen = {key for key in self.seen if any((r[0], r[1]) == key
-                             and (r[2] == newest or r[3] == 'inProgress') for r in rows)}
-        return events
+            rows = db.execute('SELECT t.thread_id,t.turn_id FROM thread_turns t '
+                'JOIN (SELECT thread_id,MAX(rollout_ordinal) ordinal FROM thread_turns GROUP BY thread_id) latest '
+                'ON latest.thread_id=t.thread_id AND latest.ordinal=t.rollout_ordinal '
+                'WHERE t.status=? AND t.completed_at IS NULL ORDER BY t.started_at DESC',
+                ('inProgress',)).fetchall()
+        metadata = task_metadata(self.home, [row[0] for row in rows])
+        return [{'thread_id': thread, 'turn_id': turn, 'canonical_id': metadata[thread]['canonical_id']}
+                for thread, turn in rows if metadata.get(thread, {}).get('kind') == 'task'
+                and metadata[thread].get('canonical_id')]
+
+    def confirm(self):
+        """Read status only, without opening a tab or sending a message."""
+        with self.lock:
+            events = self.poll()
+            if not events:
+                return False
+            pipe = None
+            try:
+                pipe = app_bridge.discover({'read_thread': {'threadId'}})
+                pipe.timeout = 3
+                for event in events:
+                    target = event['canonical_id']
+                    snapshot = app_bridge.text_result(pipe.request('tools/call', app_bridge.call_params(
+                        target, 'nx-preheat-read', 'read_thread', {'threadId': target, 'hostId': 'local',
+                        'turnLimit': 1, 'includeOutputs': False, 'maxOutputCharsPerItem': 0})))
+                    thread, turns = snapshot.get('thread') or {}, snapshot.get('turns') or []
+                    if (thread.get('id') == target and thread.get('kind') == 'codex'
+                        and (thread.get('status') or {}).get('type') == 'active'
+                        and len(turns) == 1 and turns[0].get('id') == event['turn_id']
+                        and turns[0].get('status') == 'inProgress'):
+                        return event['thread_id'], event['turn_id']
+                return False
+            except app_bridge.BridgeUnavailable:
+                return False
+            finally:
+                if pipe:
+                    pipe.close()
+
+    def still_working(self, confirmed):
+        # The final cheap check runs inside the dispatch gate. A completed or
+        # replaced turn cannot inherit a previous live confirmation.
+        return any((e['thread_id'], e['turn_id']) == confirmed for e in self.poll())
 
 
 class EarlyAnchor:
     def __init__(self, paths, current, record_limits=lambda value: None,
-                 allowed=lambda email: True, backend=Backend, clock=time.time):
+                 allowed=lambda email: True, backend=Backend, clock=time.time,
+                 dispatch=lambda email: nullcontext(True), watcher=None):
         self.paths, self.current, self.record_limits = paths, current, record_limits
         self.allowed, self.backend, self.clock = allowed, backend, clock
+        self.dispatch = dispatch
         self.path = paths.data / 'early-anchor.json'
         self.lock = threading.RLock()
-        self.watcher = WorkWatcher(paths.home, clock)
+        self.watcher = watcher or WorkWatcher(paths.home, clock)
+        self.tick_lock = threading.Lock()
+        self.due = {}
+        self.observed = {}
+        self.was_working = False
         self.configuration = None
 
     def _save(self, records):
         atomic_bytes(self.path, json.dumps(records, ensure_ascii=False).encode(), private=True)
 
+    def _records(self):
+        records = read_json(self.path, {}) if not self.path.exists() else read_json(self.path)
+        if not isinstance(records, dict) or any(not isinstance(v, dict) for v in records.values()):
+            raise RPCError('预热记录无法识别', 'anchor_state')
+        return records
+
+    def observe_limits(self, value):
+        """Reuse normal quota refreshes to notice a changed/restored window."""
+        if not value.get('ok'):
+            return
+        five = next((w for w in value.get('windows') or [] if w.get('duration_mins') == 300), None)
+        if not five:
+            return
+        email, signature = value['email'], (five.get('used'), five.get('resets_at'))
+        with self.lock:
+            if email in self.observed and self.observed[email] != signature:
+                self.due[email] = 0
+            self.observed[email] = signature
+
+    def _quota(self, connection, email, account_id):
+        raw = connection.quota()
+        if not isinstance(raw, dict) or raw.get('account_id') != account_id or raw.get('email', '').casefold() != email.casefold():
+            raise RPCError('查询账号不一致', 'identity_mismatch')
+        value = normalize_limits(limits_payload(raw), email)
+        rate = raw.get('rate_limit') or {}
+        win = rate.get('primary_window') or {}
+        remaining = numeric(win.get('reset_after_seconds'), 0, WINDOW)
+        if raw.get('plan_type') == 'plus' and win.get('limit_window_seconds') == WINDOW and remaining is None:
+            raise RPCError('计时窗口数据不完整', 'schema')
+        self.record_limits(value)
+        self.observe_limits(value)
+        return raw, rate, win
+
+    def _schedule(self, email, at):
+        with self.lock:
+            self.due[email] = max(self.clock() + 1, at)
+
+    def _resolve(self, email, key, previous, win):
+        """Only stable server reset times prove a zero-percent window started."""
+        now, reset = self.clock(), win['reset_at']
+        if win['reset_after_seconds'] < WINDOW:
+            if previous.get('status') == 'started':
+                self._schedule(email, reset + 1)
+                return {'status': 'already_started'}
+            if previous.get('status') in ('pending', 'sent', 'uncertain', 'failed'):
+                sample = previous.get('sample') or {}
+                confirmed = sample.get('reset_at') == reset and now - sample.get('at', now) >= 3
+                with self.lock:
+                    records = self._records()
+                    record = records[key]
+                    if confirmed:
+                        record.update(status='started', reset_at=reset)
+                        record.pop('sample', None)
+                    else:
+                        record['checks'] = int(record.get('checks') or 0) + 1
+                        record['sample'] = {'reset_at': reset, 'at': now}
+                    self._save(records)
+                self._schedule(email, reset + 1 if confirmed else now + (3 if record['checks'] < 3 else 60))
+                return {'status': 'started' if confirmed else 'checking', 'reset_at': reset}
+            self._schedule(email, reset + 1)
+            return {'status': 'already_started'}
+        if previous.get('status') in ('pending', 'sent', 'uncertain', 'failed'):
+            deadline = numeric(previous.get('attempt_until') or previous.get('until'), 1) or now
+            if now < deadline:
+                checks = int(previous.get('checks') or 0) + 1
+                with self.lock:
+                    records = self._records()
+                    records[key].update(checks=checks)
+                    records[key].pop('sample', None)
+                    self._save(records)
+                self._schedule(email, min(deadline + 1, now + (3 if checks < 3 else 60)))
+                return {'status': 'checking'}
+        return None
+
     def run(self, email):
         connection = None
         reserved = False
+        usage = None
         try:
             if email == self.current() or not self.allowed(email):
                 return {'status': 'skipped'}
@@ -148,59 +275,66 @@ class EarlyAnchor:
                 return {'status': 'skipped'}
             key, original = account_identity_key(path, email), fingerprint(path)
             with self.lock:
-                previous = read_json(self.path, {}).get(key, {})
-                if previous.get('until', 0) > self.clock():
-                    return {'status': 'already_started'}
+                previous = self._records().get(key, {})
             tokens = json.loads(read_credential_bytes(path).decode('utf-8-sig')).get('tokens') or {}
             if tokens.get('account_id') != who[1] or not tokens.get('access_token'):
                 raise RPCError('账号凭据不完整', 'reauth_required')
             connection = self.backend(tokens['access_token'], who[1])
-            raw = connection.quota()
-            if raw.get('account_id') != who[1] or raw.get('email', '').casefold() != email.casefold():
-                raise RPCError('查询账号不一致', 'identity_mismatch')
-            self.record_limits(normalize_limits(limits_payload(raw), email))
-            rate = raw.get('rate_limit') or {}
-            win, week = rate.get('primary_window') or {}, rate.get('secondary_window') or {}
+            raw, rate, win = self._quota(connection, email, who[1])
+            week = rate.get('secondary_window') or {}
             if (raw.get('plan_type') != 'plus' or win.get('limit_window_seconds') != WINDOW
-                or rate.get('allowed') is False
-                or win.get('used_percent') != 0 or (week.get('used_percent') or 0) >= 100
-                or win.get('reset_after_seconds') != WINDOW):
-                return {'status': 'already_started' if win.get('used_percent') == 0 else 'skipped'}
-            if (email == self.current() or not self.allowed(email) or fingerprint(path) != original):
+                or rate.get('allowed') is not True
+                or win.get('used_percent') != 0 or (week.get('used_percent') or 0) >= 100):
+                resets = [w.get('reset_at') for w in (win, week) if (w.get('used_percent') or 0) >= 100]
+                self._schedule(email, max(resets, default=win.get('reset_at') or self.clock() + 300) + 1)
                 return {'status': 'skipped'}
+            result = self._resolve(email, key, previous, win)
+            if result:
+                return result
+            confirmed_work = self.watcher.confirm()
+            if not confirmed_work:
+                self._schedule(email, self.clock() + 5)
+                return {'status': 'skipped'}
+
+            def reserve():
+                nonlocal reserved
+                with self.lock:
+                    if (email == self.current() or not self.allowed(email)
+                        or fingerprint(path) != original or not self.watcher.still_working(confirmed_work)):
+                        return False
+                    records = self._records()
+                    # Another worker can have reserved while this GET was in flight.
+                    latest = records.get(key, {})
+                    if latest != previous:
+                        return False
+                    records[key] = {'status': 'pending', 'at': self.clock(), 'attempt_until': win['reset_at']}
+                    self._save(records)
+                    reserved = True
+                    return (email != self.current() and self.allowed(email)
+                            and fingerprint(path) == original and self.watcher.still_working(confirmed_work))
+
+            usage = connection.send(reserve, lambda: self.dispatch(email))
             with self.lock:
-                records = read_json(self.path, {})
-                if records.get(key, {}).get('until', 0) > self.clock():
-                    return {'status': 'already_started'}
-                records[key] = {'status': 'pending', 'at': self.clock(), 'until': self.clock() + WINDOW}
-                self._save(records)  # Persist before sending; uncertain outcomes never retry this window.
-                reserved = True
-            usage = connection.send()
-            with self.lock:
-                records = read_json(self.path, {})
+                records = self._records()
                 records[key].update(status='sent', usage=usage)
                 self._save(records)
             connection.close(); connection = self.backend(tokens['access_token'], who[1])
-            confirmation = connection.quota()
-            if confirmation.get('account_id') != who[1] or confirmation.get('email', '').casefold() != email.casefold():
-                raise RPCError('查询账号不一致', 'identity_mismatch')
-            self.record_limits(normalize_limits(limits_payload(confirmation), email))
-            cw = (confirmation.get('rate_limit') or {}).get('primary_window') or {}
-            confirmed = cw.get('reset_after_seconds', WINDOW) < WINDOW
             with self.lock:
-                records = read_json(self.path, {})
-                records[key].update(status='started' if confirmed else 'sent', reset_at=cw.get('reset_at'))
-                self._save(records)
-            return {'status': 'started' if confirmed else 'sent', 'usage': usage, 'reset_at': cw.get('reset_at')}
+                previous = self._records()[key]
+            _, _, cw = self._quota(connection, email, who[1])
+            self._resolve(email, key, previous, cw)
+            return {'status': 'sent', 'usage': usage}
         except Exception as error:
+            possible = usage is not None or (connection is not None and connection.may_have_run)
             if reserved:
                 with self.lock:
-                    records = read_json(self.path, {})
-                    records[key].update(status='sent' if records[key].get('usage') else 'failed',
+                    records = self._records()
+                    records[key].update(status='sent' if usage else 'uncertain' if possible else 'not_sent',
                                         error_code=getattr(error, 'code', 'network'))
                     self._save(records)
-            return {'status': 'sent' if reserved and records[key].get('usage') else 'failed',
-                    'error_code': getattr(error, 'code', 'network')}
+            code = getattr(error, 'code', None) or 'network'
+            self._schedule(email, self.clock() + (3 if possible else 300 if code == 'reauth_required' else 30))
+            return {'status': 'sent' if usage else 'skipped' if code == 'cancelled' else 'failed', 'error_code': code}
         finally:
             if connection:
                 connection.close()
@@ -209,9 +343,23 @@ class EarlyAnchor:
         selection = tuple(settings.get('early_anchor_accounts') or [])
         configuration = bool(settings.get('early_anchor')), selection, self.current()
         if configuration != self.configuration:
-            self.watcher = WorkWatcher(self.paths.home, self.clock)
+            with self.lock:
+                self.due.clear()
             self.configuration = configuration
-        if not configuration[0] or not selection or busy or not self.watcher.poll():
+        if not configuration[0] or not selection or busy or not self.tick_lock.acquire(blocking=False):
             return []
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            return list(pool.map(self.run, dict.fromkeys(selection)))
+        try:
+            working = bool(self.watcher.poll())
+            if working and not self.was_working:
+                with self.lock:
+                    self.due.clear()
+            self.was_working = working
+            if not working:
+                return []
+            with self.lock:
+                ready = [email for email in dict.fromkeys(selection)
+                         if email != self.current() and self.due.get(email, 0) <= self.clock()]
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                return list(pool.map(self.run, ready))
+        finally:
+            self.tick_lock.release()
