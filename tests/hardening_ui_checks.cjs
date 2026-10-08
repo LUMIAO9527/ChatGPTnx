@@ -41,7 +41,8 @@ fs.mkdirSync(output, {recursive:true});
         await button.click();
         await button.waitFor({state:'detached'});
       } else if(scenario==='query-cooling') {
-        assert((await page.locator('.current-card').innerText()).includes('下次查询'));
+        assert.equal(await page.locator('.current-card .quota-bars').count(),1);
+        assert.equal(await page.locator('.current-card .quota-failure').count(),0);
         assert.equal(await page.locator('.current-card [data-action="reauth"]').count(),0);
       } else {
         assert((await page.locator('.notice[data-action="diagnostics"]').innerText()).includes('监控暂不可用'));

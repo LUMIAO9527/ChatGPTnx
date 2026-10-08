@@ -186,10 +186,10 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   await scenario('default');
   document.querySelector('.row[data-email="remote@example.com"]').click();await wait(40);
   const failedDetail=document.querySelector('.detail-body');
-  check('detail/quota-failure-keeps-layout',!!failedDetail.querySelector('.quota-failure')&&
-        box('.detail-actions').top-box('.quota-failure').bottom>=11&&
+  check('detail/temporary-query-failure-keeps-known-quota-layout',!!failedDetail.querySelector('.quota-bars')&&
+        box('.detail-actions').top-box('.quota-bars').bottom>=11&&
         failedDetail.scrollWidth<=failedDetail.clientWidth+1,
-        [box('.quota-failure').bottom,box('.detail-actions').top,failedDetail.scrollWidth,failedDetail.clientWidth]);
+        [box('.quota-bars').bottom,box('.detail-actions').top,failedDetail.scrollWidth,failedDetail.clientWidth]);
   document.querySelector('[data-action="back"]').click();await wait(40);
   await scenario('banked-partial');
   document.querySelector('.current-identity').click();await wait(40);
@@ -316,7 +316,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   document.querySelector('[data-disclosure="relay"] > summary').click();await wait(70);
   const firstAuto=window.NXDemo.state().relay_email;
   const relayAccountCount=window.NXDemo.state().accounts.length;
-  check('settings/relay-account-list',document.querySelectorAll('.relay-account-row .switch').length===relayAccountCount&&
+  check('settings/relay-account-list',document.querySelectorAll('[data-disclosure="relay"] .relay-account-row .switch').length===relayAccountCount&&
         document.querySelector('[data-disclosure="relay"] .disclosure-meta')?.textContent===`${relayAccountCount}/${relayAccountCount}`);
   check('settings/relay-account-style-aligns',box('.relay-account-list').left>=settingsCard.left&&
         box('.relay-account-list').right<=settingsCard.right&&

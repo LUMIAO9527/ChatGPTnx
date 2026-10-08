@@ -252,6 +252,29 @@ class Query:
     def ready(self, email, current=False):
         return self.status(email, current)['ready']
 
+    def preheat_status(self, email, consume=False):
+        status = self.status(email)
+        if not status['ready']:
+            return status
+        credential, _ = self._credential_hint(self.paths.snapshot(email), email)
+        return self.policy.status(email, credential, consume=consume)
+
+    def record_preheat_result(self, email, error=None):
+        try:
+            credential, code = self._credential_hint(self.paths.snapshot(email), email)
+        except (OSError, ValueError, TypeError):
+            return self.status(email)
+        if code:
+            return self.status(email)
+        if error is not None:
+            code = safe_code(getattr(error, 'code', 'timeout' if isinstance(error, TimeoutError) else 'network'))
+            return self._record_failure(email, credential, code, failure_details(error, 'quota'))
+        try:
+            self.policy.succeeded(email, credential)
+        except (OSError, ValueError, TypeError):
+            self._policy_unavailable = True
+        return self.status(email)
+
     def resume(self, email):
         try:
             resumed = self.policy.resume(email)
@@ -333,6 +356,7 @@ class Query:
                     raise RPCError('查询超时', 'timeout')
                 return self.client.get(endpoint, token, account_id, remaining, cancel)
             raw = get('/wham/usage')
+            quota_read_at = self.clock()
             if raw.get('account_id') != account_id or str(raw.get('email', '')).casefold() != email.casefold():
                 raise RPCError('查询身份与账号清单不一致', 'identity_mismatch')
             if usage:
@@ -364,6 +388,7 @@ class Query:
                     if warning['error_code'] == 403:
                         warning.update(scope='reset_credits', err='额度重置详情不可用，已暂停该接口；主额度查询继续')
                 result = normalize_limits(payload, email)
+                result['fetched_at'] = quota_read_at
             if cancel and cancel.is_set():
                 raise RPCError('后台查询已暂停', 'cancelled')
             if fingerprint(path) != before:

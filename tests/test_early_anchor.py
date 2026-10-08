@@ -16,12 +16,56 @@ from nx.early_anchor import Backend, EarlyAnchor, WorkWatcher, request_body
 from nx.storage import Paths, atomic_bytes
 from nx.settings import normalize_settings
 from nx.quota import RPCError
+from nx.quota_http import Query
 
 EMAIL = 'spare@fixture.invalid'
 SETTINGS = {'early_anchor': True, 'early_anchor_accounts': [EMAIL]}
 
 
 class AnchorTests(unittest.TestCase):
+    def policy_query(self):
+        return Query(self.paths, lambda: {'query_timeout':45}, client=Mock(), clock=lambda:self.now)
+
+    def test_unconfirmed_database_work_does_not_query_or_send(self):
+        self.live = False
+        engine = self.engine()
+        for _ in range(7):
+            engine.tick(SETTINGS); self.now += 6
+        self.assertEqual((self.queries, self.posts), (0, 0))
+
+    def test_preheat_obeys_existing_rate_limit_and_login_pause(self):
+        query = self.policy_query()
+        credential, _ = query._credential_hint(self.paths.snapshot(EMAIL), EMAIL)
+        for code in (429, 403, 'reauth_required', 'network'):
+            with self.subTest(code=code):
+                query.policy.failed(EMAIL, credential, code, {'retry_after_at':self.now+600})
+                self.engine(query=query).tick(SETTINGS)
+                self.assertEqual((self.queries, self.posts), (0, 0))
+
+    def test_preheat_network_failure_uses_shared_cooldown(self):
+        query = self.policy_query()
+        engine = self.engine(query=query)
+        self.failure = 'query'
+        for _ in range(7):
+            engine.tick(SETTINGS); self.now += 6
+        self.assertEqual((self.queries, self.posts), (1, 0))
+        self.assertFalse(query.status(EMAIL)['ready'])
+        self.now += 60; self.failure = None
+        self.assertEqual(engine.tick(SETTINGS)[0]['status'], 'sent')
+        self.assertTrue(query.status(EMAIL)['ready'])
+
+    def test_one_live_confirmation_serves_selected_batch(self):
+        other = 'second@fixture.invalid'
+        self.credential(email=other)
+        self.engine().tick({**SETTINGS, 'early_anchor_accounts':[EMAIL, other]})
+        self.assertEqual(self.watcher.confirm.call_count, 1)
+        self.assertEqual(self.posts, 2)
+
+    def test_credentials_changed_during_query_do_not_update_quota(self):
+        self.query_hook = lambda: self.credential('pro')
+        self.assertEqual(self.engine().run(EMAIL)['error_code'], 'identity_mismatch')
+        self.assertEqual((self.posts, len(self.values)), (0, 0))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -385,6 +429,21 @@ class WorkTests(unittest.TestCase):
 
 
 class TransportTests(unittest.TestCase):
+    def test_quota_http_errors_keep_status_and_server_retry_after(self):
+        for status in (401, 403, 429, 503):
+            with self.subTest(status=status):
+                response = Mock(status=status, headers={'Retry-After':'120'})
+                response.read.return_value = b'{"error":{"code":"too_many_requests"}}'
+                backend = Backend.__new__(Backend)
+                backend.headers = {}; backend.conn = Mock()
+                backend.conn.getresponse.return_value = response
+                with self.assertRaises(RPCError) as caught:
+                    backend.quota()
+                self.assertEqual(caught.exception.code, 'reauth_required' if status==401 else status)
+                self.assertEqual(caught.exception.diagnostics['http_status'], status)
+                self.assertIsNotNone(caught.exception.diagnostics['retry_after_at'])
+                response.close.assert_called()
+
     def test_no_retries_and_no_post_after_denied_guard(self):
         mode,counts = ['complete'],{}
         class Handler(http.server.BaseHTTPRequestHandler):

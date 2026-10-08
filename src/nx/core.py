@@ -21,7 +21,7 @@ NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 from .resume_flow import ResumeCoordinator
 
 from .version import APP_VERSION
-from .quota_policy import complete_windows, fresh_windows
+from .quota_policy import complete_windows, fresh_windows, known_windows, usable_windows, merge_quota
 from .settings import valid_setting
 from .diagnostics import Diagnostics, query_summary
 
@@ -37,7 +37,7 @@ def relay_candidates(accounts, current, excluded=()):
         return None
 
     def usable(account):
-        return (fresh_windows(account, now)
+        return (usable_windows(account, now)
                 and all(w['used'] < 100 for w in account['windows']))
 
     excluded = set(excluded)
@@ -67,7 +67,7 @@ def relay_candidates(accounts, current, excluded=()):
         reset_rank = -min(limiting_resets) if limiting_resets else float('-inf')
         return (tier, floor, has_five, reset_rank,
                 five if five is not None else -1,
-                week if week is not None else -1)
+                week if week is not None else -1, fresh_windows(account, now))
     return sorted(candidates, key=rank, reverse=True)
 
 
@@ -115,7 +115,8 @@ class Service:
                                          self.desktop_transitioning)
         from .early_anchor import EarlyAnchor
         self.early_anchor = EarlyAnchor(paths, self.accounts.current, self._record_anchor_limits,
-                                       self._anchor_allowed, dispatch=self._anchor_dispatch)
+                                       self._anchor_allowed, dispatch=self._anchor_dispatch,
+                                       query=self.query if isinstance(self.query, Query) else None)
         if self.state.recovery_path or self.resumer.recovery_path:
             self.last_error = {'id': uuid.uuid4().hex, 'kind': 'recovery', 'target': None,
                 'message': '本地状态文件损坏，已保留原文件并恢复；请检查设置与接续记录',
@@ -326,6 +327,14 @@ class Service:
     def _query_ready(self, email, current):
         return not isinstance(self.query, Query) or self.query.ready(email, email == current)
 
+    def _query_ready_or_known(self, email, current, account):
+        if self._query_ready(email, current):
+            return True
+        if not isinstance(self.query, Query):
+            return False
+        policy = self.query.status(email, email == current)
+        return usable_windows({**account, **policy, 'ok': False})
+
     def visible_error(self):
         with self.lock:
             error = self.last_error
@@ -380,9 +389,26 @@ class Service:
         return 'ready'
 
     def _record_current(self):
-        cache = self.state.get('cache')
-        cache['current'] = self.accounts.current()
-        self.state.update(cache=cache)
+        self.state.change('cache', lambda cache: {**cache, 'current': self.accounts.current()})
+
+    def _store_quota(self, value, preserve_resets=False):
+        stored = None
+        def merge(cache):
+            nonlocal stored
+            accounts = cache.get('accounts', [])
+            previous = next((a for a in accounts if a.get('email') == value['email']), {})
+            incoming = dict(value)
+            if preserve_resets:
+                incoming.pop('banked_resets', None)
+                if (previous.get('query_warning') or {}).get('scope') == 'reset_credits':
+                    incoming['query_warning'] = previous['query_warning']
+            stored = merge_quota(previous, incoming)
+            cache['accounts'] = [stored if a.get('email') == value['email'] else a for a in accounts]
+            if not previous:
+                cache['accounts'].append(stored)
+            return cache
+        self.state.change('cache', merge)
+        return copy.deepcopy(stored)
 
     def _refresh(self, targets=None, cancel=None):
         emails = self.accounts.all()
@@ -393,8 +419,6 @@ class Service:
             targets = [targets]
         else:
             targets = list(dict.fromkeys(email for email in targets if email in emails))
-        previous = self.state.get('cache')
-        indexed = {a['email']: a for a in previous.get('accounts', [])}
         settings = self.state.get('settings')
         count = 0
         results = {}
@@ -409,22 +433,18 @@ class Service:
                 except Exception:
                     result = {'email': email, 'ok': False, 'err': '查询失败', 'error_code': 'unexpected'}
                 if not result.get('ok'):
-                    old = indexed.get(email, {})
-                    result = {**old, **result, 'fetched_at': old.get('fetched_at'),
-                              'attempted_at': int(time.time())}
+                    result['attempted_at'] = int(time.time())
                 result.update(credential_metadata(self.paths.auth if email == current else self.paths.snapshot(email)))
+                result = self._store_quota(result)
                 self.early_anchor.observe_limits(result)
-                indexed[email] = result
                 results[email] = copy.deepcopy(result)
                 count += 1
                 self.phase(f'正在刷新 {count}/{len(targets)}')
-                # Progressive per-account timestamps, not a misleading global timestamp.
-                self.state.update(cache={'updated': previous.get('updated'), 'current': current,
-                                         'accounts': [indexed[e] for e in emails if e in indexed]})
                 self.notify()
         full = set(targets) == set(emails) and len(results) == len(targets) and not (cancel and cancel.is_set())
-        self.state.update(cache={'updated': int(time.time()) if full else previous.get('updated'),
-                                 'current': current, 'accounts': [indexed[e] for e in emails if e in indexed]})
+        self.state.change('cache', lambda cache: {**cache, 'current': self.accounts.current(),
+            'updated': int(time.time()) if full and any(a.get('ok') for a in results.values())
+                       else cache.get('updated')})
         if current in targets and self.resumer.has_limit_origin(current):
             self.resumer.defer_limit(current, 0, refreshed=True)
         return results
@@ -442,7 +462,11 @@ class Service:
             if not targets:
                 return {'ok': True, 'accepted': False, 'reason': 'query_paused'}
         cancel = threading.Event()
-        return self.begin('refresh', email, lambda: self._refresh(targets, cancel),
+        def work():
+            results = self._refresh(targets, cancel)
+            if results and not any(a.get('ok') for a in results.values()):
+                raise RuntimeError('额度查询未完成，请稍后刷新')
+        return self.begin('refresh', email, work,
                           background=background, interruptible=True, cancel_event=cancel)
 
     def switch(self, email):
@@ -457,21 +481,20 @@ class Service:
         previous = self.accounts.current()
         cancel = threading.Event()
         def work():
-            # Validate the target online without refreshing its credentials.
-            # A locally correct identity may still have been revoked; never
-            # switch away from the current desktop session in that case.
+            # Read the target first. Temporary failures retain known quota;
+            # explicit login/identity failures still prevent the switch.
             self.phase('验证目标账号登录状态')
             results = self._refresh(email, cancel)
             target = results.get(email) or {}
             if target.get('error_code') == 'reauth_required':
                 self.state.update(reauth={'email': email, 'previous': previous, 'phase': 'ready'})
                 raise RuntimeError('目标账号需要重新登录；当前账号没有切换')
-            if not target.get('ok'):
+            if not target.get('ok') and not usable_windows(target):
                 raise RuntimeError('目标账号在线状态尚未确认；当前账号没有切换')
             warning = target.get('query_warning') or {}
             if ((warning.get('scope') != 'reset_credits' and
                     (warning.get('paused') or (warning.get('retry_at') or 0) > time.time()))
-                    or not self._query_ready(email, previous)):
+                    or not self._query_ready_or_known(email, previous, target)):
                 raise RuntimeError('目标账号查询已暂停；当前账号没有切换')
             if self.stop.is_set() or cancel.is_set():
                 raise RuntimeError('操作已取消；当前账号没有切换')
@@ -561,7 +584,7 @@ class Service:
         if (self.operation or data.get('adding') or data.get('reauth')
                 or data.get('chatgpt_running') is False or self.stop.is_set()):
             return {'ok': True, 'accepted': False, 'reason': 'busy'}
-        if not self._query_ready(waiting['email'], data['current']):
+        if not self._query_ready_or_known(waiting['email'], data['current'], target):
             return {'ok': True, 'accepted': False, 'reason': 'query_paused'}
         if not relay_candidates([target], None):
             if (not fresh_windows(target) and
@@ -580,7 +603,7 @@ class Service:
         """Start one automatic relay for one exhausted quota window.
 
         The caller owns deduplication across repeated UI/tray refreshes.  This
-        method deliberately requires fresh, complete quota data and never
+        method deliberately requires complete quota in an unexpired window and never
         treats missing data as exhausted.
         """
         data = self.get_data()
@@ -595,11 +618,9 @@ class Service:
         account = next((a for a in data['accounts'] if a['email'] == data.get('current')), None)
         if data.get('current') in set(settings.get('auto_relay_excluded') or []):
             return {'ok': True, 'accepted': False, 'reason': 'excluded'}
-        if not account or not account.get('ok') or not account.get('windows'):
+        if not account or not usable_windows(account):
             return {'ok': True, 'accepted': False, 'reason': 'quota_unavailable'}
         now = time.time()
-        if not fresh_windows(account, now):
-            return {'ok': True, 'accepted': False, 'reason': 'quota_stale'}
         exhausted = [w for w in account['windows']
                      if w['used'] >= 100]
         if not exhausted:
@@ -992,7 +1013,7 @@ class Service:
             if email is not None and (self.operation or self.state.get('adding') or self.state.get('reauth')):
                 return {'ok': False, 'error': '请先完成当前操作'}
             account = next((a for a in self.get_data()['accounts'] if a['email'] == email), None)
-            exhausted = bool(account and account.get('ok') and complete_windows(account.get('windows'))
+            exhausted = bool(account and known_windows(account)
                              and any(w['used'] >= 100 for w in account['windows']))
             origin = self.accounts.current()
             if exhausted and not origin:
@@ -1042,7 +1063,8 @@ class Service:
         return (not self.stop.is_set() and not self.operation and not self.desktop_transitioning()
                 and settings.get('early_anchor')
                 and email in (settings.get('early_anchor_accounts') or [])
-                and email in self.accounts.all() and email != self.accounts.current())
+                and email in self.accounts.all() and email != self.accounts.current()
+                and self._query_ready(email, self.accounts.current()))
 
     @contextmanager
     def _anchor_dispatch(self, email):
@@ -1057,17 +1079,7 @@ class Service:
                 self.desktop_gate.release()
 
     def _record_anchor_limits(self, value):
-        def merge(cache):
-            accounts = cache.get('accounts', [])
-            previous = next((a for a in accounts if a.get('email') == value['email']), {})
-            # This request reads quota only; keep separately queried reset details.
-            quota = {key: item for key, item in value.items() if key != 'banked_resets'}
-            updated = {**previous, **quota}
-            cache['accounts'] = [updated if a.get('email') == value['email'] else a for a in accounts]
-            if not previous:
-                cache['accounts'].append(updated)
-            return cache
-        self.state.change('cache', merge)
+        self._store_quota(value, preserve_resets=True)
         self.notify()
 
     def resolved_hotkeys(self, emails=None):

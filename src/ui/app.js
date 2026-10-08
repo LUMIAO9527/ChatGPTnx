@@ -15,7 +15,7 @@
   }
   const $ = (q, root = document) => root.querySelector(q);
   const {esc, icon, tool, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
-         notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity} = window.NXComponents;
+         notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, readableQuota, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity} = window.NXComponents;
   const defaults = {appearance:'system', autostart:false,
     auto_relay:false, auto_relay_excluded:[], early_anchor:false, early_anchor_accounts:[], task_continuation:true, resume_message:'继续',
     notify_credential:true, notify_low:false, notify_reset_expiry:true, relay_pick:null};
@@ -85,10 +85,9 @@
   const hotkeyLabel = value => value ? value.split('+').map(part=>part==='ctrl'?'Ctrl':part[0].toUpperCase()+part.slice(1)).join(' ') : '未设置';
   const busy = () => acting || !!data.operation || !!data.switching;
   const disabled = () => busy() ? 'disabled' : '';
-  const fresh = a => !!a?.ok && Number.isFinite(a.fetched_at) && now()-(a.fetched_at)>=-60 && now()-(a.fetched_at)<=600;
-  const valid = a => fresh(a) && a.windows?.length > 0 && a.windows.every(w=>Number.isFinite(w.used) && w.used>=0 && w.used<=100 && w.resets_at>now());
+  const valid = a => displayWindows(a).length>0 && Number.isFinite(a.fetched_at) && a.fetched_at>=0 && a.fetched_at<=now()+60 && displayWindows(a).every(w=>w.resets_at>now());
   const duration = w => w.duration_mins || ({'5h':300,'周':10080}[w.label] || w.label);
-  const remainingFor = (a,minutes) => {const w=(a.windows||[]).find(w=>duration(w)===minutes);return w?100-w.used:null;};
+  const remainingFor = (a,minutes) => {const w=displayWindows(a).find(w=>duration(w)===minutes);return w?100-w.used:null;};
   function relay() {
     return data.accounts.find(a=>a.email===data.relay_email && a.email!==data.current) || null;
   }
@@ -138,18 +137,20 @@
   function relayButton(a=relay()) {
     if (!data.accounts.length) return '';
     if (data.chatgpt_running === false) return `<button class="relay" data-action="launch-chatgpt" ${busy()||data.adding?'disabled':''} aria-label="启动 ChatGPT 桌面端"><span><strong class="relay-label">${icon('baton')}启动 ChatGPT</strong><small>桌面端未运行</small></span><span class="relay-arrow">${icon('arrow')}</span></button>`;
-    if (!a) return `<button class="relay" data-action="refresh" ${disabled()}><span><strong class="relay-label">${icon('baton')}等待可用接力账号</strong><small>等待额度恢复 · 点击刷新</small></span>${icon('refresh')}</button>`;
-    return `<button class="relay" data-action="relay" ${busy()||data.adding?'disabled':''} aria-label="下一棒，切换到${esc(name(a))}"><span><strong class="relay-label">${icon('baton')}下一棒 · ${esc(name(a))}</strong><small>${esc(plan(a.plan))} · ${displayWindows(a).map(w=>`${esc(w.label)} 剩 ${remaining(w)}%`).join('　')}${fresh(a)?'':' · 缓存'}</small></span><span class="relay-arrow">${icon('arrow')}</span></button>`;
+    const exhausted=data.accounts.filter(item=>item.email!==data.current);
+    const waiting=exhausted.length>0&&exhausted.every(item=>displayWindows(item).some(w=>w.used>=100));
+    if (!a) return `<button class="relay" data-action="refresh" ${disabled()}><span><strong class="relay-label">${icon('baton')}等待可用接力账号</strong><small>${waiting?'等待额度恢复 · 点击刷新':'点击刷新账号额度'}</small></span>${icon('refresh')}</button>`;
+    return `<button class="relay" data-action="relay" ${busy()||data.adding?'disabled':''} aria-label="下一棒，切换到${esc(name(a))}"><span><strong class="relay-label">${icon('baton')}下一棒 · ${esc(name(a))}</strong><small>${esc(plan(a.plan))} · ${displayWindows(a).map(w=>`${esc(w.label)} 剩 ${remaining(w)}%`).join('　')}</small></span><span class="relay-arrow">${icon('arrow')}</span></button>`;
   }
   function accountRow(a) {
-    return `<button class="row" data-action="detail" data-email="${esc(a.email)}">${avatar(a)}<span class="meta"><strong class="account-name" title="${esc(name(a))}">${esc(name(a))}</strong><small>${esc(plan(a.plan))}${a.ok&&!fresh(a)?' · 缓存':''}</small></span>${quotaColumns(a)}</button>`;
+    return `<button class="row" data-action="detail" data-email="${esc(a.email)}">${avatar(a)}<span class="meta"><strong class="account-name" title="${esc(name(a))}">${esc(name(a))}</strong><small>${esc(plan(a.plan))}</small></span>${quotaColumns(a)}</button>`;
   }
   function footer() {
     const refreshing=data.operation?.kind==='refresh';
     return `<footer class="footer slim"><button class="refresh-status" data-action="refresh" aria-label="刷新全部额度" ${disabled()}>${icon('refresh',refreshing?'spinner':'')}<span>${refreshing?esc(data.operation.phase):age(data.updated)}</span></button><button class="btn compact add" data-action="add" ${disabled()}>${icon('plus')}添加账号</button></footer>`;
   }
   const quotaValue=(a,minutes)=>remainingFor(a,minutes) ?? -1;
-  const resetValue=(a,minutes)=>a.windows?.find(w=>duration(w)===minutes)?.resets_at ?? Number.MAX_SAFE_INTEGER;
+  const resetValue=(a,minutes)=>displayWindows(a).find(w=>duration(w)===minutes)?.resets_at ?? Number.MAX_SAFE_INTEGER;
   const quotaOverviewContent=()=>window.NXViews.accounts(viewContext());
   function resumeNotice() {
     const r=data.resume;if(!r)return '';
@@ -231,7 +232,8 @@
     const initial=page;
     if(Object.hasOwn(aliases,page))page='settings';
     if(page==='edit')page='detail';
-    if(page==='settings'){ui.disclosures.clear();ui.fullCollections.clear();}
+    const returningToSettings = page==='settings' && saved?.page==='settings';
+    if(page==='settings' && !returningToSettings){ui.disclosures.clear();ui.fullCollections.clear();}
     if(page==='detail'){ui.disclosures.clear();ui.resetExpanded.clear();}
     if(page==='resume'){ui.resumeExpanded.clear();ui.resumeCollapsed.clear();}
     if(Object.hasOwn(aliases,initial)&&aliases[initial])selectSettingDisclosure(aliases[initial]);
@@ -262,7 +264,7 @@
   const settingsGroup=(label,...groups)=>`<section class="settings-section"><h3 class="settings-heading">${esc(label)}</h3>${groups.map(content=>`<div class="settings-list">${content}</div>`).join('')}</section>`;
   const detail=(label,value,hint='')=>`<div class="detail-line"><span>${esc(label)}</span><span class="right"><strong>${esc(value)}</strong>${hint?`<small>${esc(hint)}</small>`:''}</span></div>`;
   function resetCredits(a) {
-    const bank=a.ok?a.banked_resets:null;
+    const bank=readableQuota(a)?a.banked_resets:null;
     const count=Number.isSafeInteger(bank?.available_count)&&bank.available_count>=0?bank.available_count:null;
     const expanded=ui.resetExpanded.has(a.email);
     const items=Array.isArray(bank?.items)?bank.items:[];
@@ -318,7 +320,7 @@
         const manualDate=recordedDate(a.manual_subscription_date);
         const expiryNote=manualDate?`${manualDate} 到期`:m.date?`${dt(m.date)} 到期`:'未录入到期时间';
         const waiting=data.relay_wait?.email===a.email,picked=data.settings.relay_pick===a.email;
-        const exhausted=a.ok&&a.windows?.some(w=>Number.isFinite(w.used)&&w.used>=100);
+        const exhausted=displayWindows(a).some(w=>w.used>=100);
         const pickLabel=waiting?'取消等待':picked?'取消下一棒':exhausted?'恢复后接力':'设为下一棒';
         const pickIcon=waiting||picked?'close':exhausted?'clock':'baton';
         const actionArea=isCurrent?

@@ -5,7 +5,7 @@ window.NXDemo = (() => {
   let state, usages, archives=[], resumeDetails=[], serial=0, failNext=false, previous=null, generation=0;
   const sec=()=>Math.floor(Date.now()/1000);
   function demoRelayOrder() {
-    const usable=a=>a.ok===true&&Number.isFinite(a.fetched_at)&&sec()-a.fetched_at>=-60&&sec()-a.fetched_at<=600&&a.windows?.length&&a.windows.every(w=>Number.isFinite(w.used)&&w.used>=0&&w.used<100&&Number.isFinite(w.resets_at)&&w.resets_at>sec());
+    const usable=a=>Number.isFinite(a.fetched_at)&&a.fetched_at>=0&&a.fetched_at<=sec()+60&&window.NXComponents.displayWindows(a).length>0&&window.NXComponents.displayWindows(a).every(w=>w.used<100&&w.resets_at>sec());
     const rank=a=>{
       const five=a.windows.find(w=>w.duration_mins===300),week=a.windows.find(w=>w.duration_mins===10080);
       const floor=Math.min(...a.windows.map(w=>100-w.used));
@@ -340,6 +340,7 @@ window.NXDemo = (() => {
       if(which==='reauth-cancelling')state.operation={kind:'reauth_cancel',phase:'正在恢复原账号'};
     }
     if(which==='detail-timeout'){state.accounts[0].ok=false;state.accounts[0].error_code='timeout';}
+    if(which==='detail-timeout-empty'){state.accounts[0].ok=false;state.accounts[0].error_code='timeout';state.accounts[0].windows=[];}
     if(which==='query-forbidden'){state.accounts[0].ok=false;state.accounts[0].error_code=403;state.accounts[0].paused=true;}
     if(which==='reset-forbidden')state.accounts[0].query_warning={scope:'reset_credits',paused:true,error_code:403};
     if(which==='query-cooling'){state.accounts[0].ok=false;state.accounts[0].error_code=429;state.accounts[0].retry_at=sec()+600;}

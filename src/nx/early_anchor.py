@@ -8,6 +8,7 @@ import ssl
 import threading
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 import uuid
 
@@ -15,6 +16,7 @@ from .credentials import read_credential_bytes
 from .storage import atomic_bytes, read_json, identity, claims, fingerprint, account_identity_key
 from .quota import normalize_limits, numeric, RPCError
 from .quota_http import limits_payload
+from .diagnostics_http import http_diagnostics
 from .history_store import latest_database, read_only
 from .task_metadata import task_metadata
 from .desktop import chatgpt_running
@@ -56,12 +58,20 @@ class Backend:
     def quota(self):
         self.conn.request('GET', '/backend-api/wham/usage', headers={**self.headers, 'Accept': 'application/json'})
         response = self.conn.getresponse()
-        raw = response.read(2 * 1024 * 1024 + 1)
         if response.status != 200:
-            raise RPCError('提前计时的额度查询未完成', 'reauth_required' if response.status == 401 else 'anchor_query')
+            self._http_failure(response)
+        raw = response.read(2 * 1024 * 1024 + 1)
         if len(raw) > 2 * 1024 * 1024:
             raise RPCError('额度响应无法识别', 'schema')
         return json.loads(raw)
+
+    @staticmethod
+    def _http_failure(response):
+        error = RPCError('接力预热请求未完成', 'reauth_required' if response.status == 401 else response.status)
+        wrapped = urllib.error.HTTPError('https://chatgpt.com/backend-api/wham/usage',
+            response.status, '', response.headers, response)
+        error.diagnostics = http_diagnostics(wrapped, time.time())
+        raise error
 
     def send(self, before_send=lambda: True, dispatch=lambda: nullcontext(True)):
         if self.conn.sock is None:
@@ -84,7 +94,7 @@ class Backend:
             if response.status != 200:
                 if response.status in (400, 401, 403, 404, 422, 429):
                     self.may_have_run = False  # Explicit rejection, no inference.
-                raise RPCError('提前计时请求未完成', 'reauth_required' if response.status == 401 else 'anchor_request')
+                self._http_failure(response)
             deadline = time.monotonic() + 60
             total, parts = 0, []
             while time.monotonic() < deadline:
@@ -171,10 +181,11 @@ class WorkWatcher:
 class EarlyAnchor:
     def __init__(self, paths, current, record_limits=lambda value: None,
                  allowed=lambda email: True, backend=Backend, clock=time.time,
-                 dispatch=lambda email: nullcontext(True), watcher=None):
+                 dispatch=lambda email: nullcontext(True), watcher=None, query=None):
         self.paths, self.current, self.record_limits = paths, current, record_limits
         self.allowed, self.backend, self.clock = allowed, backend, clock
         self.dispatch = dispatch
+        self.query = query
         self.path = paths.data / 'early-anchor.json'
         self.lock = threading.RLock()
         self.watcher = watcher or WorkWatcher(paths.home, clock)
@@ -206,16 +217,26 @@ class EarlyAnchor:
                 self.due[email] = 0
             self.observed[email] = signature
 
-    def _quota(self, connection, email, account_id):
+    def _quota(self, connection, email, account_id, original):
+        if self.query and not self.query.preheat_status(email, consume=True)['ready']:
+            raise RPCError('额度查询正在冷却', 'cancelled')
         raw = connection.quota()
+        read_at = self.clock()
+        if fingerprint(self.paths.snapshot(email)) != original:
+            raise RPCError('查询期间账号已变化', 'identity_mismatch')
         if not isinstance(raw, dict) or raw.get('account_id') != account_id or raw.get('email', '').casefold() != email.casefold():
             raise RPCError('查询账号不一致', 'identity_mismatch')
         value = normalize_limits(limits_payload(raw), email)
+        value['fetched_at'] = read_at
         rate = raw.get('rate_limit') or {}
         win = rate.get('primary_window') or {}
         remaining = numeric(win.get('reset_after_seconds'), 0, WINDOW)
         if raw.get('plan_type') == 'plus' and win.get('limit_window_seconds') == WINDOW and remaining is None:
             raise RPCError('计时窗口数据不完整', 'schema')
+        if self.query:
+            state = self.query.record_preheat_result(email)
+            if not state['ready']:
+                raise RPCError('额度查询正在暂停', state['error_code'])
         self.record_limits(value)
         self.observe_limits(value)
         return raw, rate, win
@@ -261,12 +282,21 @@ class EarlyAnchor:
                 return {'status': 'checking'}
         return None
 
-    def run(self, email):
+    def run(self, email, confirmed_work=None):
         connection = None
         reserved = False
         usage = None
         try:
             if email == self.current() or not self.allowed(email):
+                return {'status': 'skipped'}
+            if self.query:
+                state = self.query.preheat_status(email)
+                if not state['ready']:
+                    self._schedule(email, state.get('retry_at') or self.clock() + 60)
+                    return {'status': 'skipped'}
+            confirmed_work = confirmed_work or self.watcher.confirm()
+            if not confirmed_work:
+                self._schedule(email, self.clock() + 5)
                 return {'status': 'skipped'}
             path = self.paths.snapshot(email)
             who = identity(path)
@@ -280,7 +310,7 @@ class EarlyAnchor:
             if tokens.get('account_id') != who[1] or not tokens.get('access_token'):
                 raise RPCError('账号凭据不完整', 'reauth_required')
             connection = self.backend(tokens['access_token'], who[1])
-            raw, rate, win = self._quota(connection, email, who[1])
+            raw, rate, win = self._quota(connection, email, who[1], original)
             week = rate.get('secondary_window') or {}
             if (raw.get('plan_type') != 'plus' or win.get('limit_window_seconds') != WINDOW
                 or rate.get('allowed') is not True
@@ -291,16 +321,12 @@ class EarlyAnchor:
             result = self._resolve(email, key, previous, win)
             if result:
                 return result
-            confirmed_work = self.watcher.confirm()
-            if not confirmed_work:
-                self._schedule(email, self.clock() + 5)
-                return {'status': 'skipped'}
-
             def reserve():
                 nonlocal reserved
                 with self.lock:
                     if (email == self.current() or not self.allowed(email)
-                        or fingerprint(path) != original or not self.watcher.still_working(confirmed_work)):
+                        or fingerprint(path) != original or not self.watcher.still_working(confirmed_work)
+                        or self.query and not self.query.preheat_status(email)['ready']):
                         return False
                     records = self._records()
                     # Another worker can have reserved while this GET was in flight.
@@ -321,7 +347,7 @@ class EarlyAnchor:
             connection.close(); connection = self.backend(tokens['access_token'], who[1])
             with self.lock:
                 previous = self._records()[key]
-            _, _, cw = self._quota(connection, email, who[1])
+            _, _, cw = self._quota(connection, email, who[1], original)
             self._resolve(email, key, previous, cw)
             return {'status': 'sent', 'usage': usage}
         except Exception as error:
@@ -332,8 +358,10 @@ class EarlyAnchor:
                     records[key].update(status='sent' if usage else 'uncertain' if possible else 'not_sent',
                                         error_code=getattr(error, 'code', 'network'))
                     self._save(records)
-            code = getattr(error, 'code', None) or 'network'
-            self._schedule(email, self.clock() + (3 if possible else 300 if code == 'reauth_required' else 30))
+            code = getattr(error, 'code', None) or ('timeout' if isinstance(error, TimeoutError) else 'network')
+            state = self.query.record_preheat_result(email, error) if self.query and code != 'cancelled' else {}
+            retry = state.get('retry_at') or self.clock() + (3 if possible else 300 if code == 'reauth_required' else 30)
+            self._schedule(email, retry)
             return {'status': 'sent' if usage else 'skipped' if code == 'cancelled' else 'failed', 'error_code': code}
         finally:
             if connection:
@@ -358,8 +386,16 @@ class EarlyAnchor:
                 return []
             with self.lock:
                 ready = [email for email in dict.fromkeys(selection)
-                         if email != self.current() and self.due.get(email, 0) <= self.clock()]
+                         if email != self.current() and self.due.get(email, 0) <= self.clock()
+                         and self.allowed(email)]
+            if not ready:
+                return []
+            confirmed_work = self.watcher.confirm()
+            if not confirmed_work:
+                for email in ready:
+                    self._schedule(email, self.clock() + 5)
+                return []
             with ThreadPoolExecutor(max_workers=2) as pool:
-                return list(pool.map(self.run, ready))
+                return list(pool.map(lambda email: self.run(email, confirmed_work), ready))
         finally:
             self.tick_lock.release()

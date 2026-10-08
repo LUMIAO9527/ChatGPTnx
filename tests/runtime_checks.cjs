@@ -42,12 +42,12 @@ const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve
     }
   });
   await check('quota/rounding-is-stable-and-labels-escaped',()=>{
-    const html=components.quotaSummary({ok:true,windows:[{used:66.66666666,label:'<周>'}]});
+    const html=components.quotaSummary({ok:true,windows:[{used:66.66666666,label:'<周>',resets_at:1900000000}]});
     assert.ok(html.includes('33.3%'));assert.ok(html.includes('&lt;周&gt;'));
     assert.ok(!html.includes('<周>'));
   });
   await check('quota/zero-is-data-not-unavailable',()=>{
-    assert.ok(components.quotaSummary({ok:true,windows:[{used:100,label:'周'}]}).includes('0%'));
+    assert.ok(components.quotaSummary({ok:true,windows:[{used:100,label:'周',resets_at:1900000000}]}).includes('0%'));
   });
   await check('escaping/all-interpolation-metacharacters',()=>{
     assert.equal(components.esc(`<&>"'`),'&lt;&amp;&gt;&quot;&#39;');

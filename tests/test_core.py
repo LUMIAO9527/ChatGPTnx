@@ -150,7 +150,7 @@ class Fixture(unittest.TestCase):
         for a in cache['accounts']:
             a['fetched_at']=time.time()-601
         self.service.state.update(cache=cache)
-        self.assertIsNone(self.service.get_data()['relay_email'])
+        self.assertEqual(self.service.get_data()['relay_email'], 'b@example.com')
         before=len(self.query.calls)
         self.assertTrue(self.service.refresh_stale_relay_accounts(self.service.get_data()))
         self.wait()
@@ -233,6 +233,81 @@ class StorageTests(Fixture):
         self.refresh();public=json.dumps(self.service.get_data());self.assertNotIn('synthetic-test-only',public);self.assertNotIn('fixture.',public)
 
 class TransactionTests(Fixture):
+    def test_temporary_failure_keeps_zero_and_recovery_request(self):
+        self.refresh()
+        target = next(a for a in self.service.state.get('cache')['accounts'] if a['email']=='b@example.com')
+        target['windows'][0]['used'] = 100
+        self.service._record_anchor_limits(target)
+        self.query.codes['b@example.com'] = 'network'
+        self.service._refresh('b@example.com')
+        shown = next(a for a in self.service.get_data()['accounts'] if a['email']=='b@example.com')
+        self.assertEqual(shown['windows'][0]['used'], 100)
+        self.assertEqual(shown['credits'], '12.50')
+        self.assertEqual(self.service.set_relay_pick('b@example.com')['mode'], 'waiting')
+        self.assertEqual(self.service.state.get('relay_wait')['origin'], 'a@example.com')
+        self.assertIsNone(self.service.get_data()['relay_email'])
+
+    def test_switch_with_known_quota_survives_temporary_preflight_failure(self):
+        self.refresh()
+        self.query.codes['b@example.com'] = 'network'
+        self.assertTrue(self.service.switch('b@example.com')['accepted'])
+        self.wait()
+        self.assertTrue(self.service.last_result['ok'])
+        self.assertEqual(self.accounts.current(), 'b@example.com')
+
+    def test_cached_quota_does_not_bypass_login_or_permission_failures(self):
+        self.refresh()
+        for code in (403, 'identity_mismatch', 'missing_snapshot', 'reauth_required'):
+            with self.subTest(code=code):
+                self.query.codes['b@example.com'] = code
+                self.assertTrue(self.service.switch('b@example.com')['accepted'])
+                self.wait()
+                self.assertFalse(self.service.last_result['ok'])
+                self.assertEqual(self.accounts.current(), 'a@example.com')
+                self.service.state.update(reauth=None)
+
+    def test_all_failed_refresh_does_not_report_success_or_advance_updated(self):
+        self.refresh()
+        old = int(time.time())-120
+        self.service.state.change('cache', lambda cache: {**cache, 'updated':old})
+        self.query.codes = {email:'network' for email in self.accounts.all()}
+        self.service.refresh(); self.wait()
+        self.assertEqual(self.service.get_data()['updated'], old)
+        self.assertFalse(self.service.last_result['ok'])
+
+    def test_other_account_refresh_cannot_overwrite_preheat_result(self):
+        self.refresh()
+        started, release = threading.Event(), threading.Event()
+        original = self.query.run
+        def query(email, *args, **kwargs):
+            result = original(email, *args, **kwargs)
+            started.set(); release.wait(3)
+            return result
+        self.query.run = query
+        worker = threading.Thread(target=self.service._refresh, args=('a@example.com',))
+        worker.start()
+        try:
+            self.assertTrue(started.wait(2))
+            value = normalize_limits(limits(), 'b@example.com')
+            value['windows'][0]['used'] = 0
+            value['fetched_at'] = time.time()
+            self.service._record_anchor_limits(value)
+        finally:
+            release.set(); worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(next(a for a in self.service.get_data()['accounts'] if a['email']=='b@example.com')['windows'][0]['used'], 0)
+
+    def test_late_older_read_of_same_account_cannot_overwrite_preheat(self):
+        self.refresh()
+        older = normalize_limits(limits(), 'b@example.com')
+        newer = json.loads(json.dumps(older))
+        newer['windows'][0]['used'] = 0
+        newer['fetched_at'] = older['fetched_at'] + .5
+        self.service._record_anchor_limits(newer)
+        self.query.run = lambda *args, **kwargs: older
+        self.service._refresh('b@example.com')
+        self.assertEqual(next(a for a in self.service.get_data()['accounts'] if a['email']=='b@example.com')['windows'][0]['used'], 0)
+
     def test_refresh_progress_and_cache(self):
         self.refresh();data=self.service.get_data();self.assertTrue(all(a['ok'] for a in data['accounts']));self.assertEqual(data['current'],'a@example.com')
     def test_partial_failure_preserves_old_timestamp(self):

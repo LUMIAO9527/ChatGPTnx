@@ -32,6 +32,19 @@ def response():
 
 
 class HTTPQueryTests(unittest.TestCase):
+    def test_quota_timestamp_is_captured_before_optional_reset_query(self):
+        before = self.now
+        def get(endpoint, *args):
+            if endpoint == '/wham/usage':
+                return response()
+            self.now += 30
+            return {'available_count':2, 'credits':[]}
+        self.client.get.side_effect = get
+        value = self.q.run('a@example.com', True)
+        self.assertTrue(value['ok'])
+        self.assertEqual(value['fetched_at'], before)
+        self.assertEqual(self.now, before+30)
+
     def setUp(self):
         scratch=Path(__file__).resolve().parents[1]/'_wip';scratch.mkdir(exist_ok=True)
         self.temp=tempfile.TemporaryDirectory(dir=scratch);self.addCleanup(self.temp.cleanup)

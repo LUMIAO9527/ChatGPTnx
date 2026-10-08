@@ -59,7 +59,7 @@ window.NXComponents = (() => {
   }
   // A missing balance is not zero. Keep legacy snapshots readable and never format objects/NaN.
   function creditValue(account) {
-    if (!account?.ok) return '暂不可用';
+    if (!readableQuota(account)) return '暂不可用';
     const info=account.credit_info;
     if(info?.status==='unlimited')return '不限额';
     if(info?.status==='invalid')return '数据异常';
@@ -73,10 +73,12 @@ window.NXComponents = (() => {
     const label=accountName(account);
     return `${avatar(account)}<span class="account-choice-copy"><span class="account-title"><strong title="${esc(label)}">${esc(label)}</strong>${showCurrent&&account.email===currentEmail?'<span class="current-chip">当前</span>':''}</span><span class="account-secondary"><span class="account-plan">${esc(planLabel(account.plan))}</span><span class="choice-quotas">${quotaSummary(account)}</span></span></span>`;
   }
-  const transientQuotaFailure = account => !account?.ok &&
-    ['network','timeout',429,'-32603',-32603,'query_policy_unavailable'].includes(account?.error_code);
-  const displayWindows = account => (account?.ok || transientQuotaFailure(account)) && Array.isArray(account.windows)
-    ? account.windows.filter(w => w && Number.isFinite(w.used) && w.used>=0 && w.used<=100) : [];
+  const readableQuota = account => account?.ok === true ||
+    ['network','timeout','cancelled','schema','response_too_large',429,408,'-32603',-32603,'query_policy_unavailable'].includes(account?.error_code) ||
+    (Number.isInteger(account?.error_code) && account.error_code>=500 && account.error_code<=599);
+  const displayWindows = account => readableQuota(account) && Array.isArray(account?.windows) &&
+    account.windows.every(w => w && Number.isFinite(w.used) && w.used>=0 && w.used<=100 &&
+      Number.isFinite(w.resets_at) && w.resets_at>0 && w.resets_at<253402300800) ? account.windows : [];
   const remaining = window => Math.round((100-window.used)*10)/10;
   const quotaSummary = account => {
     const windows=displayWindows(account);
@@ -91,5 +93,5 @@ window.NXComponents = (() => {
     return `<span class="roster-quotas" style="--quota-count:${Math.max(1,windows.length)}" aria-label="${esc(windows.length?'剩余额度':'额度暂不可用')}" title="${esc(windows.length?'剩余额度':'额度暂不可用')}">${cells||'<span class="unavailable">额度暂不可用</span>'}</span>`;
   }
   return {esc, icon, tool, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
-          notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity};
+          notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, readableQuota, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity};
 })();

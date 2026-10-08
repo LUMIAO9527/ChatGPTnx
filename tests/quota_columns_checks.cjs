@@ -7,9 +7,10 @@ const vm=require('node:vm');
 const ctx={window:{}};vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/ui/components.js'),'utf8'),ctx);
 const C=ctx.window.NXComponents, results=[];
+function windows(rows){return rows.map(w=>({resets_at:1900000000,...w}));}
 function check(name,fn){fn();results.push({name,passed:true});}
 function values(a){return [...C.quotaColumns(a).matchAll(/<strong class="mono">([^<]+)<\/strong>/g)].map(m=>m[1]);}
-function account(windows){return {ok:true,windows};}
+function account(windows){return {ok:true,windows:windows.map(w=>({resets_at:1900000000,...w}))};}
 check('roster/preserves-returned-window-order',()=>{
  const h=C.quotaColumns(account([{label:'周',used:30,duration_mins:10080},{label:'5h',used:20,duration_mins:300}]));
  assert.ok(h.indexOf('<em>周</em>')<h.indexOf('<em>5h</em>'));
@@ -23,7 +24,19 @@ check('roster/five-only-has-no-week-slot',()=>assert.deepEqual(values(account([{
 check('roster/exhausted-is-real-zero',()=>assert.deepEqual(values(account([{label:'5h',used:100},{label:'周',used:100}])),['0%','0%']));
 check('roster/decimal-rounding-is-bounded',()=>assert.deepEqual(values(account([{label:'5h',used:66.6666667},{label:'周',used:99.96}])),['33.3%','0%']));
 check('roster/auth-failure-does-not-render-stale-cache',()=>assert.deepEqual(values({ok:false,error_code:'reauth_required',windows:[{label:'5h',used:25},{label:'周',used:25}]}),[]));
-check('roster/transient-refresh-failure-keeps-known-quota',()=>assert.deepEqual(values({ok:false,error_code:'network',windows:[{label:'5h',used:100},{label:'周',used:25}]}),['0%','75%']));
+check('roster/transient-refresh-failure-keeps-known-quota',()=>assert.deepEqual(values({ok:false,error_code:'network',windows:windows([{label:'5h',used:100},{label:'周',used:25}])}),['0%','75%']));
+check('roster/temporary-failures-share-quota-and-credit-behavior',()=>{
+ for(const error_code of ['network','timeout','cancelled','schema',429,500,503]){
+   const a={ok:false,error_code,credits:'12.50',windows:windows([{label:'5h',used:100},{label:'周',used:25}])};
+   assert.deepEqual(values(a),['0%','75%']);assert.equal(C.creditValue(a),'12.50');
+ }
+});
+check('roster/hard-errors-never-become-available-from-old-quota',()=>{
+ for(const error_code of ['reauth_required',403,'identity_mismatch','missing_snapshot']){
+   const a={ok:false,error_code,credits:'12.50',windows:windows([{label:'5h',used:25}])};
+   assert.deepEqual(values(a),[]);assert.equal(C.creditValue(a),'暂不可用');
+ }
+});
 check('roster/invalid-values-never-become-zero',()=>{
  for(const used of [null,undefined,NaN,Infinity,-1,101,true,'33'])assert.deepEqual(values(account([{label:'5h',used}])),[]);
 });

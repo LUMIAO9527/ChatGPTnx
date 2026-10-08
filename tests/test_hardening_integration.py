@@ -59,6 +59,30 @@ class HardeningIntegrationTests(unittest.TestCase):
             switch.assert_called()
             self.assertTrue(self.service.last_result['ok'])
 
+    def test_permission_pause_arriving_after_read_still_prevents_switch(self):
+        self.refresh()
+        target = self.query.run('b@example.com', False)
+        real = Query(self.paths, lambda: self.service.state.get('settings'))
+        self.service.query = real
+        with patch.object(real, 'run', return_value=target), patch.object(real, 'ready', return_value=False), \
+                patch.object(real, 'status', return_value={'ready':False,'paused':True,'error_code':403}), \
+                patch.object(self.service, 'runner') as switch:
+            self.service.switch('b@example.com'); self.wait()
+            switch.assert_not_called()
+            self.assertFalse(self.service.last_result['ok'])
+
+    def test_known_quota_survives_shared_rate_limit_without_new_request(self):
+        self.refresh()
+        real = Query(self.paths, lambda: self.service.state.get('settings'))
+        self.service.query = real
+        failure = {'email':'b@example.com','ok':False,'error_code':429,'paused':False,'retry_at':time.time()+600}
+        with patch.object(real, 'run', return_value=failure), patch.object(real, 'ready', return_value=False), \
+                patch.object(real, 'status', return_value={'ready':False,'paused':False,'error_code':429}), \
+                patch.object(self.service, 'runner', wraps=self.runner) as switch:
+            self.service.switch('b@example.com'); self.wait()
+            switch.assert_called_once()
+            self.assertTrue(self.service.last_result['ok'])
+
     def test_auth_and_permission_notifications_have_distinct_recovery(self):
         host = Mock(); host.noticed = set()
         base = {'updated': time.time(), 'accounts': [
