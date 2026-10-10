@@ -49,6 +49,7 @@ def normalize_banked_resets(raw):
                 continue
             expiry = timestamp(row.get('expiresAt'))
             items.append({
+                'id': row.get('id') if isinstance(row.get('id'), str) and 0 < len(row['id']) <= 256 else None,
                 'title': row.get('title')[:100] if isinstance(row.get('title'), str) else None,
                 'description': row.get('description')[:300] if isinstance(row.get('description'), str) else None,
                 'reset_type': row.get('resetType') if row.get('resetType') in ('codexRateLimits', 'unknown') else 'unknown',

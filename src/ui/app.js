@@ -8,8 +8,7 @@
   const poll = coalescedRefresh(performPoll);
   function homeContent() {
     const c=current()||(data.adding?data.accounts.find(a=>a.email===data.add_state?.previous):null);
-    const next=data.adding?null:relay();
-    const accounts=data.accounts.filter(a=>a.email!==c?.email&&a.email!==next?.email);
+    const accounts=data.accounts.filter(a=>a.email!==c?.email);
     const main=c?accountCard(c,false,data.adding?'添加前账号':'正在使用'):'';
     return header()+statusRegion(notice())+main+(data.adding?'':relayButton())+`<section class="roster"><button class="section-head section-link" data-action="quota-overview" aria-label="查看全部账号额度"><span>其他账号</span><span>${accounts.length} 个 · 查看全部 ${icon('chevron')}</span></button><div class="account-list">${accounts.map(accountRow).join('')||'<div class="roster-empty" role="status"><span>没有其他账号</span></div>'}</div></section>`+footer();
   }
@@ -29,6 +28,12 @@
   const {status:statusBar} = window.NXFeedback;
   const feedback = window.NXFeedback.create({root:app,announce:message=>{$('#announcer').textContent=message;}});
   let controlOperation=null;
+  let resetConfirmation=null,resetSubmission=null;
+  function resetRequestId(){
+    if(crypto.randomUUID)return crypto.randomUUID();
+    const bytes=crypto.getRandomValues(new Uint8Array(16));bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+    return [...bytes].map(b=>b.toString(16).padStart(2,'0')).join('').replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/,'$1-$2-$3-$4-$5');
+  }
   let notification=null,notificationTimer=null,dismissedStatus=null,activeStatusKey='',lastAnnouncedStatus='';
   const statusDock=window.NXFeedback.createDock({root:app});
   function settingValue(key,source=data) {
@@ -163,7 +168,7 @@
     if(data.reauth)return statusBar({text:'等待完成重新登录',action:'reauth',symbol:'user',attrs:`data-email="${esc(data.reauth.email)}"`});
     if(data.adding)return statusBar({text:'正在添加账号，返回完成',action:'add',symbol:'user'});
     if(data.operation&&data.operation.kind!=='refresh')return statusBar({text:data.operation.phase,tone:'progress'});
-    if(data.monitor_health?.state==='degraded')return statusBar({text:'任务监控暂不可用 · 正在延迟重试',tone:'warning',action:'diagnostics'});
+    if(data.monitor_health?.state==='degraded')return statusBar({text:'任务监控暂不可用 · 正在延迟重试',tone:'warning'});
     if(data.resume)return resumeNotice();
     if(data.last_error)return statusBar({text:data.last_error.message||'上次操作未完成',tone:'error'});
     if(data.relay_wait&&!(ui.page==='detail'&&ui.email===data.relay_wait.email)){
@@ -228,6 +233,7 @@
     return `<header class="sheet-head">${tool('back','back','返回')}<h2 id="sheet-title" tabindex="-1">${esc(title)}</h2>${actions}${config.demo?'<span class="demo-tag">演示</span>':''}</header>`;
   }
   function show(page, target=null, push=true, saved=null) {
+    resetConfirmation=null;
     const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message'};
     const initial=page;
     if(Object.hasOwn(aliases,page))page='settings';
@@ -250,6 +256,7 @@
     if(!saved?.focus) $('#sheet-title')?.focus({preventScroll:true});
   }
   function closeSheet() {
+    resetConfirmation=null;
     feedback.clear();clearNotification();navigation.invalidate();ui.recording=null;
     ui.page=null;ui.email=null;ui.history=[];sheet.hidden=true;home.inert=false;
     setSize('home');renderHome();
@@ -276,9 +283,17 @@
       content=items.map((item,index)=>{
         const expiry=!item.expires_known?'未提供':item.expires_at===null?'无到期时间':dateTime(item.expires_at);
         const status=item.status==='redeeming'?' · 使用中':item.status==='redeemed'?' · 已使用':'';
-        return `<div class="reset-credit"><span>第 ${index+1} 次${status}</span><strong>${esc(expiry)}${item.expires_known&&item.expires_at!==null?' 到期':''}</strong></div>`;
+        const pending=a.reset_attempt?.credit_id===item.id;
+        const available=item.id&&(item.status==='available'||pending);
+        const confirming=resetConfirmation?.email===a.email&&resetConfirmation?.creditId===item.id;
+        const button=available?`<button class="btn secondary small-action reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(item.id)}" ${disabled()}>${confirming?'确认':pending?'重试':'使用'}</button>`:'';
+        return `<div class="reset-credit"><span class="reset-credit-copy"><span>第 ${index+1} 次${status}</span><strong>${esc(expiry)}${item.expires_known&&item.expires_at!==null?' 到期':''}</strong></span>${button}</div>`;
       }).join('');
       if(count>items.length) content+=`<p>另有 ${count-items.length} 次未提供逐项详情。</p>`;
+    }
+    if(a.reset_attempt&&!items.some(item=>item.id===a.reset_attempt.credit_id)){
+      const confirming=resetConfirmation?.email===a.email&&resetConfirmation?.creditId===a.reset_attempt.credit_id;
+      content+=`<div class="reset-credit"><span>上次重置待确认</span><button class="btn secondary small-action reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(a.reset_attempt.credit_id)}" ${disabled()}>${confirming?'确认':'重试'}</button></div>`;
     }
     if(a.query_warning?.scope==='reset_credits'&&a.query_warning.paused) content+=`<p>重置详情查询已暂停，主额度查询正常。</p><button class="btn secondary" data-action="retry-query" data-email="${esc(a.email)}">恢复详情查询</button>`;
     return `<div class="detail-reset"><button class="detail-line detail-action reset-summary" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div class="reset-credit-details">${content}</div>`:''}</div>`;
@@ -336,10 +351,6 @@
       }
       case 'settings':
         ({title,body,cls}=window.NXViews.settings(viewContext()));break;
-      case 'diagnostics':
-        title='诊断摘要';cls='diagnostics-body';
-        body=`<p class="note">仅含版本、错误类别和匿名账号序号。先检查内容，再决定是否分享。</p><textarea class="diagnostics-preview" aria-label="脱敏诊断摘要" readonly spellcheck="false">${esc(ui.diagnostics||'正在读取…')}</textarea>`;
-        foot='<button class="btn secondary" data-action="diagnostics-refresh">重新读取</button><button class="btn primary" data-action="copy-diagnostics">复制摘要</button>';break;
       case 'purchase':
         ({title,body,cls}=window.NXViews.purchase(viewContext()));break;
       case 'resume':
@@ -416,19 +427,19 @@
     retry_query:'正在恢复查询…',
     launch_chatgpt:'正在打开 ChatGPT…',refresh:'正在刷新…',refresh_one:'正在刷新…',
     set_preferences:'正在保存…',set_account_meta:'正在保存…',set_auto_relay_account:'正在保存…',
-    set_relay_pick:'正在设置…',set_account_hotkey:'正在保存…',adopt_current:'正在保存…',
+    set_relay_pick:'正在设置…',cancel_relay_pick:'正在取消…',consume_reset:'正在重置…',set_account_hotkey:'正在保存…',adopt_current:'正在保存…',
     add_start:'正在打开…',add_finish:'正在保存…',add_cancel:'正在恢复…',
     reauth_start:'正在打开…',reauth_finish:'正在验证…',reauth_cancel:'正在恢复…',
     switch:'正在切换…',relay:'正在接力…',remove:'正在归档…',restore:'正在恢复…',
     clear_resume_history:'正在清理…',open_resume_task:'正在定位…',retry_resume_task:'正在排队…',copy_text:'正在复制…'
   };
-  const actionResults={launch_chatgpt:'已请求打开',set_preferences:'已保存',set_auto_relay_account:'已保存',set_relay_pick:'已设置',copy_text:'已复制'};
+  const actionResults={launch_chatgpt:'已请求打开',set_preferences:'已保存',set_auto_relay_account:'已保存',set_relay_pick:'已设置',cancel_relay_pick:'已取消',copy_text:'已复制'};
   async function actionFrom(source,method,...args) {
     if(acting)return null;
     const ticket=navigation.ticket();
     if(['set_preferences','set_account_meta'].includes(method)){const error=$('#form-error');if(error)error.textContent='';}
     acting=true;
-    const dockAction=new Set(['launch_chatgpt','adopt_current','add_start','add_finish','add_cancel','reauth_start','reauth_finish','reauth_cancel','switch','relay','remove','restore','open_resume_task']);
+    const dockAction=new Set(['launch_chatgpt','adopt_current','add_start','add_finish','add_cancel','reauth_start','reauth_finish','reauth_cancel','switch','relay','consume_reset','remove','restore','open_resume_task']);
     const usesDock=dockAction.has(method),operation={text:actionLabels[method]||'处理中…',ticket};
     if(usesDock)controlOperation=operation;
     const token=usesDock?null:feedback.begin(source,actionLabels[method]||'处理中…');render();
@@ -485,6 +496,8 @@
         if(done.ok && data.current===done.target){if(navigation.current(ui.submittedEpoch))closeSheet();notify('已切换到 '+name(current()),{tone:'success'});}
         else if(!done.ok){if(data.reauth&&navigation.current(ui.submittedEpoch))show('reauth',data.reauth.email);notify(data.last_error?.message||'接力未完成',{tone:'error'});}
       }
+      const resetDone=resetSubmission&&((data.recent_results||[]).find(r=>r.id===resetSubmission)||(data.last_result?.id===resetSubmission?data.last_result:null));
+      if(resetDone){resetSubmission=null;if(resetDone.ok)notify(resetDone.message||'重置已完成',{tone:'success'});}
       // Backend errors already have one persistent status entry; never echo a second toast.
     }catch(e){bridgeError=e.message;renderHome();}
     finally{schedulePoll();}
@@ -593,22 +606,6 @@
       case 'refresh':if(data.accounts.length)await run('refresh');else show('add');break;
       case 'refresh-one':await run('refresh_one',target);break;
       case 'retry-query':await run('retry_query',target);break;
-      case 'diagnostics':
-      case 'diagnostics-refresh':{
-        if(ui.page!=='diagnostics')show('diagnostics');
-        const epoch=navigation.ticket();
-        const result=await api('get_diagnostics');
-        if(navigation.current(epoch)){ui.diagnostics=result?.text||'诊断摘要暂不可用';renderSheet(false);}
-        break;
-      }
-      case 'copy-diagnostics':{
-        const field=$('.diagnostics-preview');if(!field||!ui.diagnostics)break;
-        field.focus({preventScroll:true});field.select();
-        let copied=false;
-        try {if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(field.value);copied=true;}}catch{}
-        if(!copied){try {copied=document.execCommand('copy');}catch{}}
-        notify(copied?'诊断摘要已复制':'请选中摘要手动复制',{tone:copied?'success':'error'});break;
-      }
       case 'reauth':show('reauth',target);break;
       case 'hide':if(config.demo){app.style.opacity='.35';notify('演示：窗口已隐藏，点击任意位置恢复');app.onclick=()=>{app.style.opacity='1';app.onclick=null;};}else await api('hide');break;
       case 'dismiss-status':
@@ -661,7 +658,19 @@
       case 'retry-resume-task':await run('retry_resume_task',b.dataset.session,val);break;
       case 'home':closeSheet();break;
       case 'detail':show('detail',target);break;
-      case 'toggle-reset-credits':if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.disclosures.delete('meta:'+target);}renderSheet();break;
+      case 'toggle-reset-credits':resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.disclosures.delete('meta:'+target);}renderSheet();break;
+      case 'use-reset':{
+        const account=data.accounts.find(a=>a.email===target),creditId=b.dataset.credit;
+        if(!account||busy()||acting)break;
+        if(resetConfirmation?.email!==target||resetConfirmation?.creditId!==creditId||resetConfirmation?.identityKey!==account.identity_key){
+          resetConfirmation={email:target,creditId,identityKey:account.identity_key,
+            requestId:account.reset_attempt?.credit_id===creditId?account.reset_attempt.request_id:resetRequestId()};
+          renderSheet();break;
+        }
+        const requestId=resetConfirmation.requestId;resetConfirmation=null;
+        const result=await run('consume_reset',target,creditId,requestId);
+        if(result?.accepted){resetSubmission=result.operation_id;await poll(true);}
+        break;}
       case 'back':back();break;
       case 'relay':await requestSwitch(relay()?.email,'relay');break;
       case 'launch-chatgpt':await run('launch_chatgpt');break;
@@ -675,7 +684,7 @@
       case 'inline-reload':await loadInline(val,true);break;
       case 'hotkeys':show('hotkeys');break;
       case 'record-hotkey':ui.recording=target;renderSheet();break;
-      case 'pick':{const clearing=data.settings.relay_pick===target||data.relay_wait?.email===target;await run('set_relay_pick',clearing?null:target);break;}
+      case 'pick':{const clearing=data.settings.relay_pick===target||data.relay_wait?.email===target;await run(clearing?'cancel_relay_pick':'set_relay_pick',target);break;}
       case 'quota-overview':show('quota-overview');break;
       case 'quota-metric':ui.quotaMetric=val;if(val==='time'&&ui.quotaScope==='relay')ui.quotaScope='five';renderSheet();break;
       case 'quota-scope':ui.quotaScope=val;if(val==='relay')ui.quotaMetric='quota';renderSheet();break;
@@ -752,7 +761,7 @@
   }
   systemAppearance.addEventListener('change',()=>applyAppearance(data.settings.appearance));
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet();setSize('home');poll();};
-  window.nxHidden=()=>{panelVisible=false;clearTimeout(pollTimer);pollTimer=null;};
+  window.nxHidden=()=>{panelVisible=false;resetConfirmation=null;clearTimeout(pollTimer);pollTimer=null;};
   window.addEventListener('pywebviewready',poll);
   window.addEventListener('resize',()=>{if(config.demo)setSize(ui.page?'workspace':'home');});
   setInterval(()=>{

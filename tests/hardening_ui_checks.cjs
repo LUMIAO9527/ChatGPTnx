@@ -4,7 +4,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '..');
-const output = path.join(root, '_wip', 'hardening-ui');
+const output = process.env.NX_TEST_OUTPUT || path.join(root, '_wip', 'hardening-ui');
 fs.mkdirSync(output, {recursive:true});
 (async()=>{
   const browser = await chromium.launch({executablePath:process.argv[2],headless:true});
@@ -17,14 +17,10 @@ fs.mkdirSync(output, {recursive:true});
     await page.setContent(html);
     await page.waitForSelector('[data-action="settings"]');
     await page.locator('[data-action="settings"]').first().click();
-    await page.locator('[data-action="diagnostics"]').click();
-    await page.waitForFunction(()=>document.querySelector('.diagnostics-preview')?.value.includes('monitor'));
-    const text=await page.locator('.diagnostics-preview').inputValue();
-    assert.equal(JSON.parse(text).version,'1.0.1');
-    assert(!text.includes('@'));
+    assert.equal(await page.locator('[data-action="diagnostics"]').count(),0);
     const overflow=await page.locator('#sheet').evaluate(el=>el.scrollWidth>el.clientWidth+1);
     assert.equal(overflow,false);
-    await page.screenshot({path:path.join(output,'diagnostics.png')});
+    await page.screenshot({path:path.join(output,'settings.png')});
     for(const scenario of ['query-forbidden','reset-forbidden','query-cooling','monitor-degraded']) {
       await page.goto('about:blank');
       await page.setContent(html.replace('location.search',JSON.stringify('?scenario='+scenario)));
@@ -45,12 +41,13 @@ fs.mkdirSync(output, {recursive:true});
         assert.equal(await page.locator('.current-card .quota-failure').count(),0);
         assert.equal(await page.locator('.current-card [data-action="reauth"]').count(),0);
       } else {
-        assert((await page.locator('.notice[data-action="diagnostics"]').innerText()).includes('监控暂不可用'));
+        assert((await page.locator('.notice').innerText()).includes('监控暂不可用'));
+        assert.equal(await page.locator('[data-action="diagnostics"]').count(),0);
       }
       await page.screenshot({path:path.join(output,scenario+'.png')});
     }
     assert.deepEqual(errors,[]);
-    console.log('Hardening UI: diagnostics preview, no overflow, 403, optional 403 recovery, 429, degraded monitor passed.');
+    console.log('Hardening UI: no diagnostics setting, no overflow, 403, optional 403 recovery, 429, degraded monitor passed.');
     if(process.argv[3]) {
       const broad=await context.newPage();
       await broad.setContent(fs.readFileSync(process.argv[3],'utf8'));

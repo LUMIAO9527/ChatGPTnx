@@ -178,7 +178,7 @@ def limits_payload(raw):
 def reset_payload(raw):
     rows = raw.get('credits')
     return {'availableCount': raw.get('available_count'), 'credits': [
-        {'title': r.get('title'), 'description': r.get('description'),
+        {'id': r.get('id'), 'title': r.get('title'), 'description': r.get('description'),
          'resetType': 'codexRateLimits' if r.get('reset_type') in ('codex', 'codex_rate_limits', 'codexRateLimits') else 'unknown',
          'status': r.get('status'), 'grantedAt': timestamp(r.get('granted_at')),
          **({'expiresAt': timestamp(r.get('expires_at'))} if 'expires_at' in r else {})}

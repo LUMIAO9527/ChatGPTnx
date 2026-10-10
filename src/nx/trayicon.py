@@ -181,7 +181,7 @@ class TrayIcon:
             return 0
         if message == WM_TRAYCALLBACK:
             event = lparam & 0xFFFF
-            if event in (WM_LBUTTONUP, WM_LBUTTONCLK):
+            if event == WM_LBUTTONUP:
                 self._default_action()
             elif event in (WM_RBUTTONUP, WM_CONTEXTMENU):
                 self._show_menu(hwnd)

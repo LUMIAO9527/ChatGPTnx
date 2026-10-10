@@ -25,6 +25,7 @@ from .version import APP_VERSION
 from .quota_policy import complete_windows, fresh_windows, known_windows, usable_windows, merge_quota
 from .settings import valid_setting
 from .diagnostics import Diagnostics, query_summary
+from .reset_credits import ResetCredits, MESSAGES as RESET_MESSAGES
 
 
 def relay_candidates(accounts, current, excluded=()):
@@ -118,6 +119,8 @@ class Service:
         self.early_anchor = EarlyAnchor(paths, self.accounts.current, self._record_anchor_limits,
                                        self._anchor_allowed, dispatch=self._anchor_dispatch,
                                        query=self.query if isinstance(self.query, Query) else None)
+        self.resetter = ResetCredits(paths, self.accounts.current, lambda: self.state.get('settings'),
+                                     self._record_reset_limits)
         if self.state.recovery_path or self.resumer.recovery_path:
             self.last_error = {'id': uuid.uuid4().hex, 'kind': 'recovery', 'target': None,
                 'message': '本地状态文件损坏，已保留原文件并恢复；请检查设置与接续记录',
@@ -191,6 +194,7 @@ class Service:
                     self.last_result = {'id': ident, 'kind': kind, 'target': target, 'ok': True,
                                         'source': source, 'previous': previous,
                                         'resume_session_id': self.operation.get('resume_session_id'),
+                                        'message': self.operation.get('message'),
                                         'started_at': started_at, 'finished_at': time.time()}
                     if source in ('auto', 'auto-limit'):
                         self.auto_relay_retry_after = 0.0
@@ -250,6 +254,7 @@ class Service:
             auth_path = self.paths.auth if current_email == email else self.paths.snapshot(email)
             item['identity_key'] = account_identity_key(auth_path, email)
             item['activity_key'] = activity_identity_key(auth_path, email)
+            item['reset_attempt'] = self.resetter.pending(email)
             from .subscription import from_credential
             subscription = subscriptions.get(email)
             if not subscription or subscription.get('identity_key') != item['identity_key']:
@@ -541,19 +546,23 @@ class Service:
                 try:
                     if relay_wait_id:
                         # Cancellation remains effective during online preflight.
-                        # Consume the one-shot request atomically at the switch boundary.
                         with self.lock:
                             waiting = self.state.get('relay_wait')
                             if (not waiting or waiting['id'] != relay_wait_id
                                     or waiting['email'] != email or waiting['origin'] != previous):
                                 raise RuntimeError('恢复后接力已取消；当前账号没有切换')
-                            self.state.update(relay_wait=None)
                     self.phase('保存当前账号 · 本地切换')
                     self.runner('-To', email)
                     self.phase('核验本地凭据')
                     if self.accounts.current() != email:
                         raise RuntimeError('切换后账号身份未匹配；没有标记为成功')
                     self._record_current()
+                    with self.lock:
+                        if self.relay_pick == email:
+                            self.relay_pick = None
+                        self.state.change('relay_wait', lambda value:
+                            None if value and value['email'] == email else
+                            {**value, 'origin': email} if value else None)
                 except Exception:
                     if session_id:
                         if self.accounts.current() == email:
@@ -569,12 +578,6 @@ class Service:
                 self.auto_relay_attempt = exhaustion_key
         result = self.begin('switch', email, work, cancel_event=cancel,
                             source=source, previous=previous)
-        if result.get('accepted'):
-            with self.lock:
-                self.relay_pick = None
-                if not relay_wait_id:
-                    self.state.update(relay_wait=None)
-            self.notify()
         return result
 
     def relay(self, email=None, source='relay'):
@@ -592,12 +595,19 @@ class Service:
             return {'ok': True, 'accepted': False, 'reason': 'no_request'}
         data = self.get_data()
         target = next((a for a in data['accounts'] if a['email'] == waiting['email']), None)
-        if data.get('current') != waiting['origin'] or not target:
+        if not target or data.get('current') == waiting['email']:
             with self.lock:
                 self.state.change('relay_wait', lambda value:
                     None if value and value['id'] == waiting['id'] else value)
             self.notify()
             return {'ok': True, 'accepted': False, 'reason': 'request_obsolete'}
+        if data.get('current') != waiting['origin']:
+            request_id = waiting['id']
+            with self.lock:
+                waiting = self.state.change('relay_wait', lambda value:
+                    {**value, 'origin': data['current']} if value and value['id'] == request_id else value)
+            if not waiting or waiting['id'] != request_id:
+                return {'ok': True, 'accepted': False, 'reason': 'no_request'}
         if (self.operation or data.get('adding') or data.get('reauth')
                 or data.get('chatgpt_running') is False or self.stop.is_set()):
             return {'ok': True, 'accepted': False, 'reason': 'busy'}
@@ -885,6 +895,7 @@ class Service:
     def remove(self, email):
         def work():
             self.accounts.archive(email)
+            self.cancel_relay_pick(email)
             self._record_current()
         return self.begin('remove', email, work)
 
@@ -1035,14 +1046,44 @@ class Service:
             origin = self.accounts.current()
             if exhausted and not origin:
                 return {'ok': False, 'error': '请先确认当前账号'}
-            self.state.update(relay_wait={'id': uuid.uuid4().hex, 'email': email, 'origin': origin}
-                              if exhausted else None)
-            self._relay_wait_refresh_after = self._relay_wait_attempt_after = 0.0
-            self.relay_pick = None if exhausted else email
+            if exhausted:
+                self.state.update(relay_wait={'id': uuid.uuid4().hex, 'email': email, 'origin': origin})
+                self._relay_wait_refresh_after = self._relay_wait_attempt_after = 0.0
+                if self.relay_pick == email:
+                    self.relay_pick = None
+            else:
+                self.relay_pick = email
+                self.state.change('relay_wait', lambda value:
+                    None if value and (email is None or value['email'] == email) else value)
         self.notify()
         mode = 'waiting' if exhausted else 'picked' if email else 'cancelled'
         return {'ok': True, 'mode': mode, 'message': {
             'waiting': '已安排，额度恢复后自动接力', 'picked': '已设为下一棒', 'cancelled': '已取消'}[mode]}
+
+    def cancel_relay_pick(self, email):
+        with self.lock:
+            if self.relay_pick == email:
+                self.relay_pick = None
+            self.state.change('relay_wait', lambda value:
+                None if value and value['email'] == email else value)
+        self.notify()
+        return {'ok': True, 'message': '已取消'}
+
+    def _record_reset_limits(self, value):
+        self._store_quota(value)
+        self.early_anchor.observe_limits(value)
+        self.notify()
+
+    def consume_reset(self, email, credit_id, request_id):
+        if email not in self.accounts.all():
+            return {'ok': False, 'error': '账号不在清单中'}
+        def work():
+            self.phase('正在核验重置次数')
+            with self.desktop_gate:
+                outcome = self.resetter.consume(email, credit_id, request_id)
+            with self.lock:
+                self.operation['message'] = RESET_MESSAGES[outcome]
+        return self.begin('reset', email, work)
 
     def set_auto_relay_account(self, email, enabled):
         if email not in self.accounts.all() or not isinstance(enabled, bool):

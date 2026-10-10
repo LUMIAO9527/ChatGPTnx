@@ -27,8 +27,8 @@ window.NXDemo = (() => {
       windows:[...(h===null?[]:[{label:'5h',duration_mins:300,used:h,resets_at:n+3600+i*1200}]),{label:'周',duration_mins:10080,used:w,resets_at:n+(2+i)*day+13200}],
       credits:i===2?'12.50':null,snapshot_at:n-day*(i+1),
       banked_resets:i===0?{available_count:2,items:[
-        {title:'完整额度重置',description:'可重置 5 小时与周额度',status:'available',reset_type:'codexRateLimits',granted_at:n-day,expires_at:n+8*day,expires_known:true},
-        {title:'完整额度重置',description:null,status:'available',reset_type:'codexRateLimits',granted_at:n-day,expires_at:n+20*day,expires_known:true}
+        {id:'fixture-reset-1',title:'完整额度重置',description:'可重置 5 小时与周额度',status:'available',reset_type:'codexRateLimits',granted_at:n-day,expires_at:n+8*day,expires_known:true},
+        {id:'fixture-reset-2',title:'完整额度重置',description:null,status:'available',reset_type:'codexRateLimits',granted_at:n-day,expires_at:n+20*day,expires_known:true}
       ]}:i===1?{available_count:0,items:[]}:null,
       membership:{status:i===0?'cached_hint':'not_provided',date:i===0?n+12*day:null,date_kind:i===0?'entitlement_hint':null,
         source:i===0?'credential_claim':'not_available',verified:false,checked_at:null,observed_at:n-day,account_checked_online:false}}));
@@ -58,12 +58,18 @@ window.NXDemo = (() => {
     if(kind==='switch')state.switching=target;
     setTimeout(()=>{
       if(ticket!==generation)return;
-      try{job();state.last_result={id,kind,target,ok:true};}
+      try{job();state.last_result={id,kind,target,ok:true,message:state.operation.message};}
       catch(e){state.last_result={id,kind,target,ok:false};state.last_error={id,kind,target,message:e.message};}
       state.recent_results=(state.recent_results.concat([state.last_result])).slice(-8);
       state.operation=null;state.switching=null;
     },kind==='switch'?1500:550);
     return {ok:true,accepted:true,operation_id:id};
+  }
+  function commitSwitch(email){
+    state.current=email;
+    if(state.settings.relay_pick===email)state.settings.relay_pick=null;
+    if(state.relay_wait?.email===email)state.relay_wait=null;
+    else if(state.relay_wait)state.relay_wait.origin=email;
   }
   async function call(method,...args){
     const [email,force]=args;
@@ -79,10 +85,10 @@ window.NXDemo = (() => {
           ||state.relay_order.find(email=>email!==state.current)||null;
         state.auto_relay_email=state.settings.auto_relay_excluded.includes(state.current)?null:
           state.relay_order.find(email=>email!==state.current&&!state.settings.auto_relay_excluded.includes(email))||null;
-        if(state.relay_wait&&state.relay_wait.origin!==state.current)state.relay_wait=null;
+        if(state.relay_wait&&(state.relay_wait.email===state.current||!state.accounts.some(a=>a.email===state.relay_wait.email)))state.relay_wait=null;
         if(state.relay_wait&&!state.operation&&!state.adding&&!state.reauth&&state.chatgpt_running&&state.relay_order.includes(state.relay_wait.email)){
-          const target=state.relay_wait.email;state.relay_wait=null;
-          operation('switch',target,()=>{state.current=target;state.settings.relay_pick=null;});
+          const target=state.relay_wait.email;
+          operation('switch',target,()=>commitSwitch(target));
           state.operation.source='recovery';
         }
         return clone(state);}
@@ -113,13 +119,11 @@ window.NXDemo = (() => {
       case 'refresh':return operation('refresh',null,()=>{state.updated=sec();state.accounts.forEach(a=>{if(a.ok){a.fetched_at=sec();a.windows.forEach(w=>{if(w.resets_at<=sec())w.resets_at=sec()+600;});}});});
       case 'refresh_one':return operation('refresh',email,()=>{const a=state.accounts.find(a=>a.email===email);if(a?.ok)a.fetched_at=sec();});
       case 'switch':
-        state.relay_wait=null;
         if(state.current===email)return {ok:true,already_current:true};
-        return operation('switch',email,()=>{if(failNext){failNext=false;throw new Error('模拟：凭据文件被占用，仍保留原账号。');}state.current=email;state.settings.relay_pick=null;});
+        return operation('switch',email,()=>{if(failNext){failNext=false;throw new Error('模拟：凭据文件被占用，仍保留原账号。');}commitSwitch(email);});
       case 'relay':
-        state.relay_wait=null;
         if(state.current===email)return {ok:true,already_current:true};
-        return operation('switch',email,()=>{if(failNext){failNext=false;throw new Error('模拟：凭据文件被占用，仍保留原账号。');}state.current=email;state.settings.relay_pick=null;});
+        return operation('switch',email,()=>{if(failNext){failNext=false;throw new Error('模拟：凭据文件被占用，仍保留原账号。');}commitSwitch(email);});
       case 'remove':return operation('remove',email,()=>{if(email===state.current)throw new Error('请先切换，再归档当前账号');const a=state.accounts.find(a=>a.email===email);if(!a)throw new Error('账号不存在');archives.push({key:'archived-'+serial,email,archived_at:sec(),account:a});state.accounts=state.accounts.filter(a=>a.email!==email);});
       case 'get_archives':return clone(archives);
       case 'restore':return operation('restore',null,()=>{const a=archives.find(a=>a.key===email);if(a){state.accounts.push(a.account);archives=archives.filter(x=>x.key!==email);}});
@@ -162,10 +166,28 @@ window.NXDemo = (() => {
         if(email&&(!a||email===state.current))return {ok:false,error:'这个账号不能设为下一棒'};
         if(email&&(state.operation||state.adding||state.reauth))return {ok:false,error:'请先完成当前操作'};
         const exhausted=a?.ok&&a.windows?.some(w=>Number.isFinite(w.used)&&w.used>=100);
-        state.relay_wait=exhausted?{id:(++serial).toString(16).padStart(32,'0'),email,origin:state.current}:null;
-        state.settings.relay_pick=exhausted?null:email||null;
+        if(exhausted){
+          state.relay_wait={id:(++serial).toString(16).padStart(32,'0'),email,origin:state.current};
+          if(state.settings.relay_pick===email)state.settings.relay_pick=null;
+        }else{
+          state.settings.relay_pick=email||null;
+          if(!email||state.relay_wait?.email===email)state.relay_wait=null;
+        }
         const mode=exhausted?'waiting':email?'picked':'cancelled';
         return {ok:true,mode,message:{waiting:'已安排，额度恢复后自动接力',picked:'已设为下一棒',cancelled:'已取消'}[mode]};}
+      case 'cancel_relay_pick':
+        if(state.settings.relay_pick===email)state.settings.relay_pick=null;
+        if(state.relay_wait?.email===email)state.relay_wait=null;
+        return {ok:true,message:'已取消'};
+      case 'consume_reset':{
+        const a=state.accounts.find(a=>a.email===email),credit=a?.banked_resets?.items?.find(r=>r.id===args[1]&&r.status==='available');
+        if(!credit)return {ok:false,error:'这次重置已不可用'};
+        return operation('reset',email,()=>{
+          a.banked_resets.items=a.banked_resets.items.filter(r=>r.id!==credit.id);
+          a.banked_resets.available_count=Math.max(0,a.banked_resets.available_count-1);
+          a.windows.forEach(w=>{w.used=0;});a.fetched_at=sec();
+          state.operation.message='额度已重置';
+        });}
       case 'launch_chatgpt':{
         const ticket=generation;
         if(state.demo_hold_launch)return new Promise(()=>{}); // Catalog-only fixed pending sample.

@@ -44,7 +44,8 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
         [rootStyle.getPropertyValue('--font-body'),rootStyle.getPropertyValue('--height-control')]);
   check('home/compact-size',app.clientWidth===372&&app.clientHeight===520,[app.clientWidth,app.clientHeight]);
   let list=document.querySelector('.account-list');
-  check('home/three-accounts-fit',list.querySelectorAll('.row').length===3&&list.scrollHeight-list.clientHeight<=1,
+  check('home/all-noncurrent-accounts-including-relay',list.querySelectorAll('.row').length===4&&
+        [...list.querySelectorAll('.row')].some(row=>row.dataset.email===window.NXDemo.state().relay_email),
         [list.querySelectorAll('.row').length,list.scrollHeight,list.clientHeight]);
   const homeScroll=stableScrollRegion(list);
   check('home/account-list-scroll-keeps-width',homeScroll.every(Boolean),homeScroll);
@@ -59,7 +60,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('home/footer-compact',footer.offsetHeight<=40,footer.offsetHeight);
   check('home/add-button-near-panel-bottom',box('#app').bottom-box('.footer.slim .add').bottom<=8,
         box('#app').bottom-box('.footer.slim .add').bottom);
-  for(const [name,count] of [['three-accounts',1],['four-accounts',2]]){
+  for(const [name,count] of [['three-accounts',2],['four-accounts',3]]){
     await scenario(name);
     list=document.querySelector('.account-list');footer=document.querySelector('.footer.slim');
     const rows=[...list.querySelectorAll('.row')],head=box('.section-link');
@@ -67,8 +68,8 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
     check(`home/${name}-rows-start-at-top`,rows.length===count&&
           positions.every((row,i)=>row.height>=50&&row.height<=55&&
             (i===0?row.top-head.bottom<=10:Math.abs(row.top-positions[i-1].bottom-4)<=1))&&
-          box(footer).top-positions.at(-1).bottom>20,
-          positions.map(row=>[row.top,row.height]));
+          box(footer).top-positions.at(-1).bottom>=4,
+          [positions.map(row=>[row.top,row.height]),box(footer).top-positions.at(-1).bottom]);
   }
   await scenario('default');
   await scenario('week-exhausted-auto-off');

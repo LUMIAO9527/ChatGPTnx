@@ -126,6 +126,11 @@ class TrayTests(unittest.TestCase):
         self.assertEqual(self.icon._wndproc(HWND, tray.WM_NULL, 0, 0), 41)
         self.assertEqual(self.icon._wndproc(HWND, tray.WM_TIMER, 42, 0), 41)
 
+    def test_double_click_toggles_once_per_button_release(self):
+        for event in (tray.WM_LBUTTONUP, tray.WM_LBUTTONCLK, tray.WM_LBUTTONUP):
+            self.icon._wndproc(HWND, tray.WM_TRAYCALLBACK, 1 << 16, event)
+        self.assertEqual(self.clicked.call_count, 2)
+
 
 if __name__ == '__main__':
     unittest.main()

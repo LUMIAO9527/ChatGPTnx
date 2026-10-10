@@ -207,6 +207,23 @@ class AnchorTests(unittest.TestCase):
         engine.tick(SETTINGS)
         self.assertEqual(self.posts, 2)
 
+    def test_selected_exhausted_account_preheats_after_recovery_while_work_continues(self):
+        self.used, self.reset = 100, self.now + 90
+        engine = self.engine()
+        engine.tick(SETTINGS)
+        self.assertEqual(self.posts, 0)
+        reads = self.queries
+        self.now += 30
+        engine.tick(SETTINGS)
+        self.assertEqual((self.queries, self.posts), (reads, 0))
+        self.now += 61
+        engine.tick(SETTINGS)
+        self.assertEqual(self.posts, 1)
+        self.now += 4
+        engine.tick(SETTINGS)
+        self.assertEqual(self.record()['status'], 'started')
+        self.assertEqual(self.posts, 1)
+
     def test_actual_server_recovery_overrides_old_local_lock(self):
         engine = self.engine()
         self.confirmed(engine)

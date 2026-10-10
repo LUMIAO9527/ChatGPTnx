@@ -4,7 +4,7 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = path.resolve(__dirname, '..');
-const output = path.join(root, '_wip', 'hardening-ui');
+const output = process.env.NX_TEST_OUTPUT || path.join(root, '_wip', 'hardening-ui');
 fs.mkdirSync(output, {recursive:true});
 
 (async()=>{

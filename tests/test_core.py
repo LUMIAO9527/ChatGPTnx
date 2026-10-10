@@ -509,7 +509,7 @@ class TransactionTests(Fixture):
         self.assertEqual(self.service.get_data()['settings']['relay_pick'],'b@example.com')
         self.assertNotIn('relay_pick',self.service.state.get('settings'))
         result=self.service.switch('b@example.com');self.assertTrue(result['accepted'])
-        self.assertIsNone(self.service.get_data()['settings']['relay_pick']);self.wait()
+        self.wait();self.assertIsNone(self.service.get_data()['settings']['relay_pick'])
     def test_relay_pick_rejects_current_account(self):
         self.assertFalse(self.service.set_relay_pick('a@example.com')['ok'])
     def exhaust_next(self, windows=(0,)):
@@ -916,14 +916,20 @@ class ProtocolTests(unittest.TestCase):
         panel=object.__new__(Desktop)
         panel.service=SimpleNamespace(operation=None,log=Mock())
         panel.window=object();panel.visible=True;panel._relay_restore={'id':'relay','pinned':True}
-        panel._relay_pinned=True;panel._shown_at=1
-        with patch('nx.desktop.chatgpt_foreground',side_effect=[True,False]), \
+        panel._relay_pinned=True;panel._shown_at=1;panel._hide_token=0;panel.icon=None
+        with patch('nx.desktop.chatgpt_foreground',side_effect=[True,False,False]), \
+             patch('nx.desktop.threading.Timer') as timer, \
+             patch('nx.desktop._find_hwnd',return_value=123), \
+             patch('nx.desktop.ctypes.windll.user32') as user32, \
              patch.object(panel,'_dispatch_ui',side_effect=lambda action:action() or True), \
              patch.object(panel,'_set_panel_topmost',return_value=True) as topmost, \
              patch.object(panel,'_post_script'), patch.object(panel,'_form',return_value=Mock()) as form:
             panel.hide(reason='focus')
             self.assertTrue(panel.visible)
             panel.hide(reason='focus')
+            self.assertTrue(panel.visible)
+            user32.GetForegroundWindow.return_value=999
+            timer.call_args.args[1]()
         self.assertFalse(panel.visible)
         self.assertIsNone(panel._relay_restore)
         self.assertFalse(panel._relay_pinned)
@@ -934,13 +940,18 @@ class ProtocolTests(unittest.TestCase):
         panel=object.__new__(Desktop)
         panel.service=SimpleNamespace(operation=None,log=Mock())
         panel.window=object();panel.visible=True;panel._relay_restore=None
-        panel._relay_pinned=False;panel._shown_at=1
+        panel._relay_pinned=False;panel._shown_at=1;panel._hide_token=0;panel.icon=None
         events=[]
         form=Mock();form.Hide.side_effect=lambda:events.append('hide')
-        with patch.object(panel,'_dispatch_ui',side_effect=lambda action:action() or True), \
+        with patch('nx.desktop.threading.Timer') as timer, \
+             patch('nx.desktop._find_hwnd',return_value=123), \
+             patch('nx.desktop.ctypes.windll.user32') as user32, \
+             patch.object(panel,'_dispatch_ui',side_effect=lambda action:action() or True), \
              patch.object(panel,'_set_panel_topmost',side_effect=lambda enabled:events.append('unpin') or True), \
              patch.object(panel,'_post_script'),patch.object(panel,'_form',return_value=form):
             panel.hide(reason='focus')
+            user32.GetForegroundWindow.return_value=999
+            timer.call_args.args[1]()
         self.assertEqual(events,['hide','unpin'])
 
     def test_relay_show_pins_visible_handle_and_records_verified_state(self):
@@ -1126,7 +1137,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(len(a['banked_resets']['items']),1)
         self.assertEqual(a['banked_resets']['items'][0]['expires_at'],1900500000)
         self.assertTrue(a['banked_resets']['items'][0]['expires_known'])
-        self.assertNotIn('id',a['banked_resets']['items'][0])
+        self.assertEqual(a['banked_resets']['items'][0]['id'],'opaque-1')
         self.assertEqual(a['credits'],'12.50')
     def test_banked_resets_unknown_zero_and_no_expiry_are_distinct(self):
         raw=limits()

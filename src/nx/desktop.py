@@ -374,6 +374,9 @@ class Bridge:
     def reauth_finish(self): return self._service.reauth_finish()
     def set_account_hotkey(self, email, shortcut=None): return self._service.set_account_hotkey(email, shortcut)
     def set_relay_pick(self, email=None): return self._service.set_relay_pick(email)
+    def cancel_relay_pick(self, email): return self._service.cancel_relay_pick(email)
+    def consume_reset(self, email, credit_id, request_id):
+        return self._service.consume_reset(email, credit_id, request_id)
     def set_auto_relay_account(self, email, enabled): return self._service.set_auto_relay_account(email, enabled)
     def set_early_anchor_account(self, email, enabled): return self._service.set_early_anchor_account(email, enabled)
     def set_preferences(self, changes):
@@ -760,13 +763,38 @@ class Desktop:
                 return
             if self._relay_restore and chatgpt_foreground():
                 return
-        if reason in ('user', 'blur', 'focus', 'complete'):
+            token = self._hide_token
+            def confirm():
+                if token != self._hide_token or not self.visible:
+                    return
+                rect = self.icon.rect() if self.icon else None
+                point = wt.POINT()
+                if rect and ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
+                    if rect[0] <= point.x < rect[2] and rect[1] <= point.y < rect[3]:
+                        return  # Let the tray click decide whether to show or hide.
+                if self._account_switch_active():
+                    return
+                if self._relay_restore and chatgpt_foreground():
+                    return
+                ctypes.windll.user32.GetForegroundWindow.restype = ctypes.c_void_p
+                if ctypes.windll.user32.GetForegroundWindow() == _find_hwnd():
+                    return
+                self.hide(reason='outside')
+            timer = threading.Timer(.15, confirm)
+            timer.daemon = True
+            timer.start()
+            return
+        if reason in ('user', 'blur', 'focus', 'outside', 'complete'):
             self._relay_restore = None
         if not self.window or (not self.visible and reason != 'repair'):
             return
         self.visible = False
+        self._hide_token += 1
+        token = self._hide_token
         self._shown_at = 0.0
         def apply():
+            if token != self._hide_token:
+                return
             form = self._form()
             if form:
                 form.Hide()
@@ -810,9 +838,12 @@ class Desktop:
         self.visible = True
         self._shown_at = time.time()
         self._hide_token += 1  # cancel any blur confirmation still pending
+        token = self._hide_token
         self.view = view
         self.last_layout = None
         def apply():
+            if token != self._hide_token or not self.visible:
+                return
             if (relay_operation_id and
                     (not self._relay_restore or self._relay_restore['id'] != relay_operation_id)):
                 return

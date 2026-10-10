@@ -357,6 +357,8 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .reset-credit { display: flex; align-items: center; justify-content: space-between; gap: 8px; height:var(--height-row); min-height:var(--height-row); color:var(--muted); font-size:var(--font-small); }
 .reset-credit + .reset-credit, .reset-credit + p { border-top: 1px solid var(--line); }
 .reset-credit strong { color: var(--ink); font-size: var(--font-small); font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.reset-credit-copy { display:flex; align-items:center; gap:10px; min-width:0; }
+.reset-use { flex:none; min-width:44px; }
 .danger-row { width: 100%; min-height: var(--height-primary); margin: 0; padding: 8px 10px; display: flex; align-items: center; gap: 9px; color: var(--danger); text-align: left; }
 .detail-footer { display:block; padding:0 16px 12px; border-top:0; }
 .detail-bottom { display:flex; flex-direction:column; align-items:center; gap:4px; }
@@ -549,5 +551,3 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .is-subagent .resume-task-copy { flex-direction:column; align-items:stretch; gap:2px; }
 .is-subagent .resume-task-copy > * { white-space:nowrap; }
 .is-subagent > .resume-task:disabled { opacity:1; cursor:default; }
-/* Read-only support preview stays selectable and inside the narrow panel. */
-.diagnostics-preview { width:100%; min-height:280px; box-sizing:border-box; resize:vertical; font:12px/1.6 Consolas,monospace; color:inherit; background:transparent; border:1px solid currentColor; border-radius:8px; padding:10px; white-space:pre; }
