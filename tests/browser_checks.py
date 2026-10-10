@@ -309,8 +309,8 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('settings/index-keeps-width',document.querySelector('.settings-body').scrollWidth===document.querySelector('.settings-body').clientWidth);
   check('settings/compact-row-and-switch-heights',[...document.querySelectorAll('.settings-list > *')].every(row=>box(row).height<=44)&&[...document.querySelectorAll('.settings-list .switch')].every(control=>box(control).height===24));
   check('settings/detail-style-independent-rows',document.querySelectorAll('.settings-list').length===3&&[...document.querySelectorAll('.settings-list > *')].every(row=>getComputedStyle(row).borderRadius==='12px'&&getComputedStyle(row).backgroundColor!=='rgba(0, 0, 0, 0)'));
-  check('settings/auto-relay',!!document.querySelector('[data-key="auto_relay"]'));
-  check('settings/continuation-switch-and-message',!!document.querySelector('[data-key="task_continuation"]')&&!!document.querySelector('[data-action="resume-details"]')&&!!document.querySelector('[data-disclosure="message"]'));
+  check('settings/auto-relay',!!document.querySelector('[data-disclosure="relay"] [data-key="auto_relay"]')&&document.querySelector('[data-disclosure="relay"] > summary span')?.textContent==='自动接力');
+  check('settings/continuation-switch-and-message',!!document.querySelector('[data-disclosure="message"] [data-key="task_continuation"]')&&!!document.querySelector('[data-disclosure="message"] #resume-message')&&!!document.querySelector('[data-action="resume-details"]')&&document.querySelector('[data-disclosure="message"] > summary span')?.textContent==='任务接续');
   check('settings/auto-relay-account-entry',!!document.querySelector('[data-disclosure="relay"]'));
   check('settings/automation-keeps-width',document.querySelector('.settings-body').scrollWidth===document.querySelector('.settings-body').clientWidth);
   const settingsCard=box('.settings-list');
@@ -318,14 +318,14 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   const firstAuto=window.NXDemo.state().relay_email;
   const relayAccountCount=window.NXDemo.state().accounts.length;
   check('settings/relay-account-list',document.querySelectorAll('[data-disclosure="relay"] .relay-account-row .switch').length===relayAccountCount&&
-        document.querySelector('[data-disclosure="relay"] .disclosure-meta')?.textContent===`${relayAccountCount}/${relayAccountCount}`);
+        document.querySelector('[data-disclosure="relay"] .disclosure-meta')?.textContent===(window.NXDemo.state().settings.auto_relay?`${relayAccountCount} 个账号`:'未开启'));
   check('settings/relay-account-style-aligns',box('.relay-account-list').left>=settingsCard.left&&
         box('.relay-account-list').right<=settingsCard.right&&
         document.querySelector('[data-disclosure="relay"]').open&&
         [...document.querySelectorAll('.relay-account-row .switch')].every(control=>box(control).height===24));
   document.querySelector('[data-action="auto-relay-account"][data-email="work-01@example.com"]').click();await wait(70);
   check('settings/excluding-current-stops-auto-only',window.NXDemo.state().auto_relay_email===null&&
-        window.NXDemo.state().relay_email===firstAuto&&document.querySelector('[data-disclosure="relay"] .disclosure-meta')?.textContent===`${relayAccountCount-1}/${relayAccountCount}`);
+        window.NXDemo.state().relay_email===firstAuto&&document.querySelector('[data-disclosure="relay"] .disclosure-meta')?.textContent===(window.NXDemo.state().settings.auto_relay?`${relayAccountCount-1} 个账号`:'未开启'));
   document.querySelector('[data-action="auto-relay-account"][data-email="work-01@example.com"]').click();await wait(70);
   document.querySelector(`[data-action="auto-relay-account"][data-email="${firstAuto}"]`).click();await wait(70);
   check('settings/excluding-target-preserves-manual-suggestion',window.NXDemo.state().auto_relay_email!==firstAuto&&
@@ -429,6 +429,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('appearance/explicit-dark-palette',document.documentElement.dataset.appearance==='dark'&&getComputedStyle(app).backgroundColor==='rgb(29, 29, 29)'&&selected('appearance')==='dark');
   document.querySelector('[data-key="appearance"][data-value="system"]').click();await wait(70);
   check('appearance/system-palette',document.documentElement.dataset.appearance===(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')&&selected('appearance')==='system');
+  document.querySelector('[data-disclosure="relay"] > summary').click();await wait(30);
   document.querySelector('[data-key="auto_relay"]').click();await wait(70);
   document.querySelector('[data-action="back"]').click();await wait(40);
   document.querySelector('[data-action="settings"]').click();await wait(60);

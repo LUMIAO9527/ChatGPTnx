@@ -48,11 +48,9 @@ window.NXViews.settings = c => {
   const options=[['system','系统'],['light','浅色'],['dark','深色']];
   const appearance=x.disclosure(c,'appearance','外观',segmented({label:'外观',action:'pref',key:'appearance',options,value:data.settings.appearance,className:'compact'}),options.find(([v])=>v===data.settings.appearance)?.[1]||'系统');
   const body=settingsGroup('系统',systemSettings(data.settings)+appearance+x.disclosure(c,'notifications','通知',notificationSettings(data.settings)))
-    +settingsGroup('接力与接续',autoRelaySetting(data.settings)
+    +settingsGroup('接力与接续',x.disclosure(c,'relay','自动接力',autoRelaySetting(data.settings)+x.relay(c),data.settings.auto_relay?`${n} 个账号`:'未开启')
       +x.disclosure(c,'early-anchor','接力预热',x.earlyAnchor(c),data.settings.early_anchor?`${data.accounts.filter(a=>a.plan==='plus'&&(data.settings.early_anchor_accounts||[]).includes(a.email)).length} 个账号`:'未开启')
-      +x.disclosure(c,'relay','参与自动接力的账号',x.relay(c),`${n}/${data.accounts.length}`)
-      +taskContinuationSetting(data.settings)
-      +x.disclosure(c,'message','接续消息',x.message(c))
+      +x.disclosure(c,'message','任务接续',taskContinuationSetting(data.settings)+'<p class="inline-help">接续消息</p>'+x.message(c),data.settings.task_continuation?'已开启':'未开启')
       +link('','任务接续记录','resume-details'))
     +settingsGroup('账号',x.disclosure(c,'hotkeys','账号快捷键',x.hotkeys(c),`${(data.hotkeys||[]).filter(h=>h.shortcut).length} 个`)
       +x.disclosure(c,'archives','已归档账号',x.archives(c),ui.archives?`${ui.archives.length} 个`:'')
