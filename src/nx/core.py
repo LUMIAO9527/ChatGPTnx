@@ -16,6 +16,7 @@ import time
 import uuid
 import unicodedata
 from .storage import Accounts, Paths, State, credential_metadata, identity, account_identity_key, activity_identity_key, claims
+from .credentials import read_credential_bytes
 from .quota import Query
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 from .resume_flow import ResumeCoordinator
@@ -481,21 +482,37 @@ class Service:
         previous = self.accounts.current()
         cancel = threading.Event()
         def work():
-            # Read the target first. Temporary failures retain known quota;
-            # explicit login/identity failures still prevent the switch.
-            self.phase('验证目标账号登录状态')
-            results = self._refresh(email, cancel)
-            target = results.get(email) or {}
-            if target.get('error_code') == 'reauth_required':
-                self.state.update(reauth={'email': email, 'previous': previous, 'phase': 'ready'})
-                raise RuntimeError('目标账号需要重新登录；当前账号没有切换')
-            if not target.get('ok') and not usable_windows(target):
-                raise RuntimeError('目标账号在线状态尚未确认；当前账号没有切换')
-            warning = target.get('query_warning') or {}
-            if ((warning.get('scope') != 'reset_credits' and
-                    (warning.get('paused') or (warning.get('retry_at') or 0) > time.time()))
-                    or not self._query_ready_or_known(email, previous, target)):
-                raise RuntimeError('目标账号查询已暂停；当前账号没有切换')
+            if source == 'manual':
+                # A deliberate local switch never depends on quota HTTP or its
+                # cooldown/cache age. The transaction also verifies identity.
+                self.phase('核验目标账号本地凭据')
+                path = self.paths.snapshot(email)
+                try:
+                    saved = json.loads(read_credential_bytes(path).decode('utf-8-sig'))
+                    tokens = saved.get('tokens') or {}
+                    token = tokens.get('access_token')
+                    who, account_id = identity(path)
+                except (OSError, ValueError, TypeError, AttributeError):
+                    raise RuntimeError('目标账号本地凭据无法读取；当前账号没有切换') from None
+                if not who or who.casefold() != email.casefold() or not account_id:
+                    raise RuntimeError('目标账号本地凭据与账号不匹配；当前账号没有切换')
+                if not isinstance(token, str) or not token:
+                    raise RuntimeError('目标账号登录信息不完整，请重新登录；当前账号没有切换')
+            else:
+                # Relay still needs usable quota before replacing an account.
+                self.phase('验证目标账号登录状态')
+                results = self._refresh(email, cancel)
+                target = results.get(email) or {}
+                if target.get('error_code') == 'reauth_required':
+                    self.state.update(reauth={'email': email, 'previous': previous, 'phase': 'ready'})
+                    raise RuntimeError('目标账号需要重新登录；当前账号没有切换')
+                if not target.get('ok') and not usable_windows(target):
+                    raise RuntimeError('目标账号在线状态尚未确认；当前账号没有切换')
+                warning = target.get('query_warning') or {}
+                if ((warning.get('scope') != 'reset_credits' and
+                        (warning.get('paused') or (warning.get('retry_at') or 0) > time.time()))
+                        or not self._query_ready_or_known(email, previous, target)):
+                    raise RuntimeError('目标账号查询已暂停；当前账号没有切换')
             if self.stop.is_set() or cancel.is_set():
                 raise RuntimeError('操作已取消；当前账号没有切换')
             if source in ('auto', 'auto-limit'):

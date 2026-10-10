@@ -35,6 +35,7 @@ def auth(email, extra=None):
     payload={'email':email, 'exp':1900000000, 'https://api.openai.com/auth':extra or {}}
     middle=base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip('=')
     return json.dumps({'tokens':{'id_token':'fixture.'+middle+'.not-signed','account_id':'fixture-'+email,
+                                 'access_token':'synthetic-test-only',
                                  'refresh_token':'synthetic-test-only'}}).encode()
 
 def limits():
@@ -233,6 +234,102 @@ class StorageTests(Fixture):
         self.refresh();public=json.dumps(self.service.get_data());self.assertNotIn('synthetic-test-only',public);self.assertNotIn('fixture.',public)
 
 class TransactionTests(Fixture):
+    def test_manual_switch_without_quota_never_queries_the_network(self):
+        with patch.object(self.query, 'run', side_effect=AssertionError('manual switch queried HTTP')) as query:
+            self.assertTrue(self.service.switch('b@example.com')['accepted'])
+            self.wait()
+            query.assert_not_called()
+        self.assertTrue(self.service.last_result['ok'])
+        self.assertEqual(self.accounts.current(), 'b@example.com')
+
+    def test_manual_switch_ignores_stale_exhausted_quota_and_keeps_it_visible(self):
+        target = normalize_limits(limits(), 'b@example.com')
+        target.update(ok=False, error_code='network', fetched_at=time.time()-1800,
+                      paused=False, retry_at=time.time()+900)
+        target['windows'][1]['used'] = 100
+        self.service._store_quota(target)
+        before = self.service.state.get('cache')['accounts']
+        with patch.object(self.query, 'run') as query:
+            self.service.switch('b@example.com'); self.wait()
+            query.assert_not_called()
+        self.assertTrue(self.service.last_result['ok'])
+        self.assertEqual(self.accounts.current(), 'b@example.com')
+        self.assertEqual(self.service.state.get('cache')['accounts'], before)
+
+    def test_manual_switch_does_not_depend_on_query_policy_or_server_status(self):
+        real = Query(self.paths, lambda: self.service.state.get('settings'))
+        self.service.query = real
+        for code in ('network', 'timeout', 429, 403, 'reauth_required', 'query_policy_unavailable'):
+            with self.subTest(code=code):
+                atomic_bytes(self.paths.auth, auth('a@example.com'))
+                with patch.object(real, 'run', side_effect=AssertionError('manual query')) as query, \
+                        patch.object(real, 'status', return_value={
+                            'ready':False, 'paused':True, 'error_code':code}) as status:
+                    self.service.switch('b@example.com'); self.wait()
+                    query.assert_not_called()
+                    status.assert_not_called()
+                self.assertTrue(self.service.last_result['ok'])
+                self.assertEqual(self.accounts.current(), 'b@example.com')
+
+    def test_manual_switch_rejects_missing_corrupt_or_wrong_local_identity(self):
+        original = self.paths.auth.read_bytes()
+        for saved in (None, b'not json', b'[]', auth('other@example.com'),
+                      json.dumps({'tokens':{'access_token':'fixture'}}).encode()):
+            with self.subTest(saved=saved):
+                path = self.paths.snapshot('b@example.com')
+                if saved is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    atomic_bytes(path, saved)
+                with patch.object(self.service, 'runner') as switch, patch.object(self.query, 'run') as query:
+                    self.service.switch('b@example.com'); self.wait()
+                    switch.assert_not_called(); query.assert_not_called()
+                self.assertFalse(self.service.last_result['ok'])
+                self.assertEqual(self.paths.auth.read_bytes(), original)
+
+    def test_manual_switch_rejects_incomplete_local_login(self):
+        saved = json.loads(auth('b@example.com'))
+        original = self.paths.auth.read_bytes()
+        for token in (None, '', 1):
+            with self.subTest(token=token):
+                saved['tokens']['access_token'] = token
+                atomic_bytes(self.paths.snapshot('b@example.com'), json.dumps(saved).encode())
+                with patch.object(self.service, 'runner') as switch:
+                    self.service.switch('b@example.com'); self.wait()
+                    switch.assert_not_called()
+                self.assertFalse(self.service.last_result['ok'])
+                self.assertEqual(self.paths.auth.read_bytes(), original)
+
+    def test_manual_switch_to_current_account_does_nothing(self):
+        with patch.object(self.service, 'runner') as switch, patch.object(self.query, 'run') as query:
+            result = self.service.switch('a@example.com')
+            self.assertTrue(result['already_current'])
+            switch.assert_not_called(); query.assert_not_called()
+
+    def test_hotkey_switch_preempts_interruptible_refresh(self):
+        self.query.delay = .2
+        self.service.refresh(background=True); time.sleep(.03)
+        host = SimpleNamespace(service=self.service, icon=Mock())
+        Desktop.hotkey_switch(host, 'b@example.com')
+        self.wait()
+        self.assertEqual(self.accounts.current(), 'b@example.com')
+        self.assertTrue(self.service.last_result['ok'])
+        host.icon.notify.assert_not_called()
+
+    def test_hotkey_switch_keeps_another_account_operation_intact(self):
+        started, release = threading.Event(), threading.Event()
+        def operation():
+            started.set(); release.wait(2)
+        self.service.begin('snapshot', None, operation)
+        self.assertTrue(started.wait(1))
+        try:
+            host = SimpleNamespace(service=self.service, icon=Mock())
+            Desktop.hotkey_switch(host, 'b@example.com')
+            self.assertEqual(self.accounts.current(), 'a@example.com')
+            host.icon.notify.assert_called_once()
+        finally:
+            release.set(); self.wait()
+
     def test_temporary_failure_keeps_zero_and_recovery_request(self):
         self.refresh()
         target = next(a for a in self.service.state.get('cache')['accounts'] if a['email']=='b@example.com')
@@ -255,12 +352,12 @@ class TransactionTests(Fixture):
         self.assertTrue(self.service.last_result['ok'])
         self.assertEqual(self.accounts.current(), 'b@example.com')
 
-    def test_cached_quota_does_not_bypass_login_or_permission_failures(self):
+    def test_relay_cached_quota_does_not_bypass_login_or_permission_failures(self):
         self.refresh()
         for code in (403, 'identity_mismatch', 'missing_snapshot', 'reauth_required'):
             with self.subTest(code=code):
                 self.query.codes['b@example.com'] = code
-                self.assertTrue(self.service.switch('b@example.com')['accepted'])
+                self.assertTrue(self.service._switch('b@example.com', 'relay')['accepted'])
                 self.wait()
                 self.assertFalse(self.service.last_result['ok'])
                 self.assertEqual(self.accounts.current(), 'a@example.com')
@@ -320,10 +417,10 @@ class TransactionTests(Fixture):
         self.service.refresh();self.wait()
         self.assertEqual([c[0] for c in self.query.calls], ['a@example.com','b@example.com'])
     def test_switch_verified_then_commit(self):
-        self.refresh();self.query.calls=[];r=self.service.switch('b@example.com');self.assertTrue(r['ok']);self.wait();self.assertEqual(self.service.get_data()['current'],'b@example.com');self.assertEqual([c[0] for c in self.query.calls],['b@example.com'])
-    def test_switch_preflight_keeps_working_account_when_target_needs_login(self):
+        self.refresh();self.query.calls=[];r=self.service.switch('b@example.com');self.assertTrue(r['ok']);self.wait();self.assertEqual(self.service.get_data()['current'],'b@example.com');self.assertEqual(self.query.calls,[])
+    def test_relay_preflight_keeps_working_account_when_target_needs_login(self):
         self.query.codes['b@example.com']='reauth_required'
-        self.service.switch('b@example.com');self.wait()
+        self.service._switch('b@example.com', 'relay');self.wait()
         data=self.service.get_data();self.assertEqual(data['current'],'a@example.com')
         self.assertEqual(data['reauth']['email'],'b@example.com');self.assertEqual(data['reauth']['phase'],'ready')
         self.assertFalse(self.service.last_result['ok'])

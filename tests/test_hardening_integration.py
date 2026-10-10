@@ -35,7 +35,7 @@ class HardeningIntegrationTests(unittest.TestCase):
             return {**original(*args, **kwargs), 'query_warning': {'paused': True, 'error_code': 403}}
         self.query.run = warned
         with patch.object(self.service, 'runner') as switch:
-            self.assertTrue(self.service.switch('b@example.com')['accepted'])
+            self.assertTrue(self.service._switch('b@example.com', 'relay')['accepted'])
             self.wait()
             switch.assert_not_called()
             self.assertFalse(self.service.last_result['ok'])
@@ -54,7 +54,7 @@ class HardeningIntegrationTests(unittest.TestCase):
                 'scope': 'reset_credits', 'paused': True, 'error_code': 403}}
         self.query.run = warned
         with patch.object(self.service, 'runner', wraps=self.runner) as switch:
-            self.assertTrue(self.service.switch('b@example.com')['accepted'])
+            self.assertTrue(self.service._switch('b@example.com', 'relay')['accepted'])
             self.wait()
             switch.assert_called()
             self.assertTrue(self.service.last_result['ok'])
@@ -67,7 +67,7 @@ class HardeningIntegrationTests(unittest.TestCase):
         with patch.object(real, 'run', return_value=target), patch.object(real, 'ready', return_value=False), \
                 patch.object(real, 'status', return_value={'ready':False,'paused':True,'error_code':403}), \
                 patch.object(self.service, 'runner') as switch:
-            self.service.switch('b@example.com'); self.wait()
+            self.service._switch('b@example.com', 'relay'); self.wait()
             switch.assert_not_called()
             self.assertFalse(self.service.last_result['ok'])
 
@@ -79,7 +79,7 @@ class HardeningIntegrationTests(unittest.TestCase):
         with patch.object(real, 'run', return_value=failure), patch.object(real, 'ready', return_value=False), \
                 patch.object(real, 'status', return_value={'ready':False,'paused':False,'error_code':429}), \
                 patch.object(self.service, 'runner', wraps=self.runner) as switch:
-            self.service.switch('b@example.com'); self.wait()
+            self.service._switch('b@example.com', 'relay'); self.wait()
             switch.assert_called_once()
             self.assertTrue(self.service.last_result['ok'])
 

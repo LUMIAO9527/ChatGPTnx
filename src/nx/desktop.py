@@ -486,10 +486,8 @@ class Desktop:
         self.service.notify()
 
     def hotkey_switch(self, email):
-        if self.service.operation or self.service.state.get('adding') or self.service.state.get('reauth'):
-            if self.icon:
-                self.icon.notify('请先完成当前操作。', 'ChatGPTnx')
-            return
+        # Use the same coordinator as the button: an interruptible refresh
+        # yields to a deliberate switch; another account transaction does not.
         result = self.service.switch(email)
         if not result.get('ok') and self.icon:
             self.icon.notify(result.get('error', '暂时无法切换'), 'ChatGPTnx')
