@@ -13,8 +13,8 @@ window.NXSettingsContent = (()=>{
       +(items.length>limit?`<button class="collection-more" data-action="collection-more" data-value="${key}">${expanded?'收起长名单':`显示其余 ${items.length-limit} 项`}</button>`:'');
   }
   function relay(c) {
-    const {data,esc,name,plan}=c,excluded=new Set(data.settings.auto_relay_excluded||[]);
-    return `<div class="relay-account-list">${collection(c,'relay',data.accounts,a=>`<div class="relay-account-row collection-row"><span class="relay-account-identity"><span class="relay-account-name" title="${esc(name(a))} · ${esc(a.email)}">${esc(name(a))}</span><span class="badge">${esc(plan(a.plan))}</span></span><button class="switch" role="switch" aria-label="${esc(name(a))}参与自动接力" aria-checked="${!excluded.has(a.email)}" data-action="auto-relay-account" data-email="${esc(a.email)}"><i></i></button></div>`)}</div>`;
+    const {data,esc,name,plan,icon}=c,excluded=new Set(data.settings.auto_relay_excluded||[]);
+    return `<div class="relay-account-list">${collection(c,'relay',data.accounts,a=>`<div class="relay-account-row collection-row"><span class="relay-account-identity"><span class="relay-account-name" title="${esc(name(a))} · ${esc(a.email)}">${esc(name(a))}</span><span class="badge">${esc(plan(a.plan))}</span></span><button class="account-select" role="checkbox" aria-label="${esc(name(a))}参与自动接力" aria-checked="${!excluded.has(a.email)}" data-action="auto-relay-account" data-email="${esc(a.email)}"><span class="selection-mark" aria-hidden="true">${icon('check')}</span></button></div>`)}</div>`;
   }
   function hotkeys(c) {
     const {data,ui,esc,name,hotkeyLabel}=c;
@@ -24,11 +24,10 @@ window.NXSettingsContent = (()=>{
     })}</div><p class="inline-help">点击录制 · Backspace 清除 · Esc 取消</p>`;
   }
   function earlyAnchor(c) {
-    const {data,esc,name,plan}=c,selected=new Set(data.settings.early_anchor_accounts||[]);
+    const {data,esc,name,plan,icon}=c,selected=new Set(data.settings.early_anchor_accounts||[]);
     const accounts=data.accounts.filter(a=>a.plan==='plus');
-    return `<div class="toggle-line"><span>工作期间自动预热</span><button class="switch" role="switch" aria-label="工作期间自动预热" aria-checked="${!!data.settings.early_anchor}" data-action="toggle" data-key="early_anchor"><i></i></button></div>`
-      +'<p class="inline-help">工作期间，提前启动所选备用 Plus 的 5h 计时，消耗极少额度；额度恢复后继续下一轮。</p>'
-      +`<div class="relay-account-list">${collection(c,'early-anchor',accounts,a=>`<div class="relay-account-row collection-row"><span class="relay-account-identity"><span class="relay-account-name" title="${esc(name(a))}">${esc(name(a))}</span><span class="badge">${esc(plan(a.plan))}</span></span><button class="switch" role="switch" aria-label="${esc(name(a))}接力预热" aria-checked="${selected.has(a.email)}" data-action="early-anchor-account" data-email="${esc(a.email)}"><i></i></button></div>`)}</div>`;
+    return `<div class="toggle-line"><span>提前开始 5h 计时<span class="toggle-note">（消耗少许额度）</span></span><button class="switch" role="switch" aria-label="提前开始 5h 计时（消耗少许额度）" aria-checked="${!!data.settings.early_anchor}" data-action="toggle" data-key="early_anchor"><i></i></button></div>`
+      +`<div class="relay-account-list">${collection(c,'early-anchor',accounts,a=>`<div class="relay-account-row collection-row"><span class="relay-account-identity"><span class="relay-account-name" title="${esc(name(a))}">${esc(name(a))}</span><span class="badge">${esc(plan(a.plan))}</span></span><button class="account-select" role="checkbox" aria-label="${esc(name(a))}接力预热" aria-checked="${selected.has(a.email)}" data-action="early-anchor-account" data-email="${esc(a.email)}"><span class="selection-mark" aria-hidden="true">${icon('check')}</span></button></div>`)}</div>`;
   }
   function archives(c) {
     const {ui,esc,dt}=c;

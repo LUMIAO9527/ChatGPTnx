@@ -317,12 +317,12 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   document.querySelector('[data-disclosure="relay"] > summary').click();await wait(70);
   const firstAuto=window.NXDemo.state().relay_email;
   const relayAccountCount=window.NXDemo.state().accounts.length;
-  check('settings/relay-account-list',document.querySelectorAll('[data-disclosure="relay"] .relay-account-row .switch').length===relayAccountCount&&
+  check('settings/relay-account-list',document.querySelectorAll('[data-disclosure="relay"] .relay-account-row [role="checkbox"]').length===relayAccountCount&&
         document.querySelector('[data-disclosure="relay"] .disclosure-meta')?.textContent===(window.NXDemo.state().settings.auto_relay?`${relayAccountCount} 个账号`:'未开启'));
   check('settings/relay-account-style-aligns',box('.relay-account-list').left>=settingsCard.left&&
         box('.relay-account-list').right<=settingsCard.right&&
         document.querySelector('[data-disclosure="relay"]').open&&
-        [...document.querySelectorAll('.relay-account-row .switch')].every(control=>box(control).height===24));
+        [...document.querySelectorAll('[data-disclosure="relay"] .account-select')].every(control=>box(control.querySelector('.selection-mark')).height===20));
   document.querySelector('[data-action="auto-relay-account"][data-email="work-01@example.com"]').click();await wait(70);
   check('settings/excluding-current-stops-auto-only',window.NXDemo.state().auto_relay_email===null&&
         window.NXDemo.state().relay_email===firstAuto&&document.querySelector('[data-disclosure="relay"] .disclosure-meta')?.textContent===(window.NXDemo.state().settings.auto_relay?`${relayAccountCount-1} 个账号`:'未开启'));

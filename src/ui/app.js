@@ -286,14 +286,14 @@
         const pending=a.reset_attempt?.credit_id===item.id;
         const available=item.id&&(item.status==='available'||pending);
         const confirming=resetConfirmation?.email===a.email&&resetConfirmation?.creditId===item.id;
-        const button=available?`<button class="btn secondary small-action reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(item.id)}" ${disabled()}>${confirming?'确认':pending?'重试':'使用'}</button>`:'';
+        const button=available?`<button class="btn primary small-action reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(item.id)}" ${disabled()}>${confirming?'确认':pending?'重试':'使用'}</button>`:'';
         return `<div class="reset-credit"><span class="reset-credit-copy"><span>第 ${index+1} 次${status}</span><strong>${esc(expiry)}${item.expires_known&&item.expires_at!==null?' 到期':''}</strong></span>${button}</div>`;
       }).join('');
       if(count>items.length) content+=`<p>另有 ${count-items.length} 次未提供逐项详情。</p>`;
     }
     if(a.reset_attempt&&!items.some(item=>item.id===a.reset_attempt.credit_id)){
       const confirming=resetConfirmation?.email===a.email&&resetConfirmation?.creditId===a.reset_attempt.credit_id;
-      content+=`<div class="reset-credit"><span>上次重置待确认</span><button class="btn secondary small-action reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(a.reset_attempt.credit_id)}" ${disabled()}>${confirming?'确认':'重试'}</button></div>`;
+      content+=`<div class="reset-credit"><span>上次重置待确认</span><button class="btn primary small-action reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(a.reset_attempt.credit_id)}" ${disabled()}>${confirming?'确认':'重试'}</button></div>`;
     }
     if(a.query_warning?.scope==='reset_credits'&&a.query_warning.paused) content+=`<p>重置详情查询已暂停，主额度查询正常。</p><button class="btn secondary" data-action="retry-query" data-email="${esc(a.email)}">恢复详情查询</button>`;
     return `<div class="detail-reset"><button class="detail-line detail-action reset-summary" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div class="reset-credit-details">${content}</div>`:''}</div>`;
