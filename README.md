@@ -56,9 +56,9 @@ ChatGPTnx 的核心，是让多个 Plus 账号接力推进同一个长任务。�
 
 ## 下载与运行
 
-当前本地版本为 **v1.0.2**，使用 327×458 紧凑面板及轻量动效；源码包为 `ChatGPTnx-v1.0.2-source.zip`。页面示意图来自 1.0.1。
+当前发布版本为 **v1.0.2**，使用 327×458 紧凑面板及轻量动效；源码包为 `ChatGPTnx-v1.0.2-source.zip`。页面示意图来自 1.0.1。
 
-公开发布版可从 [v1.0.1 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.1) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.0.1-source.zip`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用，以及 Microsoft Edge WebView2 Runtime。
+公开发布版可从 [v1.0.2 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.2) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.0.2-source.zip`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用，以及 Microsoft Edge WebView2 Runtime。
 
 1. 将 EXE 放入独立、可写的目录后启动，从托盘打开面板。
 2. 点击“添加账号”，按提示打开桌面登录窗口；登录新账号后，回到面板确认保存。

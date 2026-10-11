@@ -93,7 +93,7 @@ Windows 任务栏重启后，程序会自动恢复托盘图标；任务栏尚未
 加密快照不能直接交给不支持该格式的程序读取。如需回退，应使用源码包中的恢复工具；该工具未嵌入 EXE，需要本机已有的 Python。保留可信的旧程序备份与当前源码包，不要只根据版本号判断是否支持加密快照。
 
 1. 确认单独保存的旧 `ChatGPTnx.exe` 备份可用，再从托盘退出 ChatGPTnx。**禁止在 ChatGPTnx 仍运行时执行回退，也不要在恢复完成前重新启动它。** 使用完成加密的同一个 Windows 用户操作。
-2. 解压包含恢复工具的 `ChatGPTnx-v1.0.1-source.zip`，在包含 `tools` 和 `src` 的源码根目录打开 PowerShell，执行下面两行，并在提示时输入 ChatGPTnx 实际运行目录的完整路径：
+2. 解压包含恢复工具的 `ChatGPTnx-v1.0.2-source.zip`，在包含 `tools` 和 `src` 的源码根目录打开 PowerShell，执行下面两行，并在提示时输入 ChatGPTnx 实际运行目录的完整路径：
 
    ```powershell
    $runtimeDir = Read-Host "ChatGPTnx 运行目录的完整路径"
