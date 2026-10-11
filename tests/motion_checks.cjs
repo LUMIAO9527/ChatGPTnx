@@ -118,6 +118,17 @@ check('background paints cancel prior animation before measuring final bounds',(
   e.motion.paint(next.node);assert.deepEqual({...model.goal},goal);assert.equal(model.start,start);
   assert.equal(next.filter.children.filter(n=>n.inert).length,0);e.tick(800);clean(e);
 });
+check('disabled content finishes at its real opacity instead of flashing',()=>{
+  const e=setup(),old=e.surface('detail','b');e.mount(old.node);e.motion.begin(old.node,1,'b');
+  const next=e.surface('detail','b');next.content._css.opacity='.46';e.mount(next.node);e.motion.paint(next.node);
+  assert.equal(next.content.animateCalls.at(-1).frames.at(-1).opacity,.46);
+  e.tick(400);assert.equal(Number(computed(next.content).opacity),.46);assert.equal(animations.size,0);
+});
+check('repeated chart feedback cancels the prior fade and returns to base opacity',()=>{
+  const e=setup(),summary=e.el('section','usage-summary',14,220,299,110),chart=e.el('div','trend',28,268,272,48);summary.append(chart);
+  e.motion.reveal(summary);const first=chart.animateCalls[0];e.tick(50);e.motion.reveal(summary);
+  assert(first.cancelled);assert.equal(chart.animateCalls[1].frames.at(-1).opacity,1);e.tick(200);assert.equal(animations.size,0);
+});
 check('production embeds the version and excludes demo controls and accounts',()=>{assert(html.includes('"version": "1.0.2"'));for(const s of['data-preview-density','data-preview-motion','layout-preview-tools','@example.com'])assert(!html.includes(s));assert.equal(html.split('window.NXMotion =').length-1,1);const app=fs.readFileSync(path.join(root,'src/ui/app.js'),'utf8');assert(app.includes('window.nxHidden=()=>{window.NXMotion?.stop();'));assert(app.includes('closeSheet(false)'));assert(app.includes('restoreScroll(sheet,saved.scroll);restoreFocus(sheet,saved.focus)'));assert(app.includes('if(preserve)patchHTML(sheet,markup)'))});
 // Real view functions are exercised with synthetic data, without mounting a browser.
 const viewCtx={window:{NX_BRAND_MARK:'<svg viewBox="0 0 32 32"></svg>'}};vm.createContext(viewCtx);

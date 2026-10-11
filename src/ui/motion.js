@@ -2,6 +2,7 @@
 (() => {
   const preference = matchMedia('(prefers-reduced-motion: reduce)');
   const running = new Set();
+  const animationTargets = new WeakMap();
   const models = new Map(), bindings = new Map();
   const duration = 240, moveDuration = 280, stagger = 16, maxStagger = 32;
   const easing = 'cubic-bezier(.2,.7,.25,1)';
@@ -48,8 +49,15 @@
   const run = (node, frames, length = duration, elapsed = 0, delay = 0) => {
     if (!node || !allowed() || elapsed >= length + delay) return;
     try {
+      for (const previous of [...running]) {
+        if (animationTargets.get(previous) === node) previous.cancel();
+      }
+      const opacity = parseFloat(getComputedStyle(node).opacity);
+      const restOpacity = Number.isFinite(opacity) ? opacity : 1;
+      const values = frames.map(frame => 'opacity' in frame ? {...frame, opacity:frame.opacity * restOpacity} : frame);
       if (page) style(node, 'transition', 'none');
-      const animation = node.animate(frames, {duration: length, delay, easing, fill: 'both'});
+      const animation = node.animate(values, {duration: length, delay, easing, fill: 'both'});
+      animationTargets.set(animation, node);
       animation.currentTime = Math.max(0, elapsed);
       running.add(animation);
       animation.oncancel = () => running.delete(animation);
