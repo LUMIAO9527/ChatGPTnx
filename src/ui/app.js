@@ -3,7 +3,7 @@
 (() => {
   const config = window.NX_CONFIG;
   const math = window.NXMath;
-  const {readEpoch, coalescedRefresh, focusKey, restoreFocus, captureScroll, restoreScroll} = window.NXRuntime;
+  const {readEpoch, coalescedRefresh, focusKey, restoreFocus, captureScroll, restoreScroll, patchHTML} = window.NXRuntime;
   const navigation = readEpoch();
   const poll = coalescedRefresh(performPoll);
   function homeContent() {
@@ -218,7 +218,7 @@
     const wasOnboarding=home.classList.contains('is-onboarding');
     const onboarding=!data.accounts.length&&!data.adding;
     home.classList.toggle('is-onboarding',onboarding);
-    home.innerHTML=onboarding?window.NXViews.onboarding({...viewContext(),busy:busy()}):homeContent();
+    patchHTML(home,onboarding?window.NXViews.onboarding({...viewContext(),busy:busy()}):homeContent());
     if(onboarding||wasOnboarding)setSize('home');
     if(!ui.page)paintNotifications();restoreScroll(home,position);restoreFocus(home,key);feedback.paint();
     if(!ui.page)window.NXMotion?.paint(home);
@@ -388,8 +388,9 @@
     sheet.dataset.page=ui.page;
     const oldError=preserve?sheet.querySelector('#form-error')?.textContent:'';
     const oldFields=[...sheet.querySelectorAll('.field')].map(n=>({node:n,id:n.id,value:n.value,invalid:n.getAttribute('aria-invalid'),focused:n===document.activeElement,start:n.selectionStart,end:n.selectionEnd}));
-    sheet.innerHTML=pageHead(title,headActions)+`<div class="sheet-body ${cls}">${statusRegion()}${body}</div>`+(foot?`<footer class="sheet-foot ${footClass}">${foot}</footer>`:'');
-    if(preserve)for(const saved of oldFields){const node=document.getElementById(saved.id);if(node&&sheet.contains(node)){node.replaceWith(saved.node);const live=saved.node;live.value=saved.value;if(saved.invalid)live.setAttribute('aria-invalid',saved.invalid);if(saved.focused){live.focus({preventScroll:true});try{live.setSelectionRange(saved.start,saved.end);}catch{}}}}
+    const markup=pageHead(title,headActions)+`<div class="sheet-body ${cls}">${statusRegion()}${body}</div>`+(foot?`<footer class="sheet-foot ${footClass}">${foot}</footer>`:'');
+    if(preserve)patchHTML(sheet,markup);else sheet.innerHTML=markup;
+    if(preserve)for(const saved of oldFields){const node=document.getElementById(saved.id);if(node&&sheet.contains(node)){if(node!==saved.node)node.replaceWith(saved.node);const live=saved.node;live.value=saved.value;if(saved.invalid)live.setAttribute('aria-invalid',saved.invalid);if(saved.focused){live.focus({preventScroll:true});try{live.setSelectionRange(saved.start,saved.end);}catch{}}}}
     if(oldError&&sheet.querySelector('#form-error'))sheet.querySelector('#form-error').textContent=oldError;
     paintNotifications();restoreScroll(sheet,position);restoreFocus(sheet,key);feedback.paint();
     if(preserve)window.NXMotion?.paint(sheet);

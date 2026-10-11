@@ -3,9 +3,9 @@
   const preference = matchMedia('(prefers-reduced-motion: reduce)');
   const running = new Set();
   const models = new Map(), bindings = new Map();
-  const duration = 240, stagger = 16, maxStagger = 32;
+  const duration = 240, moveDuration = 280, stagger = 16, maxStagger = 32;
   const easing = 'cubic-bezier(.2,.7,.25,1)';
-  let enabled = true, page = null, layers = null, frameId = 0, lastTime = 0;
+  let enabled = true, page = null, layers = null, frameId = 0;
   const allowed = () => enabled && !preference.matches && typeof Element.prototype.animate === 'function';
   const paintPreference = () => {
     document.documentElement.dataset.motion = enabled && !preference.matches ? 'on' : 'off';
@@ -16,17 +16,23 @@
     const saved = bindings.get(node);
     if (!saved.has(property)) saved.set(property, [node.style.getPropertyValue(property), node.style.getPropertyPriority(property)]);
     node.style.setProperty(property, value);
+    node.__nxMotionOwned = true;
   };
-  const restore = () => {
-    for (const [node, properties] of bindings) {
-      for (const [property, [value, priority]] of properties) {
+  const restoreNode = node => {
+    const properties = bindings.get(node);
+    if (properties) {
+      // Remove animated values before restoring CSS transitions. Reversing
+      // this order can start a second, unintended settling transition.
+      const ordered = [...properties].sort(([a], [b]) => (a === 'transition') - (b === 'transition'));
+      for (const [property, [value, priority]] of ordered) {
         if (value) node.style.setProperty(property, value, priority);
         else node.style.removeProperty(property);
       }
       delete node.__nxMotionOwned;
+      bindings.delete(node);
     }
-    bindings.clear();
   };
+  const restore = () => { for (const node of [...bindings.keys()]) restoreNode(node); };
   const cancelAnimations = () => {
     const animations = [...running];
     running.clear();
@@ -42,10 +48,14 @@
   const run = (node, frames, length = duration, elapsed = 0, delay = 0) => {
     if (!node || !allowed() || elapsed >= length + delay) return;
     try {
-      const animation = node.animate(frames, {duration: length, delay, easing, fill: 'backwards'});
+      if (page) style(node, 'transition', 'none');
+      const animation = node.animate(frames, {duration: length, delay, easing, fill: 'both'});
       animation.currentTime = Math.max(0, elapsed);
       running.add(animation);
-      animation.onfinish = animation.oncancel = () => running.delete(animation);
+      animation.oncancel = () => running.delete(animation);
+      animation.onfinish = () => {
+        if (!page) { running.delete(animation); animation.cancel(); }
+      };
     } catch { /* An unavailable animation must never prevent the action. */ }
   };
   const fade = [{opacity: 0}, {opacity: 1}];
@@ -55,14 +65,22 @@
     const decay = Math.exp(-frequency * elapsed);
     return [target + (delta + c * elapsed) * decay, (velocity - frequency * c * elapsed) * decay];
   };
-  const settled = model => Object.keys(model.goal).every(key =>
-    Math.abs(model.pose[key] - model.goal[key]) < (key === 'o' || key === 's' ? .001 : .08) &&
-    Math.abs(model.velocity[key]) < (key === 'o' || key === 's' ? .025 : 1));
+  // Endpoint-corrected spring: retains interruption velocity, reaches the
+  // exact destination with zero velocity at 280 ms, and has no long tail.
+  const boundedSpring = (value, velocity, target, elapsed, length) => {
+    if (elapsed >= length) return [target, 0];
+    const u = Math.max(0, elapsed / length);
+    const [position, speed] = spring(value, velocity, target, Math.max(0, elapsed));
+    const [endPosition, endSpeed] = spring(value, velocity, target, length);
+    const residual = endPosition - target;
+    return [position - residual * (3*u*u - 2*u*u*u) - endSpeed * length * (u*u*u - u*u),
+      speed - residual / length * (6*u - 6*u*u) - endSpeed * (3*u*u - 2*u)];
+  };
   const advance = now => {
-    const elapsed = Math.max(0, (now - lastTime) / 1000); lastTime = now;
     for (const model of models.values()) {
+      const elapsed = Math.max(0, (now - model.start) / 1000);
       for (const key of Object.keys(model.goal)) {
-        [model.pose[key], model.velocity[key]] = spring(model.pose[key], model.velocity[key], model.goal[key], elapsed, model.frequency || 32);
+        [model.pose[key], model.velocity[key]] = boundedSpring(model.origin[key], model.initialVelocity[key], model.goal[key], elapsed, model.length / 1000);
       }
     }
   };
@@ -88,7 +106,11 @@
   const rect = node => {
     if (!node || !layers) return null;
     const box = node.getBoundingClientRect(), app = layers.app.getBoundingClientRect();
-    const sx = app.width / layers.app.clientWidth, sy = app.height / layers.app.clientHeight;
+    // clientWidth/clientHeight round to integers. Native Windows scaling
+    // produces fractional CSS pixels; using those integers shifts proxies.
+    const css = getComputedStyle(layers.app);
+    const sx = app.width / (parseFloat(css.width) || layers.app.clientWidth);
+    const sy = app.height / (parseFloat(css.height) || layers.app.clientHeight);
     if (!(sx > 0 && sy > 0 && box.width > 0 && box.height > 0)) return null;
     return {x:(box.left + box.width / 2 - app.left) / sx, y:(box.top + box.height / 2 - app.top) / sy, w:box.width / sx, h:box.height / sy};
   };
@@ -115,14 +137,13 @@
     }
     node.setAttribute('aria-hidden', 'true'); node.inert = true;
   };
-  const visual = (node, kind) => {
+  const visual = node => {
     const css = getComputedStyle(node), box = rect(node);
     if (!box) return null;
-    const clone = kind === 'name' ? document.createElement('span') : node.cloneNode(true);
-    if (kind === 'name') clone.textContent = node.textContent;
+    const clone = node.cloneNode(true);
     sanitize(clone);
     for (const property of ['color','background-color','background-image','border','border-radius','font-family','font-size','font-weight','font-style','line-height','letter-spacing','text-align','text-overflow','align-items','justify-content']) clone.style.setProperty(property, css.getPropertyValue(property));
-    Object.assign(clone.style, {position:'absolute', left:'0', top:'0', margin:'0', padding:'0', width:`${box.w}px`, height:`${box.h}px`, display:kind === 'name' ? 'block' : 'flex', whiteSpace:'nowrap', overflow:'hidden', pointerEvents:'none', transformOrigin:'0 0', transition:'none', animation:'none', opacity:'1'});
+    Object.assign(clone.style, {position:'absolute', left:'0', top:'0', margin:'0', padding:'0', width:`${box.w}px`, height:`${box.h}px`, display:'flex', whiteSpace:'nowrap', overflow:'hidden', pointerEvents:'none', transformOrigin:'0 0', transition:'none', animation:'none', opacity:'1'});
     return {node:clone, box, font:parseFloat(css.fontSize) || 14};
   };
   const upsert = (key, kind, initial, goal, factory, live) => {
@@ -136,6 +157,15 @@
       models.set(key, model);
       if (model.node) layers.front.append(model.node);
     }
+    const retarget = model.navigation !== page || Object.keys(goal).some(property => Math.abs(model.goal[property] - goal[property]) > .01);
+    if (retarget) {
+      if (model.navigation && model.kind === 'avatar') {
+        const appearance = factory();
+        if (appearance) { model.node.remove(); Object.assign(model, appearance); layers.front.append(model.node); }
+      }
+      model.origin = {...model.pose}; model.initialVelocity = {...model.velocity};
+      model.start = performance.now(); model.length = moveDuration; model.navigation = page;
+    }
     model.goal = goal; model.live = live;
     page.active.add(key);
     return model;
@@ -143,17 +173,19 @@
   const bindShared = surface => {
     const source = page.source, target = source && findAnchor(surface, source.identity);
     if (source && target) {
-      for (const kind of ['avatar', 'name']) {
+      page.sharedCard = target.root;
+      // Text always remains the real destination text. A scaled text clone
+      // cannot preserve the native glyph baseline, weight and ellipsis.
+      for (const kind of ['avatar']) {
         const from = source[kind], to = target[kind];
-        if (!from || !to || (kind === 'name' && from.text !== to.textContent)) continue;
+        if (!from || !to) continue;
         const box = rect(to); if (!box) continue;
-        const font = parseFloat(getComputedStyle(to).fontSize) || from.font;
-        const start = {...from.box, o:1, ...(kind === 'name' ? {s:1} : {})};
-        const goal = {...box, o:1, ...(kind === 'name' ? {s:font / from.font} : {})};
+        const start = {...from.box, o:1};
+        const goal = {...box, o:1};
         const key = source.identity + ':' + kind;
-        // An existing clone keeps its original font size while its target changes.
-        if (kind === 'name' && models.has(key)) goal.s = font / models.get(key).font;
-        const model = upsert(key, kind, start, goal, () => from, to);
+        // Use the destination appearance so the final handoff has the exact
+        // same font, dimensions and colors as the real avatar.
+        const model = upsert(key, kind, start, goal, () => visual(to), to);
         if (model) style(to, 'opacity', '0');
       }
     }
@@ -168,13 +200,13 @@
     }
   };
   const contentDelay = () => {
-    const moving = [...models.values()].filter(model => model.kind === 'avatar' || model.kind === 'name');
+    const moving = [...models.values()].filter(model => model.kind === 'avatar');
     // New labels appear after the shared identity has cleared their path.
     for (let delay = 0; delay <= 200; delay += 10) {
       if (moving.every(model => {
         const x = spring(model.pose.x, model.velocity.x, model.goal.x, delay / 1000)[0];
         const y = spring(model.pose.y, model.velocity.y, model.goal.y, delay / 1000)[0];
-        return Math.hypot(x - model.goal.x, y - model.goal.y) <= (model.kind === 'name' ? 8 : 16);
+        return Math.hypot(x - model.goal.x, y - model.goal.y) <= 16;
       })) return delay;
     }
     return 200;
@@ -186,11 +218,6 @@
       const number = value => Number(value.toFixed(4));
       if (model.kind === 'live') {
         style(node, 'transform', `translate(${number(p.x - model.goal.x + (model.goal.w - p.w) / 2)}px,${number(p.y - model.goal.y + (model.goal.h - p.h) / 2)}px) scale(${number(p.w / model.goal.w)},${number(p.h / model.goal.h)})`);
-      } else if (model.kind === 'name') {
-        node.style.width = `${p.w / p.s}px`;
-        node.style.height = `${p.h / p.s}px`; node.style.lineHeight = `${p.h / p.s}px`;
-        node.style.transform = `translate(${number(p.x - p.w / 2)}px,${number(p.y - p.h / 2)}px) scale(${number(p.s)})`;
-        node.style.opacity = String(Math.max(0, Math.min(1, p.o)));
       } else {
         node.style.transform = `translate(${number(p.x - p.w / 2)}px,${number(p.y - p.h / 2)}px) scale(${number(p.w / model.box.w)},${number(p.h / model.box.h)})`;
         node.style.opacity = String(Math.max(0, Math.min(1, p.o)));
@@ -202,7 +229,7 @@
     if (!page || !allowed()) { stop(); return; }
     advance(now); renderModels();
     const elapsed = now - page.start;
-    if (elapsed > 1100 || (elapsed >= page.endElapsed && [...models.values()].every(settled))) { finish(); return; }
+    if (elapsed > 1100 || (elapsed >= page.endElapsed && [...models.values()].every(model => now >= model.start + model.length))) { finish(); return; }
     frameId = requestAnimationFrame(frame);
   };
   const begin = (surface, direction = 1, preferredIdentity = null) => {
@@ -211,14 +238,12 @@
       const now = performance.now(); advance(now); renderModels();
       const identity = surface.querySelector('.current-card')?.dataset.motionIdentity || null;
       const anchor = findAnchor(surface, preferredIdentity) || findAnchor(surface, identity);
-      const source = anchor && {identity:anchor.identity, avatar:anchor.avatar && visual(anchor.avatar, 'avatar'), name:anchor.name && visual(anchor.name, 'name')};
-      if (source?.name) source.name.text = anchor.name.textContent;
+      const source = anchor && {identity:anchor.identity, avatar:anchor.avatar && {box:rect(anchor.avatar)}};
       const filterNode = surface.querySelector('.usage-filter');
       const filter = visible(filterNode, surface) ? rect(filterNode) : null;
       // Retain only the moving identity; never clone an outgoing page.
       restore(); cancelAnimations();
-      page = {start:now, direction, identity, source, filter, contentDelay:null, endElapsed:duration, active:new Set()};
-      lastTime = now;
+      page = {start:now, direction, identity, source, filter, contentDelay:null, endElapsed:duration, active:new Set(), sharedCard:null};
     } catch { stop(); }
   };
   const paint = surface => {
@@ -227,7 +252,7 @@
     if (elapsed >= 1100) { stop(); return; }
     // Async data may rebuild the page during its entrance. Resume the same clock.
     try {
-      advance(performance.now()); restore(); page.active.clear();
+      advance(performance.now()); cancelAnimations(); restore(); page.active.clear();
       bindShared(surface); renderModels();
       page.contentDelay ??= contentDelay();
     } catch { stop(); return; }
@@ -245,8 +270,14 @@
     for (const node of body.children) {
       if (node.hidden || node.__nxMotionOwned || node.matches('.header, .status-region, .status-stack')) continue;
       if (node.matches('.current-card')) {
-        // Matching account cards stay still; changed identities fade in place.
-        if (!page.identity || node.dataset.motionIdentity !== page.identity) run(node, fade, duration, elapsed, page.contentDelay);
+        // A moving avatar needs an opaque parent at handoff. Only the real
+        // labels fade; matching cards and their backgrounds remain fixed.
+        if (node === page.sharedCard) {
+          if (!page.identity || node.dataset.motionIdentity !== page.identity) {
+            run(node.querySelector('.identity-copy'), fade, duration, elapsed, page.contentDelay);
+            run(node.querySelector('.quota-bars'), fade, duration, elapsed, page.contentDelay);
+          }
+        } else if (!page.identity || node.dataset.motionIdentity !== page.identity) run(node, fade, duration, elapsed, page.contentDelay);
       } else if (node.matches('.usage-filter')) {
         run(node, fade, duration, elapsed, page.contentDelay);
       } else {

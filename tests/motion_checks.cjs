@@ -6,7 +6,7 @@ const html=fs.readFileSync(path.join(root,'_wip/build/resources/panel.html'),'ut
 const scripts=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(m=>m[1]);
 assert.equal(scripts.length,1);scripts.forEach(s=>new vm.Script(s));
 const source=fs.readFileSync(path.join(root,'src/ui/motion.js'),'utf8');
-const code=source.replace('  window.NXMotion = {','  window.__motionTest={models,bindings,spring,get page(){return page},get layers(){return layers}};\n  window.NXMotion = {');
+const code=source.replace('  window.NXMotion = {','  window.__motionTest={models,bindings,spring,boundedSpring,get page(){return page},get layers(){return layers}};\n  window.NXMotion = {');
 assert.notEqual(code,source);
 const kebab=p=>String(p).replace(/[A-Z]/g,c=>'-'+c.toLowerCase());
 function style(){const values=new Map(),priorities=new Map(),api={setProperty(p,v,priority=''){values.set(p,String(v));priorities.set(p,priority)},getPropertyValue:p=>values.get(p)||'',getPropertyPriority:p=>priorities.get(p)||'',removeProperty(p){values.delete(p);priorities.delete(p)},copy(){const s=style();for(const [k,v]of values)s.setProperty(k,v,priorities.get(k));return s}};return new Proxy(api,{get:(t,p)=>p in t?t[p]:t.getPropertyValue(kebab(p)),set:(t,p,v)=>{t.setProperty(kebab(p),v);return true}})}
@@ -32,7 +32,7 @@ class Element{
   animate(frames,options){const a={frames,options,clock:time,elapsed:0,cancelled:false,finished:false,get currentTime(){return this.elapsed+time-this.clock},set currentTime(v){this.elapsed=v;this.clock=time},cancel(){this.cancelled=true;animations.delete(this);this.oncancel?.()}};this.animateCalls.push(a);animations.add(a);return a}
 }
 const easing=p=>{let lo=0,hi=1;for(let i=0;i<30;i++){const t=(lo+hi)/2,x=3*(1-t)**2*t*.2+3*(1-t)*t*t*.25+t**3;if(x<p)lo=t;else hi=t}const t=(lo+hi)/2;return 3*(1-t)**2*t*.7+3*(1-t)*t*t+t**3};
-function computed(n){return new Proxy({getPropertyValue(p){if(p==='visibility'){for(let a=n;a;a=a.parentNode)if(a.id==='home'&&a.inert&&html.includes('#home[inert] { visibility: hidden; }'))return'hidden';return n.style.visibility||'visible'}if(p==='display'&&n.hidden)return'none';if(p==='opacity'){const a=n.animateCalls.filter(a=>!a.cancelled&&!a.finished&&a.frames.some(f=>'opacity'in f)).at(-1);if(a){const elapsed=a.currentTime-(a.options.delay||0);if(elapsed<0&&a.options.fill==='backwards')return String(a.frames[0].opacity);if(elapsed>=0&&elapsed<a.options.duration){const ratio=easing(elapsed/a.options.duration);return String(a.frames[0].opacity+(a.frames.at(-1).opacity-a.frames[0].opacity)*ratio)}}}return n.style.getPropertyValue(p)||n._css[p]||''}},{get:(t,p)=>p in t?t[p]:t.getPropertyValue(kebab(p))})}
+function computed(n){return new Proxy({getPropertyValue(p){if(p==='visibility'){for(let a=n;a;a=a.parentNode)if(a.id==='home'&&a.inert&&html.includes('#home[inert] { visibility: hidden; }'))return'hidden';return n.style.visibility||'visible'}if(p==='display'&&n.hidden)return'none';if(p==='opacity'){const a=n.animateCalls.filter(a=>!a.cancelled&&!a.finished&&a.frames.some(f=>'opacity'in f)).at(-1);if(a){const elapsed=a.currentTime-(a.options.delay||0);if(elapsed<0&&['backwards','both'].includes(a.options.fill))return String(a.frames[0].opacity);if(elapsed>=0&&elapsed<a.options.duration){const ratio=easing(elapsed/a.options.duration);return String(a.frames[0].opacity+(a.frames.at(-1).opacity-a.frames[0].opacity)*ratio)}}}return n.style.getPropertyValue(p)||n._css[p]||''}},{get:(t,p)=>p in t?t[p]:t.getPropertyValue(kebab(p))})}
 function setup(scale=1,media=false){
   time=0;sequence=0;rafs=new Map();animations=new Set();
   const pixel=(x,y,w,h)=>({left:100+x*scale,top:100+y*scale,width:w*scale,height:h*scale});
@@ -51,11 +51,11 @@ function setup(scale=1,media=false){
 }
 function drawn(node){for(let a=node;a;a=a.parentNode)if(a.hidden||computed(a).visibility==='hidden'||computed(a).display==='none'||Number(computed(a).opacity)<.001)return false;return true}
 const labels=e=>e.app.querySelectorAll('*').filter(n=>n.textContent&&drawn(n)).map(n=>n.textContent);
-function clean(e){const roots=e.app.children.filter(n=>n.id==='home'||n.id==='sheet');assert.equal(roots.filter(drawn).length,1);roots.forEach(n=>assert.notEqual(computed(n).backgroundColor,'transparent'));const layer=e.test.layers?.front;assert.equal(e.app.querySelectorAll('.nx-motion-layer').length,layer?1:0);if(layer){assert(layer.inert);assert.equal(layer.style.pointerEvents,'none');assert.equal(layer.getAttribute('aria-hidden'),'true');assert(layer.children.length<=2);assert.equal(layer.querySelectorAll('.sheet, .sheet-head, .current-card, .roster, .content').length,0);for(const node of[layer,...layer.querySelectorAll('*')]){assert(!node.id);assert.equal(node.getAttribute('data-action'),null)}}assert(e.test.models.size<=3);assert(rafs.size<=1)}
+function clean(e){const roots=e.app.children.filter(n=>n.id==='home'||n.id==='sheet');assert.equal(roots.filter(drawn).length,1);roots.forEach(n=>assert.notEqual(computed(n).backgroundColor,'transparent'));const layer=e.test.layers?.front;assert.equal(e.app.querySelectorAll('.nx-motion-layer').length,layer?1:0);if(layer){assert(layer.inert);assert.equal(layer.style.pointerEvents,'none');assert.equal(layer.getAttribute('aria-hidden'),'true');assert(layer.children.length<=1);assert.equal(layer.querySelectorAll('.sheet, .sheet-head, .current-card, .roster, .content').length,0);for(const node of[layer,...layer.querySelectorAll('*')]){assert(!node.id);assert.equal(node.getAttribute('data-action'),null)}}assert(e.test.models.size<=2);assert(rafs.size<=1)}
 let checks=0;const check=(label,fn)=>{fn();checks++;console.log('PASS '+label)};
 function entering(){const e=setup(),old=e.surface('home','a');e.mount(old.node);e.motion.begin(old.node,1,'b');const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);return{e,old,next}}
-check('persistent home and moving identity never overlay multiple pages',()=>{const{e,old,next}=entering();assert(e.app.children.includes(old.node));assert.equal(computed(old.node).visibility,'hidden');assert.equal(e.test.models.size,2);assert(e.test.page.contentDelay>0);for(const t of[0,16,33,67,100,140,200,300,420]){e.tick(t-time);clean(e);const text=labels(e);assert(!text.includes('home'));assert(!text.includes('Account a'));assert.equal(text.filter(x=>x==='Account b').length,1);if(e.test.page&&t<e.test.page.contentDelay)assert.equal(Number(computed(next.content).opacity),0)}e.tick(800);assert.equal(e.test.layers,null);assert.equal(rafs.size,0);assert.equal(animations.size,0)});
-check('detail to confirmation retains only two small proxies',()=>{const{e,next}=entering();e.tick(45);const confirm=e.surface('confirm','b');confirm.profile.root.className='confirm-account';confirm.profile.root.setAttribute('data-email','b');confirm.profile.avatar._box=e.pixel(35,244,40,40);confirm.profile.name._box=e.pixel(85,247,66,18);e.motion.begin(next.node,1,'b');e.mount(confirm.node);e.motion.paint(confirm.node);for(const dt of[0,16,34,50,80,100,200]){e.tick(dt);clean(e);assert.equal(labels(e).filter(x=>x==='Account b').length,1);assert(!labels(e).includes('detail'))}e.motion.stop()});
+check('persistent home and moving identity never overlay multiple pages',()=>{const{e,old,next}=entering();assert(e.app.children.includes(old.node));assert.equal(computed(old.node).visibility,'hidden');assert.equal(e.test.models.size,1);assert(e.test.page.contentDelay>0);for(const t of[0,16,33,67,100,140,200,300,420]){e.tick(t-time);clean(e);const text=labels(e);assert(!text.includes('home'));assert(!text.includes('Account a'));assert(text.filter(x=>x==='Account b').length<=1);if(e.test.page&&t<e.test.page.contentDelay)assert.equal(Number(computed(next.content).opacity),0)}e.tick(800);assert.equal(e.test.layers,null);assert.equal(rafs.size,0);assert.equal(animations.size,0)});
+check('detail to confirmation retains one avatar proxy and real text',()=>{const{e,next}=entering();e.tick(45);const confirm=e.surface('confirm','b');confirm.profile.root.className='confirm-account';confirm.profile.root.setAttribute('data-email','b');confirm.profile.avatar._box=e.pixel(35,244,40,40);confirm.profile.name._box=e.pixel(85,247,66,18);e.motion.begin(next.node,1,'b');e.mount(confirm.node);e.motion.paint(confirm.node);for(const dt of[0,16,34,50,80,100,200]){e.tick(dt);clean(e);assert(labels(e).filter(x=>x==='Account b').length<=1);assert(!labels(e).includes('detail'))}e.motion.stop()});
 check('interrupted return preserves pose and velocity',()=>{const{e,next}=entering();e.tick(80);const m=e.test.models.get('b:avatar'),y=m.pose.y,v=m.velocity.y;e.motion.begin(next.node,-1);const back=e.surface('home','a');e.mount(back.node);e.motion.paint(back.node);assert.equal(e.test.models.get('b:avatar'),m);assert.equal(m.pose.y,y);assert.equal(m.velocity.y,v);assert.equal(m.goal.y,300);e.tick(1);assert(m.pose.y<y);e.tick(900);clean(e);assert.equal(rafs.size,0)});
 check('asynchronous rebuild resumes one clock and does not replay',()=>{const{e}=entering();e.tick(75);const m=e.test.models.get('b:avatar'),y=m.pose.y,v=m.velocity.y,start=e.test.page.start,delay=e.test.page.contentDelay;const rebuilt=e.surface('detail','b');e.mount(rebuilt.node);e.motion.paint(rebuilt.node);assert.equal(e.test.models.get('b:avatar'),m);assert.equal(m.pose.y,y);assert.equal(m.velocity.y,v);assert.equal(m.live,rebuilt.profile.avatar);assert.equal(e.test.page.start,start);assert.equal(e.test.page.contentDelay,delay);e.tick(900);const late=e.surface('detail','b');e.mount(late.node);e.motion.paint(late.node);assert.equal(e.test.layers,null);assert.equal(late.content.animateCalls.length,0);clean(e)});
 check('home details and personal usage keep matching cards stationary',()=>{const e=setup(),old=e.surface('home','b');e.mount(old.node);e.motion.begin(old.node,1,'b');const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);assert.equal(e.test.models.size,0);assert.equal(e.test.page.contentDelay,0);assert.equal(next.profile.root.animateCalls.length,0);const usage=e.surface('usage','b');e.motion.begin(next.node,1,'b');e.mount(usage.node);e.motion.paint(usage.node);assert.equal(e.test.models.size,0);assert.equal(usage.profile.root.animateCalls.length,0);e.motion.stop()});
@@ -70,7 +70,55 @@ check('content phases cap at 32 milliseconds and ignore offscreen content',()=>{
 check('time range feedback animates one chart and keeps totals fixed',()=>{const e=setup(),old=e.surface('usage','b');e.mount(old.node);const summary=e.el('section','usage-summary',14,220,299,110),total=e.el('div','usage-total',28,224,120,28),chart=e.el('div','trend',28,268,272,48);summary.append(total,chart);old.body.append(summary);e.motion.reveal(summary);assert.equal(summary.animateCalls.length,0);assert.equal(total.animateCalls.length,0);assert.equal(chart.animateCalls.length,1);assert.equal(chart.animateCalls[0].frames[0].opacity,.65);assert.equal(chart.animateCalls[0].options.duration,150);e.tick(200);assert.equal(animations.size,0);e.motion.begin(old.node,1,'b');const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);e.motion.reveal(summary);assert.equal(chart.animateCalls.length,1);e.motion.stop();e.motion.setEnabled(false);e.motion.reveal(summary);assert.equal(chart.animateCalls.length,1)});
 check('return uses a smaller offset and resumes after data rebuild',()=>{const e=setup(),old=e.surface('detail','b');e.mount(old.node);e.motion.begin(old.node,-1,'b');const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);assert.equal(next.content.animateCalls.at(-1).frames[0].transform,'translateY(-3px)');e.tick(30);const rebuilt=e.surface('detail','b');e.mount(rebuilt.node);e.motion.paint(rebuilt.node);assert.equal(rebuilt.content.animateCalls.at(-1).currentTime,30);e.tick(260);assert.equal(e.test.page,null);assert.equal(animations.size,0);clean(e)});
 check('hiding the panel and unloading remove temporary layers',()=>{const{e,next}=entering();e.tick(30);e.document.hidden=true;e.document.emit('visibilitychange');assert.equal(rafs.size,0);assert.equal(animations.size,0);assert.equal(e.test.layers,null);assert.equal(next.profile.avatar.style.opacity,'');clean(e);e.document.hidden=false;e.motion.begin(next.node,-1);const back=e.surface('home','a');e.mount(back.node);e.motion.paint(back.node);e.window.emit('pagehide');assert.equal(rafs.size,0);assert.equal(e.test.layers,null);clean(e)});
-check('production embeds the version and excludes demo controls and accounts',()=>{assert(html.includes('"version": "1.0.2"'));for(const s of['data-preview-density','data-preview-motion','layout-preview-tools','@example.com'])assert(!html.includes(s));assert.equal(html.split('window.NXMotion =').length-1,1);const app=fs.readFileSync(path.join(root,'src/ui/app.js'),'utf8');assert(app.includes('window.nxHidden=()=>{window.NXMotion?.stop();'));assert(app.includes('closeSheet(false)'));assert(app.includes('restoreScroll(sheet,saved.scroll);restoreFocus(sheet,saved.focus)'))});
+check('account names always use the real unscaled and unclipped element',()=>{
+  const {e,next}=entering();
+  for(const dt of [0,70,90,120,180]){
+    e.tick(dt);
+    assert.equal(next.profile.name.style.transform,'');
+    assert.equal(next.profile.name.style.opacity,'');
+    assert.equal(next.profile.name.style.width,'');
+    assert.equal(next.profile.name.style.lineHeight,'');
+    assert(![...e.test.models.values()].some(m=>m.kind==='name'));
+    assert(!(e.test.layers?.front.querySelectorAll('*')||[]).some(n=>n.textContent==='Account b'));
+    clean(e);
+  }
+});
+check('shared elements reach exact bounds at 280ms without a settling tail',()=>{
+  const {e,next}=entering(),model=e.test.models.get('b:avatar');
+  e.tick(150);e.motion.paint(next.node);assert.equal(model.start,0);
+  e.tick(130);
+  for(const key of Object.keys(model.goal)){assert.equal(model.pose[key],model.goal[key]);assert.equal(model.velocity[key],0);}
+  const finished={...model.pose};e.tick(30);assert.deepEqual({...model.pose},finished);
+  e.motion.paint(next.node);assert.equal(model.start,0);assert.deepEqual({...model.pose},finished);
+  e.tick(500);assert.equal(e.test.layers,null);assert.equal(rafs.size,0);
+});
+check('bounded spring retains interruption velocity and has an exact endpoint',()=>{
+  const e=setup();
+  for(const speed of [-700,0,400]){
+    assert.deepEqual(Array.from(e.test.boundedSpring(200,speed,10,0,.28)),[200,speed]);
+    assert.deepEqual(Array.from(e.test.boundedSpring(200,speed,10,.28,.28)),[10,0]);
+    const [position,velocity]=e.test.boundedSpring(200,speed,10,.27999,.28);
+    assert(Math.abs(position-10)<.0001);assert(Math.abs(velocity)<.01);
+  }
+});
+check('fractional native CSS dimensions do not shift the avatar proxy',()=>{
+  const e=setup();e.app._box.width=326.857142857;e.app.clientWidth=327;
+  e.app._css.width='326.857142857px';e.app._css.height='458px';
+  const old=e.surface('home','a');e.mount(old.node);e.motion.begin(old.node,1,'b');
+  const next=e.surface('detail','b');next.profile.avatar._css['font-size']='15px';e.mount(next.node);e.motion.paint(next.node);
+  const model=e.test.models.get('b:avatar');
+  assert(Math.abs(model.goal.x-52)<1e-9);assert.equal(model.goal.w,40);
+  assert.equal(model.node.style.fontSize,'15px');
+  e.tick(280);assert.equal(model.pose.x,52);assert.equal(model.pose.w,40);e.motion.stop();
+});
+check('background paints cancel prior animation before measuring final bounds',()=>{
+  const e=setup(),old=e.surface('usage','all',true);e.mount(old.node);e.motion.begin(old.node,1,'b');
+  const next=e.surface('usage','b');e.mount(next.node);e.motion.paint(next.node);e.tick(60);
+  const model=e.test.models.get('usage-filter'),goal={...model.goal},start=model.start;
+  e.motion.paint(next.node);assert.deepEqual({...model.goal},goal);assert.equal(model.start,start);
+  assert.equal(next.filter.children.filter(n=>n.inert).length,0);e.tick(800);clean(e);
+});
+check('production embeds the version and excludes demo controls and accounts',()=>{assert(html.includes('"version": "1.0.2"'));for(const s of['data-preview-density','data-preview-motion','layout-preview-tools','@example.com'])assert(!html.includes(s));assert.equal(html.split('window.NXMotion =').length-1,1);const app=fs.readFileSync(path.join(root,'src/ui/app.js'),'utf8');assert(app.includes('window.nxHidden=()=>{window.NXMotion?.stop();'));assert(app.includes('closeSheet(false)'));assert(app.includes('restoreScroll(sheet,saved.scroll);restoreFocus(sheet,saved.focus)'));assert(app.includes('if(preserve)patchHTML(sheet,markup)'))});
 // Real view functions are exercised with synthetic data, without mounting a browser.
 const viewCtx={window:{NX_BRAND_MARK:'<svg viewBox="0 0 32 32"></svg>'}};vm.createContext(viewCtx);
 for(const file of ['components.js','usage.js','views/usage.js','views/accounts.js'])vm.runInContext(fs.readFileSync(path.join(root,'src/ui',file),'utf8'),viewCtx);
