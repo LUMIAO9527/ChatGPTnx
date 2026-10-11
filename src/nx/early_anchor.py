@@ -21,6 +21,7 @@ from .history_store import latest_database, read_only
 from .task_metadata import task_metadata
 from .desktop import chatgpt_running
 from . import app_bridge
+from .version import APP_VERSION
 
 MODEL = 'gpt-6-luna'
 WINDOW = 18000
@@ -42,7 +43,7 @@ class Backend:
     def __init__(self, token, account_id):
         self.may_have_run = False
         self.headers = {'Authorization': 'Bearer ' + token, 'ChatGPT-Account-Id': account_id,
-                        'User-Agent': 'ChatGPTnx/1.0.1', 'Originator': 'ChatGPTnx'}
+                        'User-Agent': f'ChatGPTnx/{APP_VERSION}', 'Originator': 'ChatGPTnx'}
         proxy = urllib.request.getproxies().get('https')
         if proxy and not urllib.request.proxy_bypass('chatgpt.com'):
             url = urllib.parse.urlsplit(proxy if '://' in proxy else 'http://' + proxy)

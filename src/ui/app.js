@@ -134,10 +134,10 @@
     const top=detail
       ? `<div class="current-identity detail-profile">${identity(a,note)}${tool('refresh','refresh-one','刷新此账号额度',`data-email="${esc(a.email)}" ${disabled()}`)}</div>`
       : `<button class="current-identity" data-action="detail" data-email="${esc(a.email)}">${identity(a,note)}${icon('chevron')}</button>`;
-    return `<section class="card current-card${detail?' detail-overview':''}">${top}${bars(a,detail)}</section>`;
+    return `<section class="card current-card${detail?' detail-overview':''}" data-motion-identity="${esc(a?.email||'')}">${top}${bars(a,detail&&!a.archived)}</section>`;
   }
   function header() {
-    return `<header class="header"><div class="brand pywebview-drag-region">${brandMark()}ChatGPTnx${config.demo?'<span class="demo-tag">演示</span>':''}</div>${tool('chart','usage-all','个人用量：总览与分账号')}${tool('settings','settings','设置')}</header>`;
+    return `<header class="header"><div class="brand pywebview-drag-region">${brandMark()}ChatGPTnx${config.demo?'<span class="demo-tag">演示</span>':''}</div>${tool('chart','usage-all','用量总览与分账号')}${tool('settings','settings','设置')}</header>`;
   }
   function relayButton(a=relay()) {
     if (!data.accounts.length) return '';
@@ -221,6 +221,7 @@
     home.innerHTML=onboarding?window.NXViews.onboarding({...viewContext(),busy:busy()}):homeContent();
     if(onboarding||wasOnboarding)setSize('home');
     if(!ui.page)paintNotifications();restoreScroll(home,position);restoreFocus(home,key);feedback.paint();
+    if(!ui.page)window.NXMotion?.paint(home);
   }
   function render() {
     const focused=document.activeElement, key=focusKey(focused);
@@ -233,6 +234,7 @@
     return `<header class="sheet-head">${tool('back','back','返回')}<h2 id="sheet-title" tabindex="-1">${esc(title)}</h2>${actions}${config.demo?'<span class="demo-tag">演示</span>':''}</header>`;
   }
   function show(page, target=null, push=true, saved=null) {
+    window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','edit','confirm','remove','reauth'].includes(page)?target:null);
     resetConfirmation=null;
     const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message'};
     const initial=page;
@@ -254,8 +256,11 @@
     setSize('workspace');renderSheet(false);
     if(saved){restoreScroll(sheet,saved.scroll);restoreFocus(sheet,saved.focus);}
     if(!saved?.focus) $('#sheet-title')?.focus({preventScroll:true});
+    window.NXMotion?.paint(sheet);
   }
-  function closeSheet() {
+  function closeSheet(animate=true) {
+    if(ui.page&&animate)window.NXMotion?.begin(sheet, -1);
+    else window.NXMotion?.stop();
     resetConfirmation=null;
     feedback.clear();clearNotification();navigation.invalidate();ui.recording=null;
     ui.page=null;ui.email=null;ui.history=[];sheet.hidden=true;home.inert=false;
@@ -326,7 +331,7 @@
     let title='',body='',foot='',cls='',headActions='',footClass='';
     switch(ui.page){
       case 'usage':
-        title='个人用量';body=usageContent();cls='usage-body';foot='';break;
+        title=ui.scope==='all'?'用量总览':'个人用量';body=usageContent();cls='usage-body usage-report '+(ui.scope==='all'?'all-usage':'personal-usage');foot='';break;
       case 'quota-overview':
         title='额度总览';body=quotaOverviewContent();cls='quota-overview-body';break;
       case 'detail': {
@@ -342,7 +347,7 @@
           `<div class="detail-actions is-current"><button class="btn primary current-status" data-action="home" aria-label="当前使用，返回首页">${icon('check')}当前使用</button></div>`:
           `<div class="detail-actions"><button class="btn primary" data-action="pick" ${attr} ${!waiting&&!picked&&(busy()||data.adding||data.reauth)?'disabled':''} aria-pressed="${waiting||picked}" title="${exhausted&&!waiting?'额度恢复并核验后自动接力':pickLabel}">${icon(pickIcon)}${pickLabel}</button><button class="btn secondary" data-action="switch" ${attr} ${busy()||data.adding?'disabled':''}>切换到此账号 ${icon('arrow')}</button></div>`;
         const archive=isCurrent?`<button class="danger-row unavailable" disabled title="切换到其他账号后可归档">${icon('archive')}归档账号</button>`:`<button class="danger-row" data-action="remove" ${attr}>${icon('archive')}归档账号</button>`;
-        body=`${accountCard(a,true,isCurrent?'当前账号':'')}${actionArea}${link('chart','个人用量','usage-account',attr)}<div class="detail-compact">${window.NXEditors.account(viewContext(),a)}${resetCredits(a)}${detail('Credits',creditValue(a))}</div>`;
+        body=`${accountCard(a,true,isCurrent?'正在使用':'')}${actionArea}${link('chart','个人用量','usage-account',attr)}<div class="detail-compact">${window.NXEditors.account(viewContext(),a)}${resetCredits(a)}${detail('Credits',creditValue(a))}</div>`;
         cls=`detail-body ${isCurrent?'is-current':''} has-credits`;foot=`<div class="detail-bottom">${archive}<div class="detail-expiry-note">${esc(expiryNote)}</div></div>`;footClass='detail-footer';break;}
       case 'confirm': {
         const quota=quotaSummary(a);
@@ -387,6 +392,7 @@
     if(preserve)for(const saved of oldFields){const node=document.getElementById(saved.id);if(node&&sheet.contains(node)){node.replaceWith(saved.node);const live=saved.node;live.value=saved.value;if(saved.invalid)live.setAttribute('aria-invalid',saved.invalid);if(saved.focused){live.focus({preventScroll:true});try{live.setSelectionRange(saved.start,saved.end);}catch{}}}}
     if(oldError&&sheet.querySelector('#form-error'))sheet.querySelector('#form-error').textContent=oldError;
     paintNotifications();restoreScroll(sheet,position);restoreFocus(sheet,key);feedback.paint();
+    if(preserve)window.NXMotion?.paint(sheet);
   }
   const inlineWrites=new Map();
   async function saveInline(source,{id,key,method,args,value,commit,clear}) {
@@ -592,6 +598,7 @@
       e.preventDefault();const d=summary.parentElement,opening=!d.open;
       if(opening&&ui.page==='settings')selectSettingDisclosure(d.dataset.disclosure);
       d.open=opening;syncDisclosure(d);
+      if(opening&&d.isConnected)window.NXMotion?.reveal(d.querySelector('.disclosure-body'));
       // Collapsing a preceding section may move the new heading above the
       // viewport. Reveal the heading only; never reset the whole page scroll.
       if(opening&&d.isConnected){const body=d.closest('.sheet-body'),r=summary.getBoundingClientRect(),v=body?.getBoundingClientRect();if(v&&r.top<v.top)body.scrollTop-=v.top-r.top;}
@@ -658,7 +665,7 @@
       case 'retry-resume-task':await run('retry_resume_task',b.dataset.session,val);break;
       case 'home':closeSheet();break;
       case 'detail':show('detail',target);break;
-      case 'toggle-reset-credits':resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.disclosures.delete('meta:'+target);}renderSheet();break;
+      case 'toggle-reset-credits':resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.disclosures.delete('meta:'+target);}renderSheet();if(ui.resetExpanded.has(target))window.NXMotion?.reveal(sheet.querySelector('.reset-credit-details'));break;
       case 'use-reset':{
         const account=data.accounts.find(a=>a.email===target),creditId=b.dataset.credit;
         if(!account||busy()||acting)break;
@@ -688,10 +695,20 @@
       case 'quota-overview':show('quota-overview');break;
       case 'quota-metric':ui.quotaMetric=val;if(val==='time'&&ui.quotaScope==='relay')ui.quotaScope='five';renderSheet();break;
       case 'quota-scope':ui.quotaScope=val;if(val==='relay')ui.quotaMetric='quota';renderSheet();break;
-      case 'usage-all':await openUsage('all');break;
+      case 'usage-all':{
+        const previous=ui.history.at(-1);
+        if(ui.page==='usage'&&ui.scope!=='all'&&previous?.page==='usage'&&previous.scope==='all')back();
+        else await openUsage('all');
+        break;
+      }
       case 'usage-account':await openUsage(target);break;
       case 'usage-refresh':await openUsage(ui.scope,true);break;
-      case 'usage-period':ui.days=val==='all'?'all':Number(val);navigation.invalidate();await loadUsage();break;
+      case 'usage-period':{
+        ui.days=val==='all'?'all':Number(val);navigation.invalidate();
+        const periodTicket=navigation.ticket();await loadUsage();
+        if(navigation.current(periodTicket)&&ui.page==='usage')window.NXMotion?.reveal(sheet.querySelector('.usage-summary'));
+        break;
+      }
       case 'edit':{if(ui.page!=='detail'||ui.email!==target)show('detail',target);ui.disclosures.add('meta:'+target);renderSheet();$('#alias')?.focus({preventScroll:true});break;}
       case 'save-alias':await saveAccountField(b,target,'alias');break;
       case 'save-expiry':await saveAccountField(b,target,'subscription_date');break;
@@ -757,13 +774,15 @@
   window.nxRequestSwitch=target=>requestSwitch(target);
   const systemAppearance=window.matchMedia('(prefers-color-scheme: dark)');
   function applyAppearance(value){
-    document.documentElement.dataset.appearance=['light','dark'].includes(value)?value:systemAppearance.matches?'dark':'light';
+    const appearance=['light','dark'].includes(value)?value:systemAppearance.matches?'dark':'light';
+    if(document.documentElement.dataset.appearance!==appearance)window.NXMotion?.stop();
+    document.documentElement.dataset.appearance=appearance;
   }
   systemAppearance.addEventListener('change',()=>applyAppearance(data.settings.appearance));
-  window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet();setSize('home');poll();};
-  window.nxHidden=()=>{panelVisible=false;resetConfirmation=null;clearTimeout(pollTimer);pollTimer=null;};
+  window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
+  window.nxHidden=()=>{window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;clearTimeout(pollTimer);pollTimer=null;};
   window.addEventListener('pywebviewready',poll);
-  window.addEventListener('resize',()=>{if(config.demo)setSize(ui.page?'workspace':'home');});
+  window.addEventListener('resize',()=>{window.NXMotion?.stop();if(config.demo)setSize(ui.page?'workspace':'home');});
   setInterval(()=>{
     if(!panelVisible && !config.demo) return;
     for(const el of app.querySelectorAll('[data-reset]'))el.textContent=reset(Number(el.dataset.reset));
@@ -794,6 +813,7 @@
         if(page==='detail'&&params.get('expand')==='reset'&&target){ui.resetExpanded.add(target.email);renderSheet();}
         if(page==='archives')await loadInline('archives');
       },
+      home:()=>closeSheet(),
       refresh:()=>poll(true),
       appearance:async value=>{window.NXDemo.appearance(value);applyAppearance(value);},
       info:()=>({page:ui.page||(home.classList.contains('is-onboarding')?'onboarding':'home'),width:app.clientWidth,height:app.clientHeight})

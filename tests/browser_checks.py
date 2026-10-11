@@ -42,7 +42,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('design/pills-remain-functional',badgeStyle.borderRadius==='999px',badgeStyle.borderRadius);
   check('design/type-height-and-shadow-scales',rootStyle.getPropertyValue('--font-body').trim()==='11px'&&rootStyle.getPropertyValue('--height-control').trim()==='36px'&&rootStyle.getPropertyValue('--shadow-hover').trim()!==rootStyle.getPropertyValue('--shadow-floating').trim(),
         [rootStyle.getPropertyValue('--font-body'),rootStyle.getPropertyValue('--height-control')]);
-  check('home/compact-size',app.clientWidth===372&&app.clientHeight===520,[app.clientWidth,app.clientHeight]);
+  check('home/compact-size',app.clientWidth===NX_CONFIG.sizes.home[0]&&app.clientHeight===NX_CONFIG.sizes.home[1],[app.clientWidth,app.clientHeight]);
   let list=document.querySelector('.account-list');
   check('home/all-noncurrent-accounts-including-relay',list.querySelectorAll('.row').length===4&&
         [...list.querySelectorAll('.row')].some(row=>row.dataset.email===window.NXDemo.state().relay_email),
@@ -83,7 +83,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   let resetRow=document.querySelector('.reset-summary');
   const detail=document.querySelector('.detail-body');
   const overviewBox=box('.detail-overview'),actionsBox=box('.detail-actions');
-  check('full/detail-keeps-home-frame',app.clientWidth===372&&app.clientHeight===520,
+  check('full/detail-keeps-home-frame',app.clientWidth===NX_CONFIG.sizes.home[0]&&app.clientHeight===NX_CONFIG.sizes.home[1],
         [app.clientWidth,app.clientHeight]);
   check('detail/overview-reuses-home-card-layout',document.querySelector('.detail-overview.current-card')&&
         Math.abs(overviewBox.left-homeCardBox.left)<=1&&Math.abs(overviewBox.right-homeCardBox.right)<=1&&
@@ -207,7 +207,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   await scenario('default');
 
   document.querySelector('[data-action="usage-all"]').click();await wait(120);
-  check('full/usage-keeps-home-frame',app.clientWidth===372&&app.clientHeight===520,
+  check('full/usage-keeps-home-frame',app.clientWidth===NX_CONFIG.sizes.home[0]&&app.clientHeight===NX_CONFIG.sizes.home[1],
         [app.clientWidth,app.clientHeight]);
   const usageTotal=()=>document.querySelector('.usage-total')?.getAttribute('aria-label');
   const usageRows=()=>[...document.querySelectorAll('.account-usage-row .usage-number')].map(n=>n.textContent);
@@ -296,7 +296,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
 
   await scenario('default');window.nxShown();await wait(80);
   document.querySelector('[data-action="settings"]').click();await wait(80);
-  check('full/settings-keeps-home-frame',app.clientWidth===372&&app.clientHeight===520,
+  check('full/settings-keeps-home-frame',app.clientWidth===NX_CONFIG.sizes.home[0]&&app.clientHeight===NX_CONFIG.sizes.home[1],
         [app.clientWidth,app.clientHeight]);
   const settingsScroll=stableScrollRegion(document.querySelector('.settings-body'));
   check('settings/scroll-keeps-width',settingsScroll.every(Boolean),settingsScroll);
@@ -345,7 +345,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   const progress=document.querySelector('.resume-notice');
   check('resume/progress-banner-links-to-details',progress?.textContent.includes('任务接续中 1/3')&&progress.dataset.action==='resume-details');
   progress.click();await wait(100);
-  check('full/resume-keeps-home-frame',app.clientWidth===372&&app.clientHeight===520,
+  check('full/resume-keeps-home-frame',app.clientWidth===NX_CONFIG.sizes.home[0]&&app.clientHeight===NX_CONFIG.sizes.home[1],
         [app.clientWidth,app.clientHeight]);
   check('resume/reopens-collapsed',document.querySelectorAll('.resume-task').length===0);
   document.querySelector('.resume-summary').click();await wait(50);

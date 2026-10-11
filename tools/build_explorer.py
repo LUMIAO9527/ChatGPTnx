@@ -2,7 +2,7 @@
 from pathlib import Path
 import argparse
 import json
-from build import ROOT, panel, APP_VERSION
+from build import ROOT, panel, APP_VERSION, CONFIG
 from screen_catalog import CASES, NATIVE_SURFACES
 
 def js(value):
@@ -10,7 +10,8 @@ def js(value):
 
 def build_explorer(output: Path):
     template=(ROOT/'tools/templates/explorer.html').read_text(encoding='utf-8')
-    html=template.replace('__VERSION__',APP_VERSION).replace('__CATALOG__',js(CASES)).replace('__NATIVE__',js(NATIVE_SURFACES)).replace('__DEMO__',js(panel(demo=True)))
+    width,height=CONFIG['sizes']['home']
+    html=template.replace('__VERSION__',APP_VERSION).replace('__GEOMETRY__',f'{width} × {height}').replace('__CATALOG__',js(CASES)).replace('__NATIVE__',js(NATIVE_SURFACES)).replace('__DEMO__',js(panel(demo=True)))
     output.parent.mkdir(parents=True,exist_ok=True);output.write_text(html,encoding='utf-8')
     print('Built offline UI explorer:',output)
     return html

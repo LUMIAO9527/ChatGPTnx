@@ -18,6 +18,7 @@ if errorlevel 1 (
 )
 "%PYTHON%" -m PyInstaller --noconfirm --clean --onefile --noconsole ^
   --name ChatGPTnx --icon "%BUILD_ROOT%\resources\nx.ico" ^
+  --version-file "%BUILD_ROOT%\resources\version.txt" ^
   --paths "%CD%\src" ^
   --add-data "%BUILD_ROOT%\resources\panel.html;." ^
   --add-data "%BUILD_ROOT%\resources\nx.ico;." ^

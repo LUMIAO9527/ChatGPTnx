@@ -1,11 +1,12 @@
 """Assemble actual UI screenshots; a local font is never included in the archive."""
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
-from build import APP_VERSION
+from build import APP_VERSION, CONFIG
 ROOT=Path(__file__).resolve().parents[1]
 
 def build(font_path):
     out=ROOT/'docs/review';out.mkdir(parents=True,exist_ok=True)
+    width,height=CONFIG['sizes']['home']
     font=lambda size:ImageFont.truetype(str(font_path),size)
     sheets={
       'overview':('同一套行与展开规则',[
@@ -32,12 +33,12 @@ def build(font_path):
     for name,(title,items) in sheets.items():
         canvas=Image.new('RGB',(1200,1232),'#eceef1');draw=ImageDraw.Draw(canvas)
         draw.text((20,15),f'ChatGPTnx {APP_VERSION} · {title}',font=font(25),fill='#252d3b')
-        draw.text((20,51),'实际组件与合成数据 · 深浅色同尺寸 · 372 × 520',font=font(16),fill='#616d7d')
+        draw.text((20,51),f'实际组件与合成数据 · 深浅色同尺寸 · {width} × {height}',font=font(16),fill='#616d7d')
         for i,(key,label,theme) in enumerate(items):
             x=20+(i%3)*394;y=93+(i//3)*561
             draw.text((x,y),label,font=font(18),fill='#252d3b')
             image=Image.open(ROOT/f'docs/previews/{theme}/{key}.png').convert('RGB')
-            if image.size!=(372,520):raise ValueError(f'Unexpected geometry: {key}')
+            if image.size!=(width,height):raise ValueError(f'Unexpected geometry: {key}')
             canvas.paste(image,(x,y+30))
         canvas.save(out/f'{name}.png')
     return out

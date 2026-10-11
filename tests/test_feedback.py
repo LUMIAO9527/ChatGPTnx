@@ -14,8 +14,8 @@ from screen_catalog import CASES
 class PresentationContracts(unittest.TestCase):
     def test_single_panel_dimensions_are_single_source(self):
         self.assertNotIn('menu',CONFIG['sizes'])
-        self.assertEqual(CONFIG['sizes']['home'],[372,520])
-        self.assertEqual(CONFIG['sizes']['workspace'],[372,520])
+        self.assertEqual(CONFIG['sizes']['home'],[327,458])
+        self.assertEqual(CONFIG['sizes']['workspace'],[327,458])
     def test_feedback_module_is_in_live_and_demo(self):
         for demo in (True,False):
             html=panel(demo=demo)

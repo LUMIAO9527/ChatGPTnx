@@ -33,7 +33,7 @@ window.NXMath = (() => {
     const span=start?Math.round((Date.parse(end+'T00:00:00Z')-Date.parse(start+'T00:00:00Z'))/86400000)+1:0;
     return{ok:true,source:SOURCE,scope:'chatgpt_account_activity',total_tokens:total===null?null:String(total),included_accounts:included.length,unique_accounts:unique,total_complete:!!unique&&included.length===unique,rows,daily,period:{days,start,end,span_days:span,complete:days!=='all'&&!!unique&&daily.length===days&&daily.every(d=>d.complete),recorded_tokens:daily.length?String(daily.reduce((sum,d)=>sum+BigInt(d.tokens),0n)):null},oldest_fetched_at:included.length?Math.min(...included.map(r=>r.fetched_at)):null,newest_fetched_at:included.length?Math.max(...included.map(r=>r.fetched_at)):null,generated_at:now};
   }
-  function compact(value){const n=count(value);if(n===null)return{main:'—',unit:''};for(const[size,unit]of[[100000000n,'亿'],[10000n,'万']])if(n>=size){const h=(n*100n+size/2n)/size;return{main:`${h/100n}.${String(h%100n).padStart(2,'0')}`,unit};}return{main:String(n),unit:''};}
+  function compact(value){const n=count(value);if(n===null)return{main:'—',unit:''};for(const[size,unit]of[[100000000n,'亿'],[10000n,'万']])if(n>=size){const h=(n*10n+size/2n)/size;return{main:`${h/10n}.${h%10n}`,unit};}return{main:String(n),unit:''};}
   const compactText=value=>{const v=compact(value);return v.main+v.unit;};
   const exact=value=>count(value)===null?'—':count(value).toLocaleString('en-US');
   function trendGroups(u, lifetime=false) {

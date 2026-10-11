@@ -7,7 +7,7 @@ CASES=[]
 def add(name,q,body):
  CASES.append((name,q,"async()=>{const $=s=>document.querySelector(s),sleep=ms=>new Promise(r=>setTimeout(r,ms)),rect=n=>(typeof n==='string'?$(n):n).getBoundingClientRect(),same=(a,b)=>['x','y','width','height'].every(k=>Math.abs(a[k]-b[k])<.1);"+body+'}'))
 add('single/no-mode-controls-or-route','open=settings',"return NXPreview.info().height===520&&!$('[data-key=panel_mode]')&&!document.body.textContent.includes('精简面板')&&!document.body.textContent.includes('默认面板');")
-add('single/old-demo-mode-does-not-open-old-ui','mode=compact',"return NXPreview.info().width===372&&NXPreview.info().height===520&&!!$('.current-card')&&!$('.compact-panel');")
+add('single/old-demo-mode-does-not-open-old-ui','mode=compact',"return NXPreview.info().width===NX_CONFIG.sizes.home[0]&&NXPreview.info().height===NX_CONFIG.sizes.home[1]&&!!$('.current-card')&&!$('.compact-panel');")
 add('geometry/home-detail-usage-share-card','',"const home=rect('.current-card').toJSON();$('.current-identity').click();await sleep(20);if(!same(home,rect('.current-card')))return false;$('[data-action=usage-account]').click();await sleep(60);return same(home,rect('.usage-context')); ")
 add('geometry/home-aggregate-usage-share-card','',"const home=rect('.current-card').toJSON();$('[data-action=usage-all]').click();await sleep(60);return same(home,rect('.usage-context'));")
 add('geometry/timeout-keeps-card-and-controls','open=detail',"const card=rect('.current-card').toJSON(),actions=rect('.detail-actions').toJSON();NXDemo.scenario('detail-timeout');await NXPreview.refresh();return same(card,rect('.current-card'))&&same(actions,rect('.detail-actions'))&&rect('.quota-failure .btn').height<=rect('.quota-failure').height;")

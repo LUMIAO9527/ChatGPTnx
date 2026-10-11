@@ -7,7 +7,7 @@
 <p>Keep a long task moving across the accounts you own. Switch accounts when quota runs out, then attempt to continue the original task.</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.0.1" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.0.2" height="20">
 <img src="docs/images/badges/license.svg" alt="Source available to inspect; rights reserved" height="20">
 </div>
 
@@ -57,6 +57,8 @@ The quota overview and usage statistics help you see which account is available 
 | <img src="docs/images/settings-live.png" width="260" alt="Settings for handoff and task continuation"> | <img src="docs/images/home-dark-current.png" width="260" alt="Home screen in dark theme"> | <img src="docs/images/add-account-live.png" width="260" alt="Add an account: open the desktop sign-in window and confirm the account"> |
 
 ## Download and run
+
+The current local build is **v1.0.2**, with a 327×458 compact panel and lightweight motion. Its source archive is `ChatGPTnx-v1.0.2-source.zip`. The example screenshots show v1.0.1. Public downloads below still refer to v1.0.1.
 
 Download `ChatGPTnx.exe` from the [v1.0.1 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.1). The release also provides `ChatGPTnx-v1.0.1-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, and Microsoft Edge WebView2 Runtime.
 

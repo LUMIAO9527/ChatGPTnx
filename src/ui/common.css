@@ -17,7 +17,7 @@ button { color: inherit; cursor: pointer; -webkit-tap-highlight-color: transpare
 button, input, select, .row, .field, .detail-line, .link-row, .confirm-account,
 .confirm-mark, .quota-failure, .account-usage-row, .mark { border-radius: var(--radius-control); }
 .segmented, .segmented button { border-radius: var(--radius-pill); }
-.avatar, .tool, .confirm-mark { border-radius:50%; }
+.avatar, .confirm-mark { border-radius:50%; }
 .keycap, .float-tip { border-radius: var(--radius-compact); }
 .badge, .current-chip, .coverage, .switch, .track { border-radius: var(--radius-pill); }
 button { position: relative; border: 1px solid transparent; background: transparent;
@@ -35,7 +35,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 button:disabled { cursor: not-allowed; opacity: .46; box-shadow: none; }
 [hidden] { display: none !important; }
 .icon { width: 19px; height: 19px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
-#app { width: 372px; height: 520px; position: relative; overflow: hidden; background: var(--bg); border-radius: var(--window-r);
+#app { width: 327px; height: 458px; position: relative; overflow: hidden; background: var(--bg); border-radius: var(--window-r);
   box-shadow: var(--shadow-window); isolation: isolate; }
 body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-shadow: none; border-radius: 0; overflow: hidden; }
 #home, .sheet { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -44,7 +44,8 @@ body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-sh
 .brand { display: flex; align-items: center; gap: 9px; margin-right: auto; font-size: var(--font-emphasis); font-weight: 650; letter-spacing: -.35px; }
 .mark { font-size: var(--font-brand-mark); font-weight: 750; letter-spacing: -1.5px; display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; background: var(--ink); color: var(--bg); }
-.tool { min-width: var(--height-control); height: var(--height-control); padding: var(--space-4); display: inline-flex; align-items: center; justify-content: center; }
+/* Icon actions share the same control corners across every page. */
+.tool { min-width: var(--height-control); height: var(--height-control); padding: var(--space-4); display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-control); }
 .btn { min-height: var(--height-primary); padding: var(--space-5) var(--space-8); display: inline-flex; align-items: center; justify-content: center; gap: var(--space-4); font-size: var(--font-control); font-weight: 550; }
 .primary { background: var(--action); color: var(--action-ink); }
 .secondary { background: var(--surface); }
@@ -131,9 +132,9 @@ h3 { font-size: var(--font-page-title); font-weight: 620; }
 .footer .add { min-height: var(--height-control); font-size: var(--font-control); padding: 7px 11px; }
 /* The whole refresh status is clickable; add stays on the right. */
 .footer.slim { min-height: 36px; margin-top: 0; padding: 3px 2px 0; gap: 6px; }
-.footer.slim .refresh-status { min-height: var(--height-icon); margin-right: auto; padding: var(--space-2) var(--space-4); display: inline-flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--font-caption); text-align: left; border-radius: var(--radius-compact); }
+.footer.slim .refresh-status { min-height: var(--height-icon); margin-right: auto; padding: var(--space-2) var(--space-4); display: inline-flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--font-caption); text-align: left; border-radius: var(--radius-control); }
 .footer.slim .refresh-status .icon { width: 16px; height: 16px; color: var(--ink); }
-.footer.slim .add { min-height: var(--height-icon); font-size: var(--font-body); padding: var(--space-2) var(--space-6); border-radius: var(--radius-compact); }
+.footer.slim .add { min-height: var(--height-icon); font-size: var(--font-body); padding: var(--space-2) var(--space-6); border-radius: var(--radius-control); }
 .resume-group { margin-bottom: 10px; }
 .resume-group-head { display: flex; justify-content: space-between; align-items: center; padding:2px 12px 5px; color: var(--muted); font-size: var(--font-small); }
 .resume-group-head strong { color: var(--ink); font-size: var(--font-body); }
@@ -335,7 +336,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .quota-failure-copy small { display:block; font-size:var(--font-body); line-height:15px; color:var(--muted);
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .current-card .quota-failure .btn { flex:0 0 auto; min-height:34px; height:34px; min-width:60px;
-  padding:5px 10px; background:var(--surface-2); font-size:var(--font-control); border-radius:var(--radius-pill); }
+  padding:5px 10px; background:var(--surface-2); font-size:var(--font-control); border-radius:var(--radius-control); }
 .detail-actions { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; margin: 0; }
 .detail-actions.is-current { grid-template-columns: 1fr; }
 .detail-actions .btn { min-height: var(--height-list); padding: 9px 11px; font-size: var(--font-body); }
@@ -449,7 +450,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .switch[aria-checked=true] { background:var(--ink); }
 .switch[aria-checked=true] i { transform:translate(calc(var(--switch-width) - var(--knob) - 2 * var(--inset)),-50%); background:var(--bg); }
 .switch:hover:not(:disabled) { box-shadow:none; }
-.account-select { width:42px; height:var(--height-icon); flex:0 0 42px; display:grid; place-items:center; padding:0; border:0; border-radius:50%; }
+.account-select { width:42px; height:var(--height-icon); flex:0 0 42px; display:grid; place-items:center; padding:0; border:0; border-radius:var(--radius-control); }
 .account-select .selection-mark { width:20px; height:20px; display:grid; place-items:center; border:1px solid var(--muted); border-radius:50%; color:var(--bg); }
 .account-select .icon { width:13px; height:13px; stroke-width:2; opacity:0; }
 .account-select::after { inset:0 5px; }
@@ -475,7 +476,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .inline-field .field { flex:1; width:0; min-width:0; min-height:32px; height:32px; padding:6px 9px;
   font-size:var(--font-body); background:var(--bg); border-radius:var(--radius-compact); }
 .inline-field .save-check { flex:0 0 32px; width:32px; min-width:32px; height:32px; padding:4px;
-  background:var(--bg); border:1px solid var(--line); border-radius:var(--radius-compact); }
+  background:var(--bg); border:1px solid var(--line); border-radius:var(--radius-control); }
 .inline-field .save-check .icon { width:17px; height:17px; }
 .disclosure-body .field-feedback,.inline-editor-page .field-feedback { min-height:0; line-height:16px; padding:5px 0 0; }
 .disclosure-body .field-feedback:empty,.inline-editor-page .field-feedback:empty { display:none; }
@@ -524,7 +525,6 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 
 
 * {cursor:default !important;}
-.header > .tool,.sheet-head .tool {border-radius:12px;}
 .sheet-head h2 {flex:1;min-width:0;}
 .sheet-head:has([data-action="resume-clear"]) .demo-tag {display:none;}
 .sheet-head:has([data-action="resume-clear"]) {padding-right:18px;}
@@ -541,8 +541,9 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .usage-account-details .metric strong {display:flex;align-items:baseline;justify-content:center;gap:1px;font-size:20px;line-height:24px;}
 .usage-account-details .metric-unit {font-size:11px;line-height:1;font-weight:500;}
 .usage-account-details .inline-help {margin:0;text-align:center;font-size:10px;line-height:14px;}
-.usage-bottom-back {display:flex;align-items:center;justify-content:center;gap:4px;flex:none;height:30px;min-height:30px;align-self:center;width:116px;margin-top:0;border-radius:999px;font-size:11px;color:var(--muted);}
-.usage-bottom-back .icon {height:13px;width:13px;}
+.usage-bottom-back {display:inline-flex;align-items:center;justify-content:center;gap:4px;flex:none;height:30px;min-height:30px;align-self:center;width:max-content;max-width:100%;padding:0 10px;margin-top:0;border-radius:var(--radius-control);font-size:11px;line-height:14px;white-space:nowrap;color:var(--muted);}
+.usage-bottom-back .icon {display:block;height:14px;width:14px;flex:0 0 14px;}
+.usage-bottom-back-label {display:block;line-height:14px;}
 .usage-hero {height:74px;flex:none;}
 .usage-total {white-space:nowrap;display:flex;align-items:baseline;height:49px;}
 .usage-chart-heading {height:15px;white-space:nowrap;}
@@ -560,3 +561,172 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .is-subagent .resume-task-copy { flex-direction:column; align-items:stretch; gap:2px; }
 .is-subagent .resume-task-copy > * { white-space:nowrap; }
 .is-subagent > .resume-task:disabled { opacity:1; cursor:default; }
+
+/* Compact product geometry; type sizes retain the shared design scale. */
+#home {
+  padding: 11px 14px 5px;
+  gap: 8px;
+}
+.header { min-height: 34px; gap: 5px; }
+.header .mark { width: 28px; height: 28px; flex: 0 0 28px; font-size: 18px; }
+.tool { min-width: 34px; height: 34px; padding: 7px; }
+.current-card {
+  height: var(--account-card-height); min-height: var(--account-card-height); flex-basis: var(--account-card-height); padding: 10px 12px 10px;
+}
+.current-identity {
+  width: calc(100% + 14px); margin: 0 -7px; height: 50px; min-height: 50px; padding: 5px 12px;
+}
+.current-card .quota-slot { height: 29px; min-height: 29px; margin-top: 9px; }
+.current-card .quota-bars { gap: 8px; }
+.relay { min-height: 62px; padding: 10px 13px; }
+.relay .relay-arrow { flex-basis: 32px; width: 32px; height: 32px; }
+.relay small { margin-top: 4px; }
+.section-head { min-height: 26px; margin-bottom: 2px; }
+.roster .account-list {
+  grid-auto-rows: minmax(44px, max-content); gap: 2px; padding-bottom: 2px;
+}
+.row { min-height: 44px; padding: 5px 7px; gap: 8px; }
+.row .avatar { width: 34px; height: 34px; }
+.footer.slim { min-height: 32px; padding: 2px 1px 0; gap: 4px; }
+.footer.slim .refresh-status,
+.footer.slim .add { min-height: 32px; }
+.footer.slim .refresh-status { padding: 2px 6px; gap: 6px; }
+.footer.slim .add { padding: 2px 5px; }
+.sheet-head { min-height: var(--sheet-header-height); padding: 7px 12px; gap: 7px; }
+.sheet-body { padding: var(--content-top) var(--panel-edge) 14px; }
+.sheet-foot { padding: 10px 14px; gap: 7px; }
+.link-row { min-height: 42px; padding: 8px; }
+.detail-line { padding: 12px 0; }
+.detail-compact .detail-line { height: 38px; min-height: 38px; padding: 8px 10px; }
+.settings-body { padding: var(--content-top) var(--panel-edge) 7px; }
+.settings-section + .settings-section { margin-top: 10px; }
+.settings-heading { margin: 0 10px 5px; }
+
+.sheet-body.detail-body,
+.sheet-body.usage-report {
+  padding: var(--content-top) var(--panel-edge) 6px;
+}
+.detail-body .detail-overview { margin-bottom: 5px; }
+.detail-actions:not(.is-current) { grid-template-columns: 1.4fr 1fr; }
+.detail-actions .btn { min-height: 42px; padding: 7px 10px; gap: 6px; white-space: nowrap; }
+.detail-body .link-row { min-height: 36px; margin: 0; padding: 7px 10px; }
+.detail-compact { gap: 4px; }
+.sheet-foot.detail-footer { padding: 0 14px 7px; border-top: 0; }
+.sheet-body.personal-usage {
+  display: grid;
+  grid-template-rows: var(--account-card-height) 32px minmax(148px, 1fr) 52px 30px;
+  gap: 6px;
+  overflow-y: auto;
+  align-content: stretch;
+}
+.usage-report > .current-card { margin: 0; }
+.usage-report > .usage-filter { margin: 0; height: 32px; min-height: 32px; padding: 3px; align-items: center; }
+.usage-report > .usage-filter button { height: 26px; min-height: 26px; font-size: 11px; }
+.usage-report .usage-summary {
+  height: auto; min-height: 148px; margin: 0; padding: 8px 12px 0;
+  border: 0; justify-content: flex-start;
+}
+.usage-report .usage-summary::before,
+.usage-report .usage-account-details::before { left: 12px; right: 12px; top: 0; }
+.usage-report .usage-hero { height: 50px; min-height: 50px; }
+.usage-report .usage-total { height: 36px; margin: 2px 0 0; font-size: 34px; line-height: 1; letter-spacing: -1px; }
+.usage-report .usage-total span { font-size: 18px; }
+.usage-report .usage-trend { margin-top: 6px; }
+.usage-report .usage-trend .trend { height: 54px; padding-top: 6px; }
+.usage-report .trend-labels { margin-top: 3px; }
+.usage-report .usage-account-details { min-height: 52px; margin: 0; padding: 0; border: 0; }
+.usage-report .usage-account-details .metrics-row { height: 52px; margin: 0; padding: 8px 0 4px; }
+.usage-report .usage-account-details .metric small { margin-bottom: 3px; font-size: 10px; }
+.usage-report .usage-account-details .metric strong { font-size: 16px; line-height: 20px; }
+.usage-report .usage-account-details .metric-unit { font-size: 10px; }
+.usage-report .usage-bottom-back { height: 30px; min-height: 30px; margin: 0; justify-self: center; }
+
+/* Shared identity positions; the overview scrolls as one continuous report. */
+.usage-report > .current-card { background: var(--surface); }
+.usage-report .identity-title { min-height: 18px; }
+.usage-report .usage-brand {
+  width: var(--avatar-size); height: var(--avatar-size);
+  min-width: var(--avatar-size); max-width: var(--avatar-size);
+  flex: 0 0 var(--avatar-size); aspect-ratio: 1;
+}
+.sheet-body.all-usage {
+  display: flex; flex-direction: column; gap: 6px;
+  overflow-y: auto; overflow-x: hidden;
+}
+.all-usage > .current-card {
+  height: auto; min-height: 0; flex: 0 0 auto; padding-bottom: 10px;
+}
+.all-usage > .usage-filter { flex: 0 0 32px; }
+.all-usage .usage-accounts {
+  min-height: 0; height: auto; margin: 0; padding: 0;
+  border: 0; flex: 0 0 auto; overflow: visible;
+}
+.all-usage .usage-accounts::before { left: 12px; right: 12px; top: 0; }
+.all-usage .section-title { min-height: 22px; height: 22px; padding: 2px 12px 0; }
+.all-usage .section-title h3 { font-size: 11px; }
+.all-usage .account-usage-list {
+  min-height: 0; height: auto; max-height: none; flex: none;
+  overflow: visible; margin: 0; gap: 2px;
+}
+.all-usage .account-usage-row { min-height: 42px; height: 42px; flex: 0 0 42px; gap: 8px; padding: 4px 7px; }
+.all-usage .account-usage-row .avatar { width: 32px; height: 32px; font-size: 12px; }
+.all-usage .account-usage-row .identity-copy strong { font-size: 12px; }
+.all-usage .account-usage-row small { margin-top: 1px; font-size: 9px; }
+.all-usage .account-usage-row .usage-number { font-size: 13px; }
+
+/* One shared body origin for every secondary page, in source pixels. */
+.sheet-body {
+  padding-top: var(--content-top);
+  padding-inline: var(--panel-edge);
+}
+.quota-overview-toolbar { top: 0; padding: 0 0 8px; }
+.quota-overview-toolbar .segmented { height: 32px; min-height: 32px; align-items: center; }
+.quota-overview-toolbar .segmented button { height: 26px; min-height: 26px; padding: 2px 6px; }
+.quota-overview-window[data-window-minutes="300"] { grid-column: 1; grid-row: 1; }
+.quota-overview-window[data-window-minutes="10080"] { grid-column: 2; grid-row: 1; }
+.quota-overview-window em,
+.quota-overview-window small { font-size: var(--font-caption); }
+.quota-overview-window strong { font-size: var(--font-control); }
+.quota-overview-row {
+  min-height: 52px; padding: 6px 10px; gap: 8px;
+}
+.quota-overview-row > .avatar {
+  width: 34px; height: 34px; font-size: var(--font-control);
+}
+.quota-overview-main .identity-title strong { font-size: var(--font-title); }
+.quota-overview-windows { margin-top: 3px; }
+
+#home.is-onboarding { padding: 0; gap: 0; }
+
+/* Motion feedback uses only the existing controls. */
+/* inert blocks input, but does not hide the persistent home underneath a sheet. */
+#home[inert] { visibility: hidden; }
+:root[data-motion="on"] #app button {
+  --nx-press-scale: .98;
+  transition: background 140ms var(--ease), box-shadow 160ms var(--ease),
+    transform 200ms cubic-bezier(.2,.7,.25,1);
+}
+:root[data-motion="on"] #app button:is(.row, .quota-overview-row, .account-usage-row, .current-identity, .relay, .link-row, .relay-account-row) {
+  --nx-press-scale: .995;
+}
+:root[data-motion="on"] #app button:is(.tool, .account-select) {
+  --nx-press-scale: .95;
+}
+:root[data-motion="on"] #app button:active:not(:disabled) {
+  transform: var(--nx-rest-transform, translate(0)) scale(var(--nx-press-scale));
+  transition-duration: 65ms;
+}
+:root[data-motion="on"] #app .switch i {
+  transition: transform 200ms cubic-bezier(.2,.7,.25,1);
+}
+:root[data-motion="off"] #app *,
+:root[data-motion="off"] #app *::before,
+:root[data-motion="off"] #app *::after {
+  transition: none !important;
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  #app button:active:not(:disabled) { transform: var(--nx-rest-transform, translate(0)) !important; }
+}
+
+#app .status-dismiss { --nx-rest-transform: translateY(-50%); }

@@ -34,7 +34,7 @@ def main(browser,output,appearance='both',only=None,resume=False):
  report=json.loads((output/'matrix.json').read_text(encoding='utf-8')) if resume and (output/'matrix.json').exists() else {'native':False,'cases':[]}
  if report.get('source_sha256',digest)!=digest:raise RuntimeError('UI sources changed: recapture into an empty directory')
  report.update(version=APP_VERSION,source_sha256=digest)
- size=[372,520]
+ size=CONFIG['sizes']['home']
  view_width=max(520,size[0]+80);view_height=max(700,size[1]+80)
  palettes=['light','dark'] if appearance=='both' else [appearance]
  selected=[c for c in CASES if not only or c['id'] in only]

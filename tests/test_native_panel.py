@@ -37,7 +37,7 @@ class Function:
 
 class PanelTests(unittest.TestCase):
     def setUp(self):
-        self.size = (372, 520)
+        self.size = (327, 458)
         self.dpi = 96
         self.rect_ok = True
 
@@ -117,16 +117,16 @@ class PanelTests(unittest.TestCase):
         for dpi in (96, 120, 144, 168, 192, 240):
             with self.subTest(dpi=dpi):
                 self.dpi = dpi
-                self.size = (round(372 * dpi / 96), round(520 * dpi / 96))
+                self.size = (round(327 * dpi / 96), round(458 * dpi / 96))
                 self.assertTrue(self.host._apply_native_shape())
-                diameter = round(16 * dpi / 96) * 2
+                diameter = round(14 * dpi / 96) * 2
                 self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1],
                                  (0, 0, self.size[0] + 1, self.size[1] + 1, diameter, diameter))
 
     def test_dpi_zero_falls_back_to_96(self):
         self.dpi = 0
         self.assertTrue(self.host._apply_native_shape())
-        self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1][-2:], (32, 32))
+        self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1][-2:], (28, 28))
 
     def test_missing_hwnd_allocates_nothing(self):
         self.find.return_value = None
@@ -175,14 +175,14 @@ class PanelTests(unittest.TestCase):
         self.assertTrue(self.host._apply_native_shape())
         self.find.return_value = HWND + 8
         self.user.FindWindowW.result = HWND + 8
-        self.size, self.dpi = (558, 780), 144
+        self.size, self.dpi = (490, 687), 144
         self.assertTrue(self.host._apply_native_shape())
         self.assertEqual(self.user.SetWindowRgn.calls[-1][0], HWND + 8)
-        self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1], (0, 0, 559, 781, 48, 48))
+        self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1], (0, 0, 491, 688, 42, 42))
 
     def test_physical_size_binds_dpi_function_before_use(self):
         self.dpi = 144
-        self.assertEqual(self.host._physical_size(HWND), (558, 780))
+        self.assertEqual(self.host._physical_size(HWND), (490, 687))
         self.assertEqual(self.user.GetDpiForWindow.argtypes, [ctypes.c_void_p])
         self.assertIs(self.user.GetDpiForWindow.restype, desktop.wt.UINT)
         self.assertEqual(self.user.GetDpiForWindow.calls, [(HWND,)])
@@ -316,9 +316,9 @@ class PanelTests(unittest.TestCase):
         self.assertIn('background: var(--bg); border-radius: var(--window-r);', css)
 
     def test_product_geometry_and_release_version(self):
-        self.assertEqual(APP_VERSION, '1.0.1')
-        self.assertEqual(PANEL_CONFIG['radius'], 16)
-        self.assertEqual(PANEL_CONFIG['sizes'], {'home': [372, 520], 'workspace': [372, 520]})
+        self.assertEqual(APP_VERSION, '1.0.2')
+        self.assertEqual(PANEL_CONFIG['radius'], 14)
+        self.assertEqual(PANEL_CONFIG['sizes'], {'home': [327, 458], 'workspace': [327, 458]})
 
 
 if __name__ == '__main__':

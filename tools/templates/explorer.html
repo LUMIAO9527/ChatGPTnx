@@ -15,7 +15,7 @@ function nav(){const q=$('#search').value.trim().toLowerCase();let group='';$('#
 function load(item){selected=item;try{history.replaceState(null,'','#'+item.id);}catch{}nav();$('#label').textContent=item.label;$('#group').textContent=item.group;$('#id').textContent=item.id+' · route: '+item.route;$('#note').textContent=item.note||'共享正式 UI 组件与交互处理，仅数据和桌面操作使用演示适配器。';$('#status').classList.remove('error');$('#status').textContent='正在载入…';$('#position').textContent=(catalog.indexOf(item)+1)+' / '+catalog.length;
 const query='?'+item.query+'&case='+encodeURIComponent(item.id)+'&appearance='+theme;
 const init='window.NX_PREVIEW_QUERY='+JSON.stringify(query)+';window.NX_PREVIEW_CASE='+JSON.stringify(item.id)+';window.NX_CONFIG=';
-frame.srcdoc=demo.replace('window.NX_CONFIG=',init);$('#caption').textContent='统一面板 372 × 520 · 点击面板即可操作';}
+frame.srcdoc=demo.replace('window.NX_CONFIG=',init);$('#caption').textContent='统一面板 __GEOMETRY__ · 点击面板即可操作';}
 function command(command,value){frame.contentWindow.postMessage({source:'chatgptnx-explorer',command,value},'*');}
 document.addEventListener('click',event=>{const b=event.target.closest('button');if(!b)return;if(b.dataset.case)load(catalog.find(c=>c.id===b.dataset.case));if(b.dataset.theme){theme=b.dataset.theme;document.querySelectorAll('[data-theme]').forEach(n=>n.setAttribute('aria-pressed',n.dataset.theme===theme));command('appearance',theme);}if(b.dataset.simulate)command('simulate',b.dataset.simulate);});
 $('#search').addEventListener('input',nav);$('#reset').onclick=()=>load(selected);$('#prev').onclick=()=>load(catalog[(catalog.indexOf(selected)+catalog.length-1)%catalog.length]);$('#next').onclick=()=>load(catalog[(catalog.indexOf(selected)+1)%catalog.length]);

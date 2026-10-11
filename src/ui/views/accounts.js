@@ -14,7 +14,7 @@ window.NXViews.accounts = context => {
       return quotaValue(b,minutes)-quotaValue(a,minutes) || name(a).localeCompare(name(b),'zh-CN');
     });
     const rows=sorted.map(a=>{
-      const windows=window.NXComponents.displayWindows(a).slice(0,2).map(w=>`<span class="quota-overview-window ${100-w.used<=10?'danger':''}"><em>${esc(w.label)}</em><strong class="mono">${remaining(w)}%</strong><small class="mono" data-duration="${duration(w)}" data-reset="${w.resets_at}">${reset(w.resets_at)}</small></span>`).join('');
+      const windows=window.NXComponents.displayWindows(a).slice(0,2).map(w=>`<span class="quota-overview-window ${100-w.used<=10?'danger':''}" data-window-minutes="${esc(duration(w))}"><em>${esc(w.label)}</em><strong class="mono">${remaining(w)}%</strong><small class="mono" data-duration="${duration(w)}" data-reset="${w.resets_at}">${reset(w.resets_at)}</small></span>`).join('');
       return `<button class="quota-overview-row" data-action="detail" data-email="${esc(a.email)}">${window.NXComponents.avatar(a)}<span class="quota-overview-main"><span class="identity-title"><strong title="${esc(name(a))}">${esc(name(a))}</strong><span class="badge">${esc(plan(a.plan))}</span>${a.email===data.current?'<span class="current-chip">当前</span>':''}</span><span class="quota-overview-windows">${windows||'<span class="muted small">额度暂不可用</span>'}</span></span>${icon('chevron')}</button>`;
     }).join('');
     const metrics=[['quota','额度'],['time','时间']],scopes=[['relay','接力'],['five','5h'],['week','周']];

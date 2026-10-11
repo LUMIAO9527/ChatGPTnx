@@ -6,13 +6,19 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 sys.path.insert(0, str(ROOT / 'tools'))
-from build import CONFIG, panel
+from build import CONFIG, panel, windows_version, APP_VERSION
 from nx.desktop import DEFAULT_CONFIG
 
 
 class BuildTests(unittest.TestCase):
     def test_native_and_html_share_geometry(self):
         self.assertEqual(CONFIG, DEFAULT_CONFIG)
+
+    def test_windows_file_version_matches_application(self):
+        resource = windows_version()
+        self.assertIn(f"StringStruct('FileVersion', '{APP_VERSION}')", resource)
+        self.assertIn(f"StringStruct('ProductVersion', '{APP_VERSION}')", resource)
+        self.assertIn('filevers=(1, 0, 2, 0)', resource)
 
     def test_production_has_no_demo_data_or_external_resources(self):
         html = panel()
@@ -26,7 +32,7 @@ class BuildTests(unittest.TestCase):
         for demo in (False, True):
             with self.subTest(demo=demo):
                 html = panel(demo=demo)
-                for marker in ('window.NXFeedback =', 'window.NXMath =', 'window.NXComponents =', 'window.NXRuntime =',
+                for marker in ('window.NXMotion =', 'window.NXFeedback =', 'window.NXMath =', 'window.NXComponents =', 'window.NXRuntime =',
                                'window.NXViews.accounts =', 'window.NXViews.resume =',
                                'window.NXViews.usage =', 'window.NXViews.settings ='):
                     self.assertEqual(html.count(marker), 1)

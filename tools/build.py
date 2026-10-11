@@ -18,7 +18,7 @@ from nx.resume_policy import ATTENTION_REASONS, RETRYABLE_REASONS
 from screen_catalog import CASES
 
 STYLES = ('tokens.css', 'common.css', 'feedback.css')
-SCRIPTS = ('usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'app.js')
+SCRIPTS = ('usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'motion.js', 'app.js')
 
 
 def ui_source_digest():
@@ -47,10 +47,28 @@ def panel(*, demo=False, proposal=None):
 <body class="{body_class}"><div id="app"></div><script>window.NX_CONFIG=Object.freeze({json.dumps(cfg, ensure_ascii=False)});\n{brand}{policy}{catalog}{js}</script></body></html>'''
 
 
+def windows_version():
+    """Windows file properties use the same release version as the application."""
+    version = tuple(map(int, APP_VERSION.split('.'))) + (0,)
+    return f'''VSVersionInfo(
+  ffi=FixedFileInfo(filevers={version!r}, prodvers={version!r}, mask=0x3f,
+    flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[StringFileInfo([StringTable('040904b0', [
+    StringStruct('FileDescription', 'ChatGPTnx'),
+    StringStruct('FileVersion', '{APP_VERSION}'),
+    StringStruct('InternalName', 'ChatGPTnx'),
+    StringStruct('OriginalFilename', 'ChatGPTnx.exe'),
+    StringStruct('ProductName', 'ChatGPTnx'),
+    StringStruct('ProductVersion', '{APP_VERSION}')])]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])])
+'''
+
+
 def build():
     RESOURCES.mkdir(parents=True, exist_ok=True)
     (RESOURCES / 'panel.html').write_text(panel(demo=False), encoding='utf-8')
     (RESOURCES / 'demo.html').write_text(panel(demo=True), encoding='utf-8')
+    (RESOURCES / 'version.txt').write_text(windows_version(), encoding='utf-8')
     (RESOURCES / 'nx.ico').write_bytes((ROOT / 'src' / 'assets' / 'nx.ico').read_bytes())
     (RESOURCES / 'switch_account.ps1').write_bytes((ROOT / 'src' / 'switch_account.ps1').read_bytes())
     (RESOURCES / 'continue_in_desktop.ps1').write_bytes((ROOT / 'src' / 'continue_in_desktop.ps1').read_bytes())
