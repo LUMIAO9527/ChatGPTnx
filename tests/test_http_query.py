@@ -193,6 +193,69 @@ class HTTPQueryTests(unittest.TestCase):
         self.assertTrue(result['ok']);self.assertNotIn('query_warning',result)
         self.assertEqual(result['banked_resets']['items'],[])
         self.assertTrue(self.q.ready('c@example.com',False))
+        self.assertTrue(self.q.ready('a@example.com',True))
+        self.assertTrue(self.q.ready('b@example.com',False))
+
+    def test_network_recovery_preserves_login_permission_and_rate_limit_pauses(self):
+        credential=credential_fingerprint(self.paths.auth.read_bytes())
+        for code in ('reauth_required',403,429,503):
+            with self.subTest(code=code):
+                self.q.policy.failed('a@example.com',credential,code,{'retry_after_at':self.now+7200})
+                before=(self.paths.data/'query-policy.json').read_bytes()
+                self.assertFalse(self.q.recover_network('a@example.com',True))
+                self.assertEqual((self.paths.data/'query-policy.json').read_bytes(),before)
+        self.client.get.assert_not_called()
+
+    def test_network_recovery_does_not_reset_optional_endpoint_pause(self):
+        credential=credential_fingerprint(self.paths.auth.read_bytes())
+        self.q.policy.failed('a@example.com',credential,403,{'phase':'reset_credits'},scope='reset_credits')
+        self.client.get.side_effect=RPCError('network','network')
+        self.q.run('a@example.com',True)
+        self.assertTrue(self.q.recover_network('a@example.com',True))
+        self.client.get.side_effect=lambda endpoint,*args: response() if endpoint=='/wham/usage' else self.fail('paused optional endpoint retried')
+        self.assertTrue(self.q.run('a@example.com',True)['ok'])
+        self.assertEqual(self.client.get.call_count,2)
+        self.assertFalse(self.q.policy.status('a@example.com',credential,scope='reset_credits')['ready'])
+        self.assertFalse(self.q.policy._probes)
+
+    def test_success_clears_only_primary_network_failures_for_other_accounts(self):
+        policy=self.q.policy
+        for email,code,scope in (('net@example.com','network','account'),
+                                 ('timeout@example.com','timeout','account'),
+                                 ('login@example.com','reauth_required','account'),
+                                 ('denied@example.com',403,'account'),
+                                 ('limited@example.com',429,'account'),
+                                 ('server@example.com',503,'account'),
+                                 ('optional@example.com','network','reset_credits')):
+            policy.failed(email,'b'*64,code,{'phase':'reset_credits' if scope=='reset_credits' else 'quota'},scope=scope)
+        policy.succeeded('a@example.com','a'*64)
+        for email in ('net@example.com','timeout@example.com'):
+            self.assertTrue(policy.status(email,'b'*64)['ready'])
+        for email in ('login@example.com','denied@example.com','limited@example.com','server@example.com'):
+            self.assertFalse(policy.status(email,'b'*64)['ready'])
+        self.assertFalse(policy.status('optional@example.com','b'*64,scope='reset_credits')['ready'])
+
+    def test_legacy_long_network_wait_is_shortened_without_changing_rate_limit(self):
+        credential=credential_fingerprint(self.paths.auth.read_bytes())
+        records={account_key('a@example.com'):{'credential':credential,'error_code':'network',
+                 'retry_at':self.now+800,'updated_at':self.now-90,'attempts':6},
+                 account_key('limited@example.com'):{'credential':'b'*64,'error_code':429,
+                 'retry_at':self.now+7200,'updated_at':self.now-90,'attempts':6}}
+        document={'version':1,'accounts':records,'network':{'retry_at':self.now+800,
+                  'attempts':6,'recent':{account_key('a@example.com'):self.now-90}}}
+        atomic_bytes(self.paths.data/'query-policy.json',json.dumps(document).encode())
+        self.assertTrue(self.new_query().ready('a@example.com',True))
+        self.assertEqual(self.q.policy.status('limited@example.com','b'*64)['retry_at'],self.now+7200)
+        self.client.get.assert_not_called()
+
+    def test_shared_network_wait_is_not_multiplied_by_accounts_or_preheat_failures(self):
+        for attempt in range(9):
+            for email in ('a@example.com','b@example.com','c@example.com'):
+                value=self.q.policy.failed(email,'b'*64,'network',{'phase':'quota'})
+                self.assertLessEqual(value['retry_at'],self.now+60)
+            self.assertFalse(self.q.policy.status('d@example.com','b'*64)['ready'])
+            self.now+=60
+            self.assertTrue(self.q.policy.status('d@example.com','b'*64)['ready'])
 
     def test_query_policy_file_contains_only_hashes_and_safe_metadata(self):
         failure=RPCError('fixture-access a@example.com C:/private/path',403)
@@ -234,17 +297,25 @@ class HTTPQueryTests(unittest.TestCase):
         self.assertFalse(self.q.ready('a@example.com',True))
         self.q.run('a@example.com',True);self.assertEqual(self.client.get.call_count,1)
 
-    def test_backoff_is_bounded_and_success_resets_it(self):
-        self.client.get.side_effect=RPCError('network','network')
-        for attempt in range(9):
-            result=self.q.run('a@example.com',True)
-            expected=min(60*2**attempt,900)
-            self.assertEqual(result['retry_at']-self.now,expected)
-            self.now+=expected
+    def test_network_wait_stays_short_after_repeated_failures(self):
+        for code in ('network','timeout'):
+            self.client.get.side_effect=RPCError('network',code)
+            for attempt in range(9):
+                result=self.q.run('a@example.com',True)
+                self.assertEqual(result['retry_at']-self.now,60)
+                self.now+=60
         self.client.get.side_effect=lambda endpoint,*args: response() if endpoint=='/wham/usage' else {'available_count':2,'credits':[]}
         self.assertTrue(self.q.run('a@example.com',True)['ok'])
         self.client.get.side_effect=RPCError('network','network')
         self.assertEqual(self.q.run('a@example.com',True)['retry_at']-self.now,60)
+
+    def test_rate_limit_and_server_backoff_still_grow(self):
+        for code,maximum in ((429,1800),(503,900)):
+            for attempt in range(9):
+                state=self.q.policy.failed(str(code)+'@example.com','b'*64,code,{})
+                delay=min(60*2**attempt,maximum)
+                self.assertEqual(state['retry_at']-self.now,delay)
+                self.now+=delay
 
     def test_identity_mismatch_stops_before_secondary_endpoints(self):
         self.client.get.side_effect=None;self.client.get.return_value={**response(),'account_id':'other'}

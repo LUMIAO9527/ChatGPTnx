@@ -416,7 +416,7 @@ class Service:
         self.state.change('cache', merge)
         return copy.deepcopy(stored)
 
-    def _refresh(self, targets=None, cancel=None):
+    def _refresh(self, targets=None, cancel=None, recover_network=False):
         emails = self.accounts.all()
         current = self.accounts.current()
         if targets is None:
@@ -428,25 +428,37 @@ class Service:
         settings = self.state.get('settings')
         count = 0
         results = {}
+        probe = None
+        if recover_network and isinstance(self.query, Query):
+            statuses = {email: self.query.status(email, email == current) for email in targets}
+            if any(not status['ready'] and status['error_code'] in ('network', 'timeout')
+                   for status in statuses.values()):
+                probe = next((email for email in targets if statuses[email]['ready'] or
+                              self.query.recover_network(email, email == current)), None)
+        batches = [[probe], [email for email in targets if email != probe]] if probe else [targets]
         with ThreadPoolExecutor(max_workers=min(2, max(1, int(settings['query_workers'])))) as pool:
-            futures = {pool.submit(self.query.run, email, email == current, cancel=cancel): email for email in targets}
-            for future in as_completed(futures):
-                if cancel and cancel.is_set():
-                    continue
-                email = futures[future]
-                try:
-                    result = future.result()
-                except Exception:
-                    result = {'email': email, 'ok': False, 'err': '查询失败', 'error_code': 'unexpected'}
-                if not result.get('ok'):
-                    result['attempted_at'] = int(time.time())
-                result.update(credential_metadata(self.paths.auth if email == current else self.paths.snapshot(email)))
-                result = self._store_quota(result)
-                self.early_anchor.observe_limits(result)
-                results[email] = copy.deepcopy(result)
-                count += 1
-                self.phase(f'正在刷新 {count}/{len(targets)}')
-                self.notify()
+            for batch in batches:
+                futures = {pool.submit(self.query.run, email, email == current, cancel=cancel): email for email in batch}
+                for future in as_completed(futures):
+                    if cancel and cancel.is_set():
+                        continue
+                    email = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception:
+                        result = {'email': email, 'ok': False, 'err': '查询失败', 'error_code': 'unexpected'}
+                    if not result.get('ok'):
+                        result['attempted_at'] = int(time.time())
+                    result.update(credential_metadata(self.paths.auth if email == current else self.paths.snapshot(email)))
+                    result = self._store_quota(result)
+                    self.early_anchor.observe_limits(result)
+                    results[email] = copy.deepcopy(result)
+                    count += 1
+                    self.phase(f'正在刷新 {count}/{len(targets)}')
+                    self.notify()
+                # Recover the connection once before querying the remaining roster.
+                if (cancel and cancel.is_set()) or (probe and not results.get(probe, {}).get('ok')):
+                    break
         full = set(targets) == set(emails) and len(results) == len(targets) and not (cancel and cancel.is_set())
         self.state.change('cache', lambda cache: {**cache, 'current': self.accounts.current(),
             'updated': int(time.time()) if full and any(a.get('ok') for a in results.values())
@@ -469,7 +481,7 @@ class Service:
                 return {'ok': True, 'accepted': False, 'reason': 'query_paused'}
         cancel = threading.Event()
         def work():
-            results = self._refresh(targets, cancel)
+            results = self._refresh(targets, cancel, recover_network=not background)
             if results and not any(a.get('ok') for a in results.values()):
                 raise RuntimeError('额度查询未完成，请稍后刷新')
         return self.begin('refresh', email, work,

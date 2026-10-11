@@ -283,6 +283,16 @@ class Query:
         except (OSError, ValueError, TypeError):
             return False
 
+    def recover_network(self, email, current=False):
+        try:
+            if self._policy_unavailable:
+                return False
+            path = self.paths.auth if current else self.paths.snapshot(email)
+            credential, code = self._credential_hint(path, email)
+            return not code and self.policy.recover_network(email, credential)
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
+
     def _failure(self, email, code, details, policy=None):
         if (policy or {}).get('error_code') == 'query_policy_unavailable':
             code = 'query_policy_unavailable'

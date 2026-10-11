@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 from nx.storage import Paths, State, Accounts, atomic_bytes, identity, credential_metadata, safe_email, timestamp
 from nx.core import Service, relay_candidate
 from nx.quota import RPCError, Query, normalize_limits, normalize_usage
+from nx.quota_http import credential_fingerprint
 from nx.desktop import Desktop, launch_chatgpt, popup_position
 
 
@@ -370,6 +371,108 @@ class TransactionTests(Fixture):
         self.query.codes = {email:'network' for email in self.accounts.all()}
         self.service.refresh(); self.wait()
         self.assertEqual(self.service.get_data()['updated'], old)
+        self.assertFalse(self.service.last_result['ok'])
+
+    def http_query(self):
+        client = Mock()
+        def get(endpoint, token, account_id, timeout, cancel):
+            if endpoint == '/wham/rate-limit-reset-credits':
+                return {'available_count': 2, 'credits': []}
+            return {'account_id': account_id, 'email': account_id.removeprefix('fixture-'),
+                    'plan_type': 'plus', 'rate_limit': {'primary_window': {
+                        'used_percent': 10, 'limit_window_seconds': 18000, 'reset_at': 1900000000}}}
+        client.get.side_effect = get
+        query = Query(self.paths, lambda: self.service.state.get('settings'), client=client)
+        self.service.query = query
+        return query, client
+
+    def pause_network(self, query, emails=None):
+        for email in emails or self.accounts.all():
+            path = self.paths.auth if email == self.accounts.current() else self.paths.snapshot(email)
+            query.policy.failed(email, credential_fingerprint(path.read_bytes()), 'network', {'phase': 'quota'})
+
+    def test_manual_refresh_recovers_network_then_updates_whole_roster_and_relay(self):
+        self.refresh()
+        self.service.state.change('cache', lambda cache: {**cache, 'updated': int(time.time())-2000})
+        credentials = {p: p.read_bytes() for p in [self.paths.auth, *self.paths.snapshots.glob('*')] if p.is_file()}
+        query, client = self.http_query()
+        self.pause_network(query)
+        self.assertFalse(self.service.refresh(background=True)['accepted'])
+        client.get.assert_not_called()
+        self.assertTrue(self.service.refresh()['accepted']); self.wait()
+        self.assertTrue(self.service.last_result['ok'])
+        data = self.service.get_data()
+        self.assertTrue(all(account['ok'] for account in data['accounts']))
+        self.assertEqual(data['relay_email'], 'b@example.com')
+        self.assertLess(abs(data['updated']-time.time()), 3)
+        self.assertEqual([call.args[2] for call in client.get.call_args_list
+                          if call.args[0] == '/wham/usage'], ['fixture-a@example.com','fixture-b@example.com'])
+        self.assertEqual(credentials, {p: p.read_bytes() for p in credentials})
+
+    def test_failed_manual_network_probe_does_not_query_every_account(self):
+        self.refresh()
+        before = self.service.state.get('cache')
+        query, client = self.http_query()
+        self.pause_network(query)
+        client.get.side_effect = RPCError('synthetic offline', 'network')
+        self.service.refresh(); self.wait()
+        self.assertEqual(client.get.call_count, 1)
+        self.assertFalse(self.service.last_result['ok'])
+        self.assertEqual(self.service.state.get('cache')['updated'], before['updated'])
+        self.assertEqual([a['windows'] for a in self.service.state.get('cache')['accounts']],
+                         [a['windows'] for a in before['accounts']])
+        self.assertFalse(self.service.refresh(background=True)['accepted'])
+        self.service.refresh(); self.wait()
+        self.assertEqual(client.get.call_count, 2)
+
+    def test_healthy_current_account_recovers_a_backup_network_wait(self):
+        query, client = self.http_query()
+        self.pause_network(query, ['b@example.com'])
+        self.service.refresh(); self.wait()
+        self.assertTrue(self.service.last_result['ok'])
+        self.assertEqual([call.args[2] for call in client.get.call_args_list
+                          if call.args[0] == '/wham/usage'], ['fixture-a@example.com','fixture-b@example.com'])
+        self.assertTrue(all(a['ok'] for a in self.service.get_data()['accounts']))
+
+    def test_manual_detail_network_recovery_stays_scoped_to_one_account(self):
+        query, client = self.http_query()
+        self.pause_network(query)
+        self.service.refresh('b@example.com'); self.wait()
+        self.assertTrue(self.service.last_result['ok'])
+        self.assertEqual({call.args[2] for call in client.get.call_args_list}, {'fixture-b@example.com'})
+
+    def test_manual_refresh_does_not_unpause_auth_permission_or_rate_limit(self):
+        query, client = self.http_query()
+        for code in ('reauth_required',403,429):
+            with self.subTest(code=code):
+                for email in self.accounts.all():
+                    path = self.paths.auth if email == self.accounts.current() else self.paths.snapshot(email)
+                    query.policy.failed(email, credential_fingerprint(path.read_bytes()), code, {})
+                self.service.refresh(); self.wait()
+                self.assertFalse(self.service.last_result['ok'])
+                client.get.assert_not_called()
+
+    def test_consecutive_manual_refreshes_never_overlap_network_probes(self):
+        query, client = self.http_query()
+        self.pause_network(query)
+        entered = threading.Event()
+        calls, active, peak = 0, 0, 0
+        guard = threading.Lock()
+        def get(endpoint, token, account_id, timeout, cancel):
+            nonlocal calls, active, peak
+            with guard:
+                calls += 1; active += 1; peak = max(peak, active)
+            entered.set()
+            try:
+                cancel.wait(.2)
+                raise RPCError('synthetic offline', 'cancelled' if cancel.is_set() else 'network')
+            finally:
+                with guard: active -= 1
+        client.get.side_effect = get
+        self.assertTrue(self.service.refresh()['accepted'])
+        self.assertTrue(entered.wait(2))
+        self.assertTrue(self.service.refresh()['accepted']); self.wait()
+        self.assertEqual((calls, peak, active), (2, 1, 0))
         self.assertFalse(self.service.last_result['ok'])
 
     def test_other_account_refresh_cannot_overwrite_preheat_result(self):

@@ -12,6 +12,7 @@ from .storage import atomic_bytes
 
 _LOCK = threading.RLock()
 MAX_STATE_BYTES = 1024 * 1024
+NETWORK_RETRY_SECONDS = 60
 
 
 def account_key(email, scope='account'):
@@ -54,14 +55,20 @@ class QueryPolicy:
                 'error_code': safe_code(record.get('error_code')), 'paused': record.get('paused') is True,
                 'attempts': min(int(_number(record.get('attempts'))), 20),
                 'retry_at': _number(record.get('retry_at')), 'updated_at': _number(record.get('updated_at'))}
+            if accounts[key]['error_code'] in ('network', 'timeout'):
+                accounts[key]['retry_at'] = min(accounts[key]['retry_at'],
+                    accounts[key]['updated_at'] + NETWORK_RETRY_SECONDS)
         network = data.get('network')
         network = network if isinstance(network, dict) else {}
         recent = network.get('recent')
+        recent = {key: _number(value) for key, value in recent.items() if _hex(key)} \
+            if isinstance(recent, dict) else {}
         return {'accounts': accounts, 'network': {
-            'retry_at': _number(network.get('retry_at')),
+            # Apply the short network retry to state left by older versions too.
+            'retry_at': min(_number(network.get('retry_at')),
+                            math.ceil(max(recent.values(), default=0) + NETWORK_RETRY_SECONDS)),
             'attempts': min(int(_number(network.get('attempts'))), 20),
-            'recent': {key: _number(value) for key, value in recent.items() if _hex(key)}
-                if isinstance(recent, dict) else {}}}
+            'recent': recent}}
 
     def _write(self, data):
         # Old fingerprints are replaced on every credential change. Bound old
@@ -110,8 +117,11 @@ class QueryPolicy:
                 return {**safe_fields(details), 'error_code': code, 'paused': False, 'retry_at': None, 'ready': True}
             retry_at = 0
             if transient:
-                delay = min(60 * 2 ** (attempts - 1), 1800 if code == 429 else 900)
-                retry_at = math.ceil(max(now + delay, _number(details.get('retry_after_at'))))
+                if code in ('network', 'timeout'):
+                    retry_at = math.ceil(now + NETWORK_RETRY_SECONDS)
+                else:
+                    delay = min(60 * 2 ** (attempts - 1), 1800 if code == 429 else 900)
+                    retry_at = math.ceil(max(now + delay, _number(details.get('retry_after_at'))))
             data['accounts'][key] = {**safe_fields(details), 'credential': credential, 'error_code': code,
                 'paused': paused, 'retry_at': retry_at, 'attempts': attempts, 'updated_at': int(now)}
             if scope == 'account' and code in ('network', 'timeout'):
@@ -121,19 +131,36 @@ class QueryPolicy:
                 network['recent'] = recent
                 if len(recent) >= 2 or network.get('retry_at', 0) > now:
                     count = min(network.get('attempts', 0) + 1, 20)
-                    network.update(attempts=count, retry_at=math.ceil(now + min(60 * 2 ** (count - 1), 900)))
+                    network.update(attempts=count, retry_at=math.ceil(now + NETWORK_RETRY_SECONDS))
             self._write(data)
             return self._status(data, key, credential)
 
     def succeeded(self, email, credential):
         with _LOCK:
             data, key = self._read(), account_key(email)
-            if key in data['accounts'] or data['network'].get('retry_at') or data['network'].get('recent'):
-                data['accounts'].pop(key, None)
+            recovered = {k: v for k, v in data['accounts'].items() if k != key and
+                (v.get('error_code') not in ('network', 'timeout') or v.get('phase') == 'reset_credits')}
+            if recovered != data['accounts'] or data['network'].get('retry_at') or data['network'].get('recent'):
                 # A successful actual network request proves connectivity.
+                data['accounts'] = recovered
                 data['network'] = {}
                 self._probes.clear()
                 self._write(data)
+
+    def recover_network(self, email, credential):
+        """Authorize one manual connection probe without resetting other errors."""
+        with _LOCK:
+            data, key = self._read(), account_key(email)
+            status = self._status(data, key, credential)
+            if status['ready'] or status['paused'] or status['error_code'] not in ('network', 'timeout'):
+                return False
+            entry = data['accounts'].get(key, {})
+            if entry.get('credential') == credential and entry.get('error_code') in ('network', 'timeout'):
+                data['accounts'].pop(key, None)
+            if data['network'].get('retry_at', 0) > self.clock():
+                self._probes.add(key)
+            self._write(data)
+            return True
 
     def resume(self, email):
         """Explicit user action only. Never bypass 401 or rate-limit cooldown."""
