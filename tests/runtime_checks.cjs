@@ -32,13 +32,16 @@ class DomNode {
   hasAttribute(name){return this.attrs.has(name);}
   setAttribute(name,value){this.attrs.set(name,String(value));}
   removeAttribute(name){this.attrs.delete(name);}
-  matches(selector){return selector==='.field'&&(this.getAttribute('class')||'').split(' ').includes('field');}
+  matches(selector){return selector.startsWith('.')&&(this.getAttribute('class')||'').split(' ').includes(selector.slice(1));}
+  querySelectorAll(selector){const found=[];for(const child of this.childNodes){if(child.matches(selector))found.push(child);found.push(...child.querySelectorAll(selector));}return found;}
+  querySelector(selector){return this.querySelectorAll(selector)[0]||null;}
+  contains(other){return this===other||this.childNodes.some(child=>child.contains(other));}
   insertBefore(node,cursor){node.remove();const index=cursor?this.childNodes.indexOf(cursor):this.childNodes.length;if(index<0)throw Error('Invalid cursor');this.childNodes.splice(index,0,node);node.parentNode=this;return node;}
   remove(){if(this.parentNode){const siblings=this.parentNode.childNodes;siblings.splice(siblings.indexOf(this),1);this.parentNode=null;}}
 }
 const text=value=>new DomNode('#text',{text:value});
 const node=(tag,attrs={},children=[])=>new DomNode(tag,attrs,children);
-const patch=(root,next)=>{dom.next=next;context.window.NXRuntime.patchHTML(root,'fixture');};
+const patch=(root,next,options)=>{dom.next=next;context.window.NXRuntime.patchHTML(root,'fixture',options);};
 (async()=>{
   await check('navigation/old-read-invalidated',()=>{
     const epoch=readEpoch(), first=epoch.ticket();epoch.invalidate();
@@ -89,6 +92,72 @@ const patch=(root,next)=>{dom.next=next;context.window.NXRuntime.patchHTML(root,
     const control=node('button',{'data-action':'refresh',style:'opacity:0','aria-label':'Refresh'});control.__nxMotionOwned=true;
     const root=node('div',{},[control]);patch(root,node('div',{},[node('button',{'data-action':'refresh',disabled:'','aria-label':'Refreshing'})]));
     assert.equal(root.firstChild,control);assert.equal(control.getAttribute('style'),'opacity:0');assert(control.hasAttribute('disabled'));assert.equal(control.getAttribute('aria-label'),'Refreshing');
+  });
+  await check('refresh/live-avatar-slot-is-preserved-without-replacing-its-glyph',()=>{
+    const slot=node('span',{'aria-hidden':'true'});slot.__nxMotionPlaceholder=true;
+    const glyph=text('A'),avatar=node('span',{class:'avatar',style:'position:fixed'},[glyph]);avatar.__nxMotionOwned=true;
+    const name=node('strong',{},[text('Account')]),root=node('div',{},[slot,avatar,name]);
+    for(let i=0;i<20;i++)patch(root,node('div',{},[node('span',{class:'avatar'},[text('A')]),node('strong',{},[text('Account')])]));
+    assert.deepEqual(root.childNodes,[slot,avatar,name]);assert.equal(avatar.firstChild,glyph);
+    assert.equal(avatar.getAttribute('style'),'position:fixed');assert(slot.__nxMotionPlaceholder);
+    slot.remove();assert.deepEqual(root.childNodes,[avatar,name]);
+  });
+  await check('refresh/slots-do-not-disturb-keyed-sibling-order-or-cleanup',()=>{
+    const slot=node('span');slot.__nxMotionPlaceholder=true;
+    const avatar=node('span',{class:'avatar'},[text('A')]);
+    const row=id=>node('button',{'data-action':'detail','data-email':id},[text(id)]);
+    const a=row('a'),b=row('b'),root=node('div',{},[a,slot,avatar,b]);
+    patch(root,node('div',{},[row('b'),node('span',{class:'avatar'},[text('A')]),row('a')]));
+    assert.deepEqual(root.childNodes.filter(n=>!n.__nxMotionPlaceholder),[b,avatar,a]);assert.equal(slot.parentNode,root);
+    patch(root,node('div',{},[row('a')]));assert.deepEqual(root.childNodes.filter(n=>!n.__nxMotionPlaceholder),[a]);
+    slot.remove();assert.deepEqual(root.childNodes,[a]);
+  });
+  await check('navigation/same-account-card-and-text-survive-route-changes',()=>{
+    const glyph=text('A'),name=text('Account A'),avatar=node('span',{class:'avatar'},[glyph]);
+    const card=node('section',{'data-motion-identity':'a'},[avatar,node('strong',{},[name])]);
+    const body=node('div',{class:'sheet-body detail-body'},[card]),root=node('section',{},[body]);
+    patch(root,node('section',{},[node('div',{class:'sheet-body usage-body'},[
+      node('section',{'data-motion-identity':'a'},[node('span',{class:'avatar'},[text('A')]),node('strong',{},[text('Account A')])])
+    ])]),{preserveFields:false});
+    assert.equal(root.firstChild,body);assert.equal(body.firstChild,card);assert.equal(card.firstChild,avatar);
+    assert.equal(avatar.firstChild,glyph);assert.equal(card.childNodes[1].firstChild,name);
+    assert.equal(body.getAttribute('class'),'sheet-body usage-body');
+  });
+  await check('navigation/fields-reset-while-passive-refresh-keeps-the-draft',()=>{
+    const field=node('input',{id:'alias',class:'field',value:'Account A'});field.value='unsaved A';
+    const root=node('section',{},[field]);
+    patch(root,node('section',{},[node('input',{id:'alias',class:'field',value:'Account A'})]));
+    assert.equal(root.firstChild,field);assert.equal(field.value,'unsaved A');
+    const incoming=node('input',{id:'alias',class:'field',value:'Account B'});
+    patch(root,node('section',{},[incoming]),{preserveFields:false});
+    assert.equal(root.firstChild,incoming);assert.notEqual(root.firstChild,field);assert.equal(root.firstChild.getAttribute('value'),'Account B');
+    assert.equal(field.parentNode,null);
+  });
+  await check('navigation/real-route-renderer-reuses-the-card-and-resets-only-new-route-scroll',()=>{
+    const app=fs.readFileSync(path.join(__dirname,'../src/ui/app.js'),'utf8');
+    const start=app.indexOf('  function renderSheet('),end=app.indexOf('  const inlineWrites=',start),renderer=app.slice(start,end);
+    const avatar=node('span',{class:'avatar'},[text('A')]),card=node('section',{'data-motion-identity':'a'},[avatar]);
+    const body=node('div',{class:'sheet-body detail-body'},[card]),sheet=node('section',{},[body]);body.scrollTop=57;
+    const incoming=()=>node('section',{},[node('div',{class:'sheet-body usage-body'},[node('section',{'data-motion-identity':'a'},[node('span',{class:'avatar'},[text('A')])])])]);
+    const env={sheet,ui:{page:'usage',scope:'a'},data:{accounts:[]},composingField:null,document:{activeElement:null},window:{NXMotion:{paint(){}}},
+      esc:components.esc,captureScroll:context.window.NXRuntime.captureScroll,restoreScroll:context.window.NXRuntime.restoreScroll,focusKey:()=>null,restoreFocus(){},
+      usageContent:()=>'',pageHead:()=>'',statusRegion:()=>'',paintNotifications(){},feedback:{paint(){}},patchHTML:context.window.NXRuntime.patchHTML};
+    dom.next=incoming();vm.runInNewContext(renderer+'renderSheet(false);',env);
+    assert.equal(sheet.firstChild,body);assert.equal(body.firstChild,card);assert.equal(card.firstChild,avatar);assert.equal(body.scrollTop,0);
+    body.scrollTop=41;dom.next=incoming();vm.runInNewContext(renderer+'renderSheet(true);',env);
+    assert.equal(card.firstChild,avatar);assert.equal(body.scrollTop,41);
+  });
+  await check('tooltip/coordinates-stay-local-to-the-contained-and-scaled-panel',()=>{
+    const app=fs.readFileSync(path.join(__dirname,'../src/ui/app.js'),'utf8');
+    const start=app.indexOf('  function floatTip('),end=app.indexOf('  for(const event',start),code=app.slice(start,end);
+    for(const [left,top,scale,x,y] of [[0,0,1,148,220],[100,80,1,148,220],[50,80,.8,204,300]]){
+      const tip={offsetWidth:120,offsetHeight:30,style:{},hidden:true};
+      const panel={getBoundingClientRect:()=>({left,top,width:327*scale,height:458*scale})};
+      const el={dataset:{floatTip:'Fixture'},getBoundingClientRect:()=>({left:left+(x-4)*scale,top:top+y*scale,width:8*scale})};
+      vm.runInNewContext(code+'floatTip(el);',{$:()=>tip,app:panel,el,requestAnimationFrame:fn=>fn(),getComputedStyle:()=>({width:'327px',height:'458px'})});
+      assert(Math.abs(parseFloat(tip.style.left)-Math.max(8,Math.min(199,x-60)))<1e-10);
+      assert(Math.abs(parseFloat(tip.style.top)-(y-38))<1e-10);assert.equal(tip.hidden,false);
+    }
   });
   await check('refresh/changed-widget-type-and-removed-attributes-are-applied',()=>{
     const root=node('div',{},[node('button',{'data-action':'refresh',disabled:''}),node('span',{},[text('old')])]);

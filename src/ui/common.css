@@ -36,7 +36,7 @@ button:disabled { cursor: not-allowed; opacity: .46; box-shadow: none; }
 [hidden] { display: none !important; }
 .icon { width: 19px; height: 19px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 #app { width: 327px; height: 458px; position: relative; overflow: hidden; background: var(--bg); border-radius: var(--window-r);
-  box-shadow: var(--shadow-window); isolation: isolate; }
+  box-shadow: var(--shadow-window); isolation: isolate; contain: paint; }
 body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-shadow: none; border-radius: 0; overflow: hidden; }
 #home, .sheet { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 #home { padding: 14px 16px 6px; gap: 10px; }
@@ -72,6 +72,12 @@ h3 { font-size: var(--font-page-title); font-weight: 620; }
 .identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .avatar { width: var(--avatar-size); height: var(--avatar-size); background: var(--surface-2);
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: var(--font-emphasis); font-weight: 600; }
+/* Keep the small avatar's raster surface stable when its movement ends. */
+.avatar, .usage-brand { will-change: transform; }
+/* Opacity surfaces keep Windows text rendering consistent before and after
+   navigation. Opacity does not create a containing block for moving avatars. */
+:root[data-motion="on"] :is(#home > *, .sheet-body > *, .sheet-head h2,
+  .sheet-foot, .current-card .identity-copy, .current-card .quota-bars) { will-change: opacity; }
 .identity-copy { flex: 1; min-width: 0; text-align: left; }
 .identity-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .identity-title strong { min-width: 0; }
@@ -306,7 +312,11 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .section-title h3 { margin: 0; font-size: var(--font-control); font-weight: 650; }
 .section-title > span { margin-left: auto; color: var(--muted); font-size: var(--font-small); }
 .trend { height: 58px; display: flex; align-items: flex-end; gap: 1px; padding-top: 7px; }
-.trend-bar { flex: 1 1 0; min-width: 1px; display: block; background: repeating-linear-gradient(135deg,#292929 0 2px,#626262 2px 4px); opacity: .9; border-radius: 2px 2px 0 0; }
+/* One cached vector tile preserves the hatch without a new gradient shader
+   for the first chart paint in an isolated WebView2 process. */
+.trend-bar { flex: 1 1 0; min-width: 1px; display: block;
+  background: #626262 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Crect width='8' height='8' fill='%23626262'/%3E%3Cpath d='M-2 2L2-2M0 8L8 0M6 10L10 6' stroke='%23292929' stroke-width='2.828427'/%3E%3C/svg%3E") repeat;
+  background-size: 5.656854px 5.656854px; opacity: .9; border-radius: 2px 2px 0 0; }
 .trend-bar.partial { opacity: .75; }
 .trend-bar.missing { height: 2px !important; background: var(--surface-2); opacity: .7; }
 .trend-bar.zero { height: 2px !important; opacity: .25; }
@@ -586,7 +596,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
   grid-auto-rows: minmax(44px, max-content); gap: 2px; padding-bottom: 2px;
 }
 .row { min-height: 44px; padding: 5px 7px; gap: 8px; }
-.row .avatar { width: 34px; height: 34px; }
+.row .avatar { width: 34px; height: 34px; font-size: calc(var(--font-emphasis) * .85); }
 .footer.slim { min-height: 32px; padding: 2px 1px 0; gap: 4px; }
 .footer.slim .refresh-status,
 .footer.slim .add { min-height: 32px; }
@@ -691,7 +701,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
   min-height: 52px; padding: 6px 10px; gap: 8px;
 }
 .quota-overview-row > .avatar {
-  width: 34px; height: 34px; font-size: var(--font-control);
+  width: 34px; height: 34px; font-size: calc(var(--font-emphasis) * .85);
 }
 .quota-overview-main .identity-title strong { font-size: var(--font-title); }
 .quota-overview-windows { margin-top: 3px; }

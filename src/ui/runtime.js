@@ -43,12 +43,17 @@ window.NXRuntime = (() => {
   };
   const compatible = (a, b) => a.nodeType === b.nodeType && a.nodeName === b.nodeName &&
     a.namespaceURI === b.namespaceURI && nodeKey(a) === nodeKey(b);
-  function patchChildren(root, incoming) {
-    const previous = [...root.childNodes], unused = new Set(previous);
-    let cursor = root.firstChild;
+  function patchChildren(root, incoming, preserveFields) {
+    // A moving live avatar keeps an inert layout slot beside it. This is not
+    // product markup: preserve it during refresh, and reconcile the real node.
+    const previous = [...root.childNodes].filter(node => !node.__nxMotionPlaceholder), unused = new Set(previous);
+    const nextContent = node => { while (node?.__nxMotionPlaceholder) node = node.nextSibling; return node; };
+    const reusable = (old, next) => compatible(old, next) &&
+      (preserveFields || !old.matches?.('.field'));
+    let cursor = nextContent(root.firstChild);
     for (const next of [...incoming.childNodes]) {
-      const node = cursor && unused.has(cursor) && compatible(cursor, next) ? cursor :
-        previous.find(old => unused.has(old) && compatible(old, next));
+      const node = cursor && unused.has(cursor) && reusable(cursor, next) ? cursor :
+        previous.find(old => unused.has(old) && reusable(old, next));
       if (!node) {
         root.insertBefore(next, cursor); continue;
       }
@@ -66,17 +71,17 @@ window.NXRuntime = (() => {
             if (attr.name === 'style' && node.__nxMotionOwned) continue;
             if (node.getAttribute(attr.name) !== attr.value) node.setAttribute(attr.name, attr.value);
           }
-          patchChildren(node, next);
+          patchChildren(node, next, preserveFields);
         }
       } else if (node.nodeValue !== next.nodeValue) node.nodeValue = next.nodeValue;
-      cursor = node.nextSibling;
+      cursor = nextContent(node.nextSibling);
     }
     for (const node of unused) node.remove();
   }
-  function patchHTML(root, html) {
+  function patchHTML(root, html, {preserveFields = true} = {}) {
     const template = root.ownerDocument.createElement('template');
     template.innerHTML = html;
-    patchChildren(root, template.content);
+    patchChildren(root, template.content, preserveFields);
   }
   return {readEpoch, coalescedRefresh, focusKey, restoreFocus, captureScroll, restoreScroll, patchHTML};
 })();

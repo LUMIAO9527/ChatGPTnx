@@ -389,7 +389,10 @@
     const oldError=preserve?sheet.querySelector('#form-error')?.textContent:'';
     const oldFields=[...sheet.querySelectorAll('.field')].map(n=>({node:n,id:n.id,value:n.value,invalid:n.getAttribute('aria-invalid'),focused:n===document.activeElement,start:n.selectionStart,end:n.selectionEnd}));
     const markup=pageHead(title,headActions)+`<div class="sheet-body ${cls}">${statusRegion()}${body}</div>`+(foot?`<footer class="sheet-foot ${footClass}">${foot}</footer>`:'');
-    if(preserve)patchHTML(sheet,markup);else sheet.innerHTML=markup;
+    // Keep shared identity nodes alive across routes. New routes reset input
+    // nodes and scroll; passive state refreshes preserve both.
+    patchHTML(sheet,markup,{preserveFields:preserve});
+    if(!preserve){const body=sheet.querySelector('.sheet-body');if(body)body.scrollTop=0;}
     if(preserve)for(const saved of oldFields){const node=document.getElementById(saved.id);if(node&&sheet.contains(node)){if(node!==saved.node)node.replaceWith(saved.node);const live=saved.node;live.value=saved.value;if(saved.invalid)live.setAttribute('aria-invalid',saved.invalid);if(saved.focused){live.focus({preventScroll:true});try{live.setSelectionRange(saved.start,saved.end);}catch{}}}}
     if(oldError&&sheet.querySelector('#form-error'))sheet.querySelector('#form-error').textContent=oldError;
     paintNotifications();restoreScroll(sheet,position);restoreFocus(sheet,key);feedback.paint();
@@ -748,9 +751,14 @@
     const tip=$('#float-tip');if(!tip||!el?.dataset.floatTip)return;
     tip.textContent=el.dataset.floatTip;tip.hidden=false;
     const r=el.getBoundingClientRect();requestAnimationFrame(()=>{
+      // #app contains fixed motion and tooltip painting. Work in its CSS
+      // coordinates, including a scaled/off-centre standalone preview.
+      const box=app.getBoundingClientRect(),css=getComputedStyle(app);
+      const width=parseFloat(css.width)||app.clientWidth,height=parseFloat(css.height)||app.clientHeight;
+      const sx=box.width/width,sy=box.height/height;
       const w=tip.offsetWidth,h=tip.offsetHeight;
-      tip.style.left=Math.max(8,Math.min(window.innerWidth-w-8,r.left+r.width/2-w/2))+'px';
-      tip.style.top=Math.max(8,r.top-h-8)+'px';
+      tip.style.left=Math.max(8,Math.min(width-w-8,(r.left+r.width/2-box.left)/sx-w/2))+'px';
+      tip.style.top=Math.max(8,(r.top-box.top)/sy-h-8)+'px';
     });
   }
   for(const event of ['mouseover','focusin'])app.addEventListener(event,e=>{const el=e.target.closest('[data-float-tip]');if(el)floatTip(el);});

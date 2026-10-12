@@ -60,6 +60,8 @@ The quota overview and usage statistics help you see which account is available 
 
 The current release is **v1.0.2**, with a 327×458 compact panel and lightweight motion. Its source archive is `ChatGPTnx-v1.0.2-source.zip`. The example screenshots show v1.0.1.
 
+This revision improves avatar movement, text flicker during navigation, and small shifts at the end of transitions. Repeated clicks preserve motion continuity, and background refreshes retain live page elements. No runtime dependency has been added.
+
 Download `ChatGPTnx.exe` from the [v1.0.2 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.2). The release also provides `ChatGPTnx-v1.0.2-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, and Microsoft Edge WebView2 Runtime.
 
 1. Put the EXE in its own writable folder and launch it. Open the panel from the system tray.
