@@ -6,6 +6,8 @@
   const id=window.NX_PREVIEW_CASE||params.get('case');
   const selected=(window.NX_CATALOG||[]).find(c=>c.id===id);
   const report=(type,extra={})=>{if(parent!==window)parent.postMessage({source:'chatgptnx-preview',type,...extra},'*');};
+  addEventListener('error',event=>report('error',{message:event.message||'页面脚本异常'}));
+  addEventListener('unhandledrejection',event=>report('error',{message:String(event.reason?.message||event.reason||'异步操作异常')}));
   async function applyStep(step) {
     if(step.simulate){window.NXDemo.simulate(step.simulate);await window.NXPreview.refresh();await wait(step.wait??80);return;}
     const target=step.click||step.fill||step.hover||step.scroll;
@@ -38,4 +40,6 @@
       report('state',{info:window.NXPreview.info()});
     }catch(error){report('error',{message:String(error.message||error)});}
   });
+  let lastInfo='';
+  setInterval(()=>{if(!window.NX_CASE_READY)return;const info=window.NXPreview.info(),key=JSON.stringify(info);if(key!==lastInfo){lastInfo=key;report('state',{info});}},400);
 })();

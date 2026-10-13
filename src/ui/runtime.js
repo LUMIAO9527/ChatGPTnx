@@ -24,7 +24,7 @@ window.NXRuntime = (() => {
       Object.entries(key).every(([k, v]) => node.dataset[k] === v)
     )?.focus({preventScroll: true});
   }
-  const scrollRegions = ['.sheet-body', '.account-list', '.onboarding-main'];
+  const scrollRegions = ['.sheet-body', '.account-list', '.onboarding-main', '.update-notes-body'];
   const captureScroll = root => scrollRegions.map(selector =>
     [selector, root.querySelector(selector)?.scrollTop || 0]);
   function restoreScroll(root, positions) {

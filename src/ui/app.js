@@ -20,6 +20,7 @@
     notify_credential:true, notify_low:false, notify_reset_expiry:true, relay_pick:null};
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[]};
   let workflowResume = false;
+  let lastLoginResult = '';
   const ui = {page:null, email:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), disclosures:new Set(), fullCollections:new Set(), inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
   let connected = false, bridgeError = '', acting = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
   const app = $('#app');
@@ -72,7 +73,7 @@
   function paintNotifications() {
     const surface=ui.page&&!sheet.hidden?sheet:home;
     const contextual=[...surface.querySelectorAll('template.status-source')].map(n=>n.dataset.default).find(Boolean);
-    const fallback=controlOperation?statusBar({text:controlOperation.text,tone:'progress'}):contextual||(['error','resume','resume-clear'].includes(ui.page)?'':notice());
+    const fallback=controlOperation?statusBar({text:controlOperation.text,tone:'progress'}):bridgeError?notice():contextual||(['error','resume','resume-clear'].includes(ui.page)?'':notice());
     activeStatusKey=fallback+'|'+(data.last_error?.id||'')+'|'+(data.resume?.id||'');
     const html=notificationMarkup()||(fallback&&dismissedStatus!==activeStatusKey?wrapStatus(fallback):'');
     statusDock.paint(surface,html);
@@ -165,7 +166,7 @@
   }
   function notice() {
     if(bridgeError)return statusBar({text:'本地连接中断 · 点击重新连接',tone:'warning',action:'refresh-state'});
-    if(data.reauth)return statusBar({text:'等待完成重新登录',action:'reauth',symbol:'user',attrs:`data-email="${esc(data.reauth.email)}"`});
+    if(data.reauth)return statusBar({text:data.login_progress?.message||'等待完成重新登录 · 自动验证并保存',action:'reauth',symbol:'user',attrs:`data-email="${esc(data.reauth.email)}"`});
     if(data.adding)return statusBar({text:'正在添加账号，返回完成',action:'add',symbol:'user'});
     if(data.operation&&data.operation.kind!=='refresh')return statusBar({text:data.operation.phase,tone:'progress'});
     if(data.monitor_health?.state==='degraded')return statusBar({text:'任务监控暂不可用 · 正在延迟重试',tone:'warning'});
@@ -211,14 +212,10 @@
   }
   function renderHome() {
     const position=captureScroll(home),key=focusKey(document.activeElement);
-    if (!connected) {
-      home.innerHTML=header()+statusRegion()+`<div class="empty"><h3>连接本地应用</h3><p class="note">${esc(bridgeError||'正在连接桌面服务…')}</p><button class="btn secondary" data-action="refresh-state">重新连接</button></div>`;
-      feedback.paint();if(!ui.page)paintNotifications();return;
-    }
     const wasOnboarding=home.classList.contains('is-onboarding');
     const onboarding=!data.accounts.length&&!data.adding;
     home.classList.toggle('is-onboarding',onboarding);
-    patchHTML(home,onboarding?window.NXViews.onboarding({...viewContext(),busy:busy()}):homeContent());
+    patchHTML(home,onboarding?window.NXViews.onboarding({...viewContext(),busy:busy(),connected,bridgeError}):homeContent());
     if(onboarding||wasOnboarding)setSize('home');
     if(!ui.page)paintNotifications();restoreScroll(home,position);restoreFocus(home,key);feedback.paint();
     if(!ui.page)window.NXMotion?.paint(home);
@@ -358,6 +355,8 @@
         ({title,body,cls}=window.NXViews.settings(viewContext()));break;
       case 'purchase':
         ({title,body,cls}=window.NXViews.purchase(viewContext()));break;
+      case 'support-qr':({title,body,cls}=window.NXViews.supportQr(viewContext()));break;
+      case 'update':({title,body,cls,foot,footClass}=window.NXViews.update(viewContext()));break;
       case 'resume':
         title='任务接续';body=resumeContent();cls='resume-body';headActions=tool('archive','resume-clear','清理已结束记录',ui.resumeDetails.some(s=>!['switching','resuming','waiting_account'].includes(s.phase))?'':'disabled');break;
       case 'resume-clear':
@@ -368,17 +367,17 @@
         title='添加账号';{
           const status=data.add_login_status,ready=status==='ready';
           const heading=!data.adding?'添加新的账号':ready?'新账号已就绪':'等待新账号登录';
-          const copy=!data.adding?'将重启桌面端，打开登录窗口。':ready?'确认后加入账号清单。':'取消会恢复添加前的账号。';
-          const state=data.operation?data.operation.phase:ready?'账号凭据已准备完成':status==='unchanged'?'仍是添加前的账号，请登录新账号':status==='existing'?'这个账号已经在清单里':status==='waiting'?'等待登录新账号':'等待打开登录窗口';
-          const steps=`<ol class="add-progress"><li class="${ready?'done':'current'}">在 ChatGPT 桌面端登录新账号</li><li class="${ready?'current':''}">${ready?'确认保存这个账号':'登录完成后，回到这里确认保存'}</li></ol>`;
+          const copy=!data.adding?'将重启桌面端，打开登录窗口。':'完成登录后自动验证并保存；取消会恢复原账号。';
+          const state=data.operation?data.operation.phase:data.login_progress?.message|| (ready?'已检测到登录，准备自动验证':status==='unchanged'?'仍是添加前的账号，请登录新账号':status==='existing'?'这个账号已经在清单里':status==='waiting'?'等待登录新账号':'等待打开登录窗口');
+          const steps=`<ol class="add-progress"><li class="${ready?'done':'current'}">在 ChatGPT 桌面端登录新账号</li><li class="${ready?'current':''}">自动验证并保存</li></ol>`;
           body=`<div class="confirm-mark">${icon(ready?'check':'plus')}</div><h3 class="confirm-title">${heading}</h3><p class="note">${copy}</p>${steps}${statusRegion(statusBar({text:state,tone:data.operation?'progress':ready?'success':'neutral',symbol:ready?'check':'clock',className:'flow-status'}))}`;
-          foot=data.adding?`<button class="btn secondary" data-action="cancel-add" ${disabled()}>取消并恢复</button><button class="btn primary" data-action="finish-add" ${disabled()||!ready?'disabled':''}>确认保存</button>`:`<button class="btn secondary" data-action="back">返回</button><button class="btn primary" data-action="start-add" ${disabled()}>打开登录窗口</button>`;break;
+          foot=data.adding?`<button class="btn secondary" data-action="cancel-add">取消并恢复</button><button class="btn primary" data-action="finish-add" ${disabled()||!ready?'disabled':''}>重试验证</button>`:`<button class="btn secondary" data-action="back">返回</button><button class="btn primary" data-action="start-add" ${disabled()}>打开登录窗口</button>`;break;
         }
       case 'reauth': {
         if(!a){closeSheet();return;}
         title='重新登录';const pending=data.reauth?.email===a.email,started=pending&&data.reauth.phase!=='ready';
-        body=`<div class="confirm-mark">${icon('user')}</div><h3 class="confirm-title">重新登录<br>${esc(name(a))}。</h3><p class="note">${started?'请在 ChatGPT 中完成“继续登录”或网页登录，然后回来验证。':'会重启桌面端，暂时退出当前账号。'}</p>${statusRegion(statusBar({text:data.operation?data.operation.phase:started?'登录完成后，点击“验证并保存”。':'取消可恢复原账号。',tone:data.operation?'progress':'neutral',className:'flow-status'}))}`;
-        foot=started?`<button class="btn secondary" data-action="cancel-reauth" ${disabled()}>取消并恢复</button><button class="btn primary" data-action="finish-reauth" ${disabled()}>验证并保存</button>`:`<button class="btn secondary" data-action="${pending?'cancel-reauth':'back'}">返回</button><button class="btn primary" data-action="start-reauth" ${attr} ${disabled()}>打开登录窗口</button>`;break;}
+        body=`<div class="confirm-mark">${icon('user')}</div><h3 class="confirm-title">重新登录<br>${esc(name(a))}。</h3><p class="note">${started?'请在 ChatGPT 中完成“继续登录”或网页登录，完成后自动验证并保存。':'会重启桌面端，暂时退出当前账号。'}</p>${statusRegion(statusBar({text:data.operation?data.operation.phase:data.login_progress?.message|| (started?'等待完成登录 · 此面板保持在台前':'取消可恢复原账号。'),tone:data.operation?'progress':'neutral',className:'flow-status'}))}`;
+        foot=started?`<button class="btn secondary" data-action="cancel-reauth">取消并恢复</button><button class="btn primary" data-action="finish-reauth" ${disabled()}>重试验证</button>`:`<button class="btn secondary" data-action="${pending?'cancel-reauth':'back'}">返回</button><button class="btn primary" data-action="start-reauth" ${attr} ${disabled()}>打开登录窗口</button>`;break;}
       case 'scenarios':
         title='演示场景';body=`<div class="menu-list">${[['default','正常 · 含 1 个失败账号'],['detail-dense','详情含双额度与 Credits'],['banked-partial','重置次数有部分详情'],['banked-unknown','重置次数未提供'],['resume-progress','任务接续中'],['resume-waiting','等待可用接力账号'],['resume-failed','任务接续失败'],['reauth','账号需要重新登录'],['chatgpt-off','ChatGPT 桌面端未运行'],['complete','所有账号用量可读'],['usage-empty','所有用量均未提供'],['stale','额度缓存过期'],['expired','窗口到点待核验'],['fail-switch','下一次接力失败'],['many','14 个账号'],['empty','空账号清单'],['member-none','会员日期未提供']].map(([key,label])=>`<button class="btn secondary" data-action="scenario" data-value="${key}">${label}</button>`).join('')}</div>`;break;
       case 'error':
@@ -436,6 +435,7 @@
   const actionLabels={
     retry_query:'正在恢复查询…',
     launch_chatgpt:'正在打开 ChatGPT…',refresh:'正在刷新…',refresh_one:'正在刷新…',
+    check_update:'正在检查…',download_update:'正在准备下载…',cancel_update_download:'正在取消下载…',install_update:'正在重启…',
     set_preferences:'正在保存…',set_account_meta:'正在保存…',set_auto_relay_account:'正在保存…',
     set_relay_pick:'正在设置…',cancel_relay_pick:'正在取消…',consume_reset:'正在重置…',set_account_hotkey:'正在保存…',adopt_current:'正在保存…',
     add_start:'正在打开…',add_finish:'正在保存…',add_cancel:'正在恢复…',
@@ -500,6 +500,12 @@
       }
       if(prev!==JSON.stringify(data)||extraChanged||recovered)render();
       if(navigation.current(ticket)&&data.adding&&(revealAdd||data.add_login_status==='ready'&&previousAddStatus!=='ready')&&ui.page!=='add')show('add');
+      if(revealAdd&&data.reauth&&ui.page!=='reauth')show('reauth',data.reauth.email);
+      if(data.login_result?.id&&data.login_result.id!==lastLoginResult){
+        lastLoginResult=data.login_result.id;
+        if(['add','reauth'].includes(ui.page))closeSheet();
+        notify(data.login_result.message,{tone:data.login_result.quota_ok?'success':'warning'});
+      }
       const terminal=ui.submitted&&((data.recent_results||[]).find(r=>r.id===ui.submitted)||(data.last_result?.id===ui.submitted?data.last_result:null));
       if(terminal){
         const done=terminal;ui.submitted=null;
@@ -630,6 +636,14 @@
       case 'feedback-details':{clearNotification();break;}
       case 'settings':show('settings');break;
       case 'purchase-account':show('purchase');break;
+      case 'support-qr':show('support-qr');break;
+      case 'open-update':show('update');break;
+      case 'toggle-update-notes':{const key='update-notes';ui.disclosures.has(key)?ui.disclosures.delete(key):ui.disclosures.add(key);renderSheet();break;}
+      case 'open-github':await actionFrom(b,'open_github');break;
+      case 'check-update':await actionFrom(b,'check_update');break;
+      case 'download-update':await actionFrom(b,'download_update');break;
+      case 'cancel-update-download':await actionFrom(b,'cancel_update_download');break;
+      case 'install-update':await actionFrom(b,'install_update');break;
       case 'copy-purchase-qq':{
         const field=$('#purchase-qq');if(!field)break;
         let copied=false;
@@ -784,8 +798,11 @@
   const systemAppearance=window.matchMedia('(prefers-color-scheme: dark)');
   function applyAppearance(value){
     const appearance=['light','dark'].includes(value)?value:systemAppearance.matches?'dark':'light';
-    if(document.documentElement.dataset.appearance!==appearance)window.NXMotion?.stop();
+    const changed=document.documentElement.dataset.appearance!==appearance;
+    if(changed)window.NXMotion?.stop();
     document.documentElement.dataset.appearance=appearance;
+    if(changed&&!config.demo&&window.pywebview?.api?.native_appearance)
+      window.pywebview.api.native_appearance(appearance).catch(()=>{});
   }
   systemAppearance.addEventListener('change',()=>applyAppearance(data.settings.appearance));
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
@@ -800,7 +817,7 @@
   function schedulePoll(delay=null){
     clearTimeout(pollTimer);pollTimer=null;
     if(!panelVisible && !config.demo) return;
-    const wait=delay ?? ((busy()||ui.submitted)?800:5000);
+    const wait=delay ?? ((busy()||ui.submitted||data.adding||data.reauth||['checking','downloading','installing'].includes(data.update?.status))?800:5000);
     pollTimer=setTimeout(()=>poll(),wait);
   }
   applyAppearance(data.settings.appearance);
@@ -825,7 +842,7 @@
       home:()=>closeSheet(),
       refresh:()=>poll(true),
       appearance:async value=>{window.NXDemo.appearance(value);applyAppearance(value);},
-      info:()=>({page:ui.page||(home.classList.contains('is-onboarding')?'onboarding':'home'),width:app.clientWidth,height:app.clientHeight})
+      info:()=>({page:ui.page||(home.classList.contains('is-onboarding')?'onboarding':'home'),width:app.clientWidth,height:app.clientHeight,version:config.version,update_state:data.update?.status||'idle',login_state:data.adding?'adding':data.reauth?'reauth':'idle'})
     };
     window.NXPreviewReady=window.NXPreview.open(new URLSearchParams(window.NX_PREVIEW_QUERY??location.search));
   }

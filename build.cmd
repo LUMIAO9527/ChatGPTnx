@@ -11,6 +11,8 @@ set "PYINSTALLER_CONFIG_DIR=%BUILD_ROOT%\cache"
 
 "%PYTHON%" tools\build.py
 if errorlevel 1 exit /b 1
+"%PYTHON%" tools\build_explorer.py
+if errorlevel 1 exit /b 1
 "%PYTHON%" -c "import PyInstaller" 1>%SystemRoot%\System32\NUL 2>&1
 if errorlevel 1 (
   echo PyInstaller is missing. Install requirements-dev.txt first.
@@ -24,6 +26,7 @@ if errorlevel 1 (
   --add-data "%BUILD_ROOT%\resources\nx.ico;." ^
   --add-data "%BUILD_ROOT%\resources\switch_account.ps1;." ^
   --add-data "%BUILD_ROOT%\resources\continue_in_desktop.ps1;." ^
+  --add-data "%BUILD_ROOT%\resources\update_app.ps1;." ^
   --distpath "%BUILD_ROOT%\dist" --workpath "%BUILD_ROOT%\work" ^
   --specpath "%BUILD_ROOT%\spec" src\chatgptnx.py
 if errorlevel 1 exit /b 1

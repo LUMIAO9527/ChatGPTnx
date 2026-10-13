@@ -7,7 +7,7 @@
 <p>用 n 个 Plus 账号，接力推进一个长任务。自动切号，继续原任务。</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.0.2" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.3" height="20">
 <img src="docs/images/badges/license.svg" alt="源码可查看 · 保留权利" height="20">
 </div>
 
@@ -24,6 +24,7 @@ https://github.com/user-attachments/assets/e1d24f80-0716-4bba-a024-7058e5c0b2e0
 - **任务接续**：切换账号后接续原桌面任务，支持自定义接续消息，分别查看成功、跳过和需查看的记录；识别到的后台子任务不单独触发桌面接续。
 - **额度与用量**：集中查看各账号的剩余额度、重置时间和 Token 用量；短暂查询失败保留已知额度，各页面与接力判断一致。普通查询与预热共用暂停和冷却规则。
 - **凭据保护与诊断**：使用 Windows 当前用户加密保护账号快照，提供可预览、可复制的脱敏诊断摘要。
+- **登录与更新**：登录期间面板默认保持可见，检测到完整登录后自动验证并保存；可从设置检查、下载并安装 GitHub 正式更新。
 - **轻量化**：常驻 Windows 托盘，面板用完即收起，支持通知、快捷键和深浅外观。
 
 ### 持续任务能力
@@ -56,18 +57,24 @@ ChatGPTnx 的核心，是让多个 Plus 账号接力推进同一个长任务。�
 
 ## 下载与运行
 
-当前发布版本为 **v1.0.2**，使用 327×458 紧凑面板及轻量动效；源码包为 `ChatGPTnx-v1.0.2-source.zip`。页面示意图来自 1.0.1。
+当前版本为 **v1.3**。早期页面示意图来自 v1.0.1；最新全部页面与状态可用根目录的 `ChatGPTnx-v1.3.html` 离线查看。
 
-本次修订改善头像移动、页面切换时的文字闪动及动画结束后的微移。动效可在连续点击时平滑接续，后台数据刷新保留页面元素；没有增加运行依赖。
+v1.3 新增自动登录验证、可回退的内置更新，并把账号服务咨询、QQ 联系和自愿打赏合并到“联系与支持”一页。
 
-公开发布版可从 [v1.0.2 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.2) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.0.2-source.zip`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用，以及 Microsoft Edge WebView2 Runtime。
+公开发布版可从 [v1.3 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.3) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.3-source.zip`，完整演示可下载 `ChatGPTnx-v1.3.html`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用，以及 Microsoft Edge WebView2 Runtime。
 
 1. 将 EXE 放入独立、可写的目录后启动，从托盘打开面板。
-2. 点击“添加账号”，按提示打开桌面登录窗口；登录新账号后，回到面板确认保存。
+2. 点击“添加账号”，在 ChatGPT 完成登录；程序自动验证并保存。验证暂未完成时，可在面板点击“重试验证”。
 3. 先用“下一棒”完成一次手动接力，再在设置中开启自动接力并选择参与账号。
 4. 开启“切号后自动接续任务”，根据需要配置接续消息；在任务接续记录中查看结果。
 
 关闭面板只是收起界面，程序仍在托盘运行；需要完全退出时，使用托盘菜单。
+
+## 演示与调试
+
+双击根目录的 [ChatGPTnx-v1.3.html](ChatGPTnx-v1.3.html)，或运行 `preview.cmd`。一个文件覆盖全部页面和关键状态，支持搜索、浅深色、模拟登录、更新状态以及调试报告导出。演示默认按可用空间放大并居中，也可切换到 100% 真实尺寸检查。所有数据均为合成数据，不访问本机账号，也不执行真实切号、下载或安装。
+
+维护时运行 `python tools/build.py` 和 `python tools/build_explorer.py`；`build.cmd` 也会同步生成总 HTML。它直接嵌入正式 UI 组件，后续修改无需另写预览页面。Windows 原生窗口行为仍需在本机验证。
 
 ## 数据与隐私
 

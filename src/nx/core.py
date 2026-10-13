@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 import copy
+import hashlib
 from datetime import date
 import json
 import logging
@@ -15,8 +16,8 @@ import threading
 import time
 import uuid
 import unicodedata
-from .storage import Accounts, Paths, State, credential_metadata, identity, account_identity_key, activity_identity_key, claims
-from .credentials import read_credential_bytes
+from .storage import Accounts, Paths, State, credential_metadata, identity, account_identity_key, activity_identity_key, claims, fingerprint
+from .credentials import read_credential_bytes, write_credential_bytes, credential_store_lock
 from .quota import Query
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 from .resume_flow import ResumeCoordinator
@@ -97,6 +98,11 @@ class Service:
         self.hotkey_status = {}
         self._cancel_event = None
         self.desktop_gate = threading.Lock()
+        self.login_progress = None
+        self.login_result = None
+        self._login_observation = None
+        self._login_cancel = threading.Event()
+        self._login_commit = threading.RLock()
         self.query = query or Query(paths, lambda: self.state.get('settings'))
         self.runner = runner or self._powershell
         self.log = logging.getLogger('chatgptnx.' + str(id(self)))
@@ -121,6 +127,8 @@ class Service:
                                        query=self.query if isinstance(self.query, Query) else None)
         self.resetter = ResetCredits(paths, self.accounts.current, lambda: self.state.get('settings'),
                                      self._record_reset_limits)
+        from .updater import UpdateManager
+        self.updater = UpdateManager(paths.root, paths.resources, self.notify)
         if self.state.recovery_path or self.resumer.recovery_path:
             self.last_error = {'id': uuid.uuid4().hex, 'kind': 'recovery', 'target': None,
                 'message': '本地状态文件损坏，已保留原文件并恢复；请检查设置与接续记录',
@@ -297,6 +305,9 @@ class Service:
                 'adding': bool(add_state), 'add_state': add_state,
                 'add_login_status': add_login_status,
                 'reauth': self.state.get('reauth'),
+                'login_progress': copy.deepcopy(self.login_progress),
+                'login_result': copy.deepcopy(self.login_result),
+                'update': self.updater.snapshot(),
                 'last_error': self.visible_error(), 'last_result': copy.deepcopy(self.last_result),
                 'recent_results': copy.deepcopy(self.recent_results),
                 'hotkeys': [{'email': email, 'shortcut': hotkeys.get(email),
@@ -396,6 +407,152 @@ class Service:
 
     def _record_current(self):
         self.state.change('cache', lambda cache: {**cache, 'current': self.accounts.current()})
+
+    def _login_pending(self):
+        reauth = self.state.get('reauth')
+        if reauth:
+            return 'reauth', reauth
+        return 'adding', self.state.get('adding')
+
+    def _login_status(self, kind, pending):
+        if not pending or pending.get('phase') != 'login':
+            return 'inactive'
+        actual = identity(self.paths.auth)
+        if not all(actual):
+            return 'waiting'
+        if kind == 'reauth':
+            return 'ready' if actual == identity(self.paths.snapshot(pending['email'])) else 'wrong'
+        return self._add_login_status(pending)
+
+    def _login_message(self, status):
+        return {'waiting': '等待在 ChatGPT 中完成登录，完成后自动验证并保存',
+                'ready': '已检测到登录，正在准备自动验证',
+                'wrong': '登录的不是待恢复账号，请重新选择正确账号',
+                'existing': '这个账号已经在清单里，请登录新账号',
+                'unchanged': '当前仍是原账号，请登录新账号',
+                'inactive': '正在准备登录窗口'}.get(status, '等待完成登录')
+
+    def tick_login(self, now=None):
+        """Only an explicit pending workflow can trigger an automatic commit.
+
+        Debounce actual credential bytes, serialize with manual actions, bound
+        retries, and leave cancelled/denied workflows for deliberate user action.
+        """
+        now = time.monotonic() if now is None else now
+        kind, pending = self._login_pending()
+        if not pending:
+            self._login_observation = None
+            self.login_progress = None
+            return False
+        status = self._login_status(kind, pending)
+        key = (kind, pending.get('id'), pending.get('email'), pending.get('previous'),
+               status, fingerprint(self.paths.auth))
+        with self.lock:
+            observed = self._login_observation
+            if not observed or observed['key'] != key:
+                self._login_observation = observed = {
+                    'key': key, 'since': now, 'attempts': 0, 'next': now, 'blocked': False}
+                self.login_progress = {'kind': kind, 'status': status,
+                                       'message': self._login_message(status)}
+                self.notify()
+            if (status != 'ready' or self.operation or observed['blocked'] or self.stop.is_set() or self._login_cancel.is_set()
+                    or now - observed['since'] < 2 or now < observed['next'] or observed['attempts'] >= 3):
+                return False
+            observed['attempts'] += 1
+            observed['next'] = now + 60
+        result = self.reauth_finish(automatic=True) if kind == 'reauth' else self.add_finish(automatic=True)
+        return bool(result.get('accepted'))
+
+    def _complete_login(self, kind, pending, expected, digest, cancel):
+        key = 'reauth' if kind == 'reauth' else 'adding'
+        def unchanged():
+            if (cancel.is_set() or self._login_cancel.is_set() or self.stop.is_set()
+                    or self.state.get(key) != pending or identity(self.paths.auth) != expected
+                    or fingerprint(self.paths.auth) != digest):
+                raise RuntimeError('登录操作已取消或账号发生变化；尚未保存')
+        unchanged()
+        verified_bytes = read_credential_bytes(self.paths.auth)
+        if hashlib.sha256(verified_bytes).hexdigest() != digest:
+            raise RuntimeError('登录凭据正在变化，请稍后重试')
+        self.phase('自动验证登录身份')
+        with self.lock:
+            self.login_progress = {'kind': kind, 'status': 'checking', 'message': '正在验证并保存登录'}
+        # Query uses the live credential explicitly; a new account need not be
+        # present in the roster before its server identity has been verified.
+        checked = self.query.run(expected[0], True, cancel=cancel)
+        unchanged()
+        if not checked.get('ok') and not checked.get('identity_verified'):
+            code = checked.get('error_code')
+            blocked = code in ('reauth_required', 401, 403, 'identity_mismatch',
+                               'credential_unreadable', 'query_policy_unavailable')
+            message = ('登录验证被拒绝，请确认账号后重新登录' if blocked else
+                       '已检测到登录，联网验证暂未完成；可重试验证')
+            with self.lock:
+                if self._login_observation:
+                    self._login_observation['blocked'] = blocked
+                    delay = max(60, (checked.get('retry_at') or time.time()) - time.time())
+                    self._login_observation['next'] = time.monotonic() + delay
+                self.login_progress = {'kind': kind, 'status': 'blocked' if blocked else 'retry',
+                                       'message': message}
+            raise RuntimeError(message)
+        unchanged()
+        self.phase('保存已验证的登录')
+        # Save the exact bytes verified above, never reread a different login
+        # inside the snapshot helper after the network request has finished.
+        with self._login_commit:
+            unchanged()
+            with self.lock:
+                self.operation['interruptible'] = False
+            with credential_store_lock(self.paths.snapshots):
+                unchanged()
+                write_credential_bytes(self.paths.snapshot(expected[0]), verified_bytes)
+                if identity(self.paths.snapshot(expected[0])) != expected:
+                    raise RuntimeError('保存后的账号身份不一致，请保留登录流程并重试')
+            if kind == 'adding':
+                self.accounts.activate(expected[0])
+            self.state.update(**{key: None})
+        if checked.get('ok'):
+            checked.update(email=expected[0], **credential_metadata(self.paths.auth))
+            self._store_quota(checked)
+        self._record_current()
+        with self.lock:
+            self.login_progress = None
+            self.login_result = {'id': uuid.uuid4().hex, 'kind': kind,
+                'message': '登录已验证并保存' if checked.get('ok') else '登录已保存，额度暂未更新',
+                'quota_ok': bool(checked.get('ok'))}
+
+    def check_update(self):
+        return self.updater.check()
+
+    def download_update(self):
+        return self.updater.download()
+
+    def cancel_update_download(self):
+        return self.updater.cancel_download()
+
+    def install_update(self):
+        if not self.gate.acquire(blocking=False):
+            return {'ok': False, 'error': '请等待当前账号操作完成后更新'}
+        desktop_locked = self.desktop_gate.acquire(blocking=False)
+        committed = False
+        try:
+            resume = self.resumer.summary() or {}
+            if (not desktop_locked or self.operation or self.state.get('adding') or self.state.get('reauth')
+                    or resume.get('phase') in ('switching', 'resuming') or self.stop.is_set()):
+                return {'ok': False, 'error': '请完成登录、切号或任务接续后再更新'}
+            result = self.updater.install(os.getpid())
+            if result.get('ok'):
+                self.stop.set()
+                committed = True
+            return result
+        except Exception:
+            return {'ok': False, 'error': '无法启动更新程序；当前版本继续运行'}
+        finally:
+            # Freeze the coordinator until process exit after launching helper.
+            if not committed:
+                if desktop_locked:
+                    self.desktop_gate.release()
+                self.gate.release()
 
     def _store_quota(self, value, preserve_resets=False):
         stored = None
@@ -767,17 +924,19 @@ class Service:
         if pending and (pending.get('email') != email or pending.get('phase') != 'ready'):
             return {'ok': False, 'error': '已在重新登录流程中'}
         previous = pending.get('previous') if pending else self.accounts.current()
+        self._login_cancel.clear()
+        workflow_id = uuid.uuid4().hex
         expected_email, expected_id = identity(self.paths.snapshot(email))
         if not expected_email or not expected_id:
             return {'ok': False, 'error': '账号快照不完整，无法安全重新登录'}
         def work():
-            self.state.update(reauth={'email': email, 'previous': previous, 'phase': 'parking'})
+            self.state.update(reauth={'id': workflow_id, 'email': email, 'previous': previous, 'phase': 'parking'})
             self.phase('保存当前账号 · 打开登录窗口')
             try:
                 # Reuse the add-account transaction: preserve the current
                 # snapshot, remove only live auth, then open a clean login.
                 self.runner('-Park')
-                self.state.update(reauth={'email': email, 'previous': previous, 'phase': 'login'})
+                self.state.update(reauth={'id': workflow_id, 'email': email, 'previous': previous, 'phase': 'login'})
                 self._record_current()
             except Exception:
                 self.state.update(reauth={'email': email, 'previous': previous,
@@ -787,7 +946,9 @@ class Service:
                           lambda: self._serialize_desktop(work), allow_reauth=True)
 
     def reauth_cancel(self):
-        pending = self.state.get('reauth')
+        with self._login_commit:
+            self._login_cancel.set()
+            pending = self.state.get('reauth')
         if not pending:
             return {'ok': True, 'accepted': False}
         if pending.get('phase') == 'ready':
@@ -806,7 +967,7 @@ class Service:
         return self.begin('reauth_cancel', pending.get('email'),
                           lambda: self._serialize_desktop(work), allow_reauth=True)
 
-    def reauth_finish(self):
+    def reauth_finish(self, automatic=False):
         pending = self.state.get('reauth')
         if not pending:
             return {'ok': False, 'error': '请先开始重新登录'}
@@ -814,33 +975,31 @@ class Service:
             return {'ok': False, 'error': '登录窗口尚未准备完成'}
         target = pending.get('email')
         expected = identity(self.paths.snapshot(target))
+        cancel = threading.Event()
+        digest = fingerprint(self.paths.auth)
         def work():
             actual = identity(self.paths.auth)
             if not actual[0] or not actual[1]:
                 raise RuntimeError('尚未完成登录；请先在 ChatGPT 中继续')
             if actual != expected:
                 raise RuntimeError('登录的不是待修复账号；不会覆盖原账号快照')
-            self.phase('验证新的登录状态')
-            results = self._refresh(target)
-            checked = results.get(target) or {}
-            if not checked.get('ok'):
-                raise RuntimeError('新的登录状态尚未通过验证；请确认 ChatGPT 已完成登录')
-            self.runner('-Snapshot')
-            self.state.update(reauth=None)
-            self._record_current()
+            self._complete_login('reauth', pending, expected, digest, cancel)
         return self.begin('reauth_finish', target,
-                          lambda: self._serialize_desktop(work), allow_reauth=True)
+                          lambda: self._serialize_desktop(work), allow_reauth=True,
+                          interruptible=True, cancel_event=cancel, source='login-auto' if automatic else 'manual')
 
     def add_start(self):
         if self.state.get('adding'):
             return {'ok': False, 'error': '已在添加流程中'}
         previous = identity(self.paths.auth)[0]
+        self._login_cancel.clear()
+        workflow_id = uuid.uuid4().hex
         def work():
-            self.state.update(adding={'previous': previous, 'phase': 'parking'})
+            self.state.update(adding={'id': workflow_id, 'previous': previous, 'phase': 'parking'})
             self.phase('保存当前账号 · 打开登录窗口')
             try:
                 self.runner('-Park')
-                self.state.update(adding={'previous': previous, 'phase': 'login'})
+                self.state.update(adding={'id': workflow_id, 'previous': previous, 'phase': 'login'})
                 self._record_current()
             except Exception:
                 self.state.update(adding={'previous': previous, 'phase': 'needs_recovery'})
@@ -865,7 +1024,9 @@ class Service:
                           refresh_after=True)
 
     def add_cancel(self):
-        pending = self.state.get('adding')
+        with self._login_commit:
+            self._login_cancel.set()
+            pending = self.state.get('adding')
         if not pending:
             return {'ok': True, 'accepted': False}
         def work():
@@ -879,7 +1040,7 @@ class Service:
         return self.begin('add_cancel', None, lambda: self._serialize_desktop(work),
                           allow_adding=True, refresh_after=True)
 
-    def add_finish(self):
+    def add_finish(self, automatic=False):
         pending = self.state.get('adding')
         if not pending:
             return {'ok': False, 'error': '请先开始添加账号'}
@@ -892,17 +1053,16 @@ class Service:
             return {'ok': False, 'error': '当前仍是添加前的账号，请先登录新账号'}
         if status == 'existing':
             return {'ok': False, 'error': '这个账号已经在清单里，无需重复添加'}
+        expected, digest = identity(self.paths.auth), fingerprint(self.paths.auth)
+        cancel = threading.Event()
         def work():
             email, account_id = identity(self.paths.auth)
             if not email or not account_id:
                 raise RuntimeError('未读取到完整登录凭据，请先在桌面端完成登录')
-            self.phase('保存新账号快照')
-            self.runner('-Snapshot')
-            self.accounts.activate(email)
-            self.state.update(adding=None)
-            self._record_current()
+            self._complete_login('adding', pending, expected, digest, cancel)
         return self.begin('add_finish', None, lambda: self._serialize_desktop(work),
-                          allow_adding=True, refresh_after=True)
+                          allow_adding=True, interruptible=True, cancel_event=cancel,
+                          source='login-auto' if automatic else 'manual')
 
     def remove(self, email):
         def work():
@@ -1244,20 +1404,15 @@ class Service:
                     delay = 30
         threading.Thread(target=watch_work, name='nx-work-watch', daemon=True).start()
         def watch_login():
-            """Announce a new login only after its credential has stayed stable."""
-            observed = announced = None
-            stable_since = 0.0
+            """Complete an explicit login workflow even when its panel is hidden."""
             while not self.stop.wait(.5):
-                status = self._add_login_status()
-                if status != observed:
-                    observed = status
-                    stable_since = time.monotonic()
-                stable = status != 'ready' or time.monotonic() - stable_since >= 2.0
-                if stable and status != announced:
-                    announced = status
-                    self.notify()
-                if status == 'inactive':
-                    observed = announced = None
+                try:
+                    self.tick_login()
+                except Exception:
+                    # A partial desktop write is retried on the next observation.
+                    # No raw paths, credentials or exception text enter logs.
+                    self.log.warning('login_watch_failed')
+                    self.stop.wait(2)
         threading.Thread(target=watch_login, name='nx-login-watch', daemon=True).start()
 
         def watch_usage_limit():

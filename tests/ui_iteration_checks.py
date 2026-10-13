@@ -4,6 +4,7 @@ import argparse,json,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'tools'))
 from browser_session import browser_session,demo_html
+from build import APP_VERSION
 
 CASES = [
 ('first-use/full-panel-not-empty-dashboard', 'scenario=first-run', r'''()=>document.querySelector('#home').classList.contains('is-onboarding')&&!document.querySelector('.roster')&&!document.querySelector('[data-action="add"]')&&document.querySelector('.onboarding-foot').getBoundingClientRect().bottom<=document.querySelector('#app').getBoundingClientRect().bottom'''),
@@ -44,7 +45,7 @@ def main(browser,output,explorer=None):
   context=engine.new_context(viewport={'width':1440,'height':960});page=context.new_page();errors=[];requests=[]
   page.on('pageerror',lambda e:errors.append(str(e)));page.on('request',lambda req:requests.append(req.url))
   try:
-   page.set_content((explorer or ROOT/'docs/ui-explorer.html').read_text(encoding='utf-8'))
+   page.set_content((explorer or ROOT/f'ChatGPTnx-v{APP_VERSION}.html').read_text(encoding='utf-8'))
    page.locator('#status').filter(has_text="可操作").wait_for(timeout=5000)
    frame=page.frames[1]
    results.append({'name':'explorer/initial-flow-operable','passed':frame.locator('.onboarding-main').count()==1,'errors':list(errors)})

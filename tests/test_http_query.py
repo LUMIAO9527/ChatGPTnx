@@ -32,6 +32,20 @@ def response():
 
 
 class HTTPQueryTests(unittest.TestCase):
+    def test_login_proof_survives_quota_parse_failure(self):
+        raw = response()
+        raw['rate_limit'] = {'primary_window': {'used_percent': 'invalid'}}
+        self.client.get.side_effect = lambda endpoint, *args: raw if endpoint == '/wham/usage' else {'credits': []}
+        value = self.q.run('a@example.com', True)
+        self.assertTrue(value['identity_verified'])
+        self.assertFalse(value['ok'])
+
+    def test_login_proof_is_revoked_if_optional_query_returns_401(self):
+        self.client.get.side_effect = lambda endpoint, *args: response() if endpoint == '/wham/usage' else (_ for _ in ()).throw(RPCError('denied', 'reauth_required'))
+        value = self.q.run('a@example.com', True)
+        self.assertFalse(value['identity_verified'])
+        self.assertFalse(value['ok'])
+
     def test_quota_timestamp_is_captured_before_optional_reset_query(self):
         before = self.now
         def get(endpoint, *args):

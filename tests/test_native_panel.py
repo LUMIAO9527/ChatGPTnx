@@ -74,6 +74,7 @@ class PanelTests(unittest.TestCase):
         self.host = desktop.Desktop(SimpleNamespace(log=Mock(), listeners=[], operation=None))
         self.host.window = SimpleNamespace(uid='synthetic')
         self.form = Mock()
+        self.form.InvokeRequired = False
         self.host._form = Mock(return_value=self.form)
         self.host._post_script = Mock()
         self.host._set_panel_topmost = Mock(return_value=True)
@@ -84,15 +85,48 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(self.user.SetWindowRgn.calls, [(HWND, HRGN, True)])
         self.assertEqual(self.gdi.DeleteObject.calls, [])
 
-    def test_windows_11_uses_smooth_dwm_corners_without_region(self):
+    def test_windows_11_uses_the_shared_radius_instead_of_system_rounding(self):
         self.windows_version.return_value.build = 26200
+        edges = Mock()
+        self.host._corner_edges = edges
+        self.host._native_appearance = 'dark'
+        self.host._bind_corner_events = Mock()
         self.assertTrue(self.host._apply_native_shape())
         calls = self.dwm.DwmSetWindowAttribute.calls
         self.assertEqual([call[1] for call in calls], [33, 34, 38])
         self.assertEqual([call[2]._obj.value for call in calls],
-                         [2, 0xFFFFFFFE, 1])
+                         [1, 0xFFFFFFFE, 1])
         self.assertTrue(all(call[0] == HWND for call in calls))
         self.assertEqual(self.user.SetWindowRgn.calls, [])
+        edges.apply.assert_called_once_with(HWND, 16, (29, 29, 29))
+
+    def test_windows_11_corner_windows_are_created_on_owner_ui_thread(self):
+        self.windows_version.return_value.build = 26200
+        self.form.InvokeRequired = True
+        self.host._dispatch_ui = Mock(return_value=True)
+        self.assertTrue(self.host._apply_native_shape())
+        self.host._dispatch_ui.assert_called_once_with(self.host._apply_native_shape)
+        self.assertEqual(self.dwm.DwmSetWindowAttribute.calls, [])
+
+    def test_windows_11_radius_scales_and_palette_tracks_live_theme(self):
+        self.windows_version.return_value.build = 26200
+        self.host._corner_edges = Mock()
+        self.host._bind_corner_events = Mock()
+        for dpi in (96, 120, 144, 168, 192, 240):
+            self.dpi = dpi
+            for palette, rgb in [('light', (255,255,255)), ('dark', (29,29,29))]:
+                self.host._native_appearance = palette
+                self.assertTrue(self.host._apply_native_shape())
+                self.host._corner_edges.apply.assert_called_with(HWND, round(16*dpi/96), rgb)
+
+    def test_corner_failure_prevents_showing_incomplete_edges(self):
+        self.windows_version.return_value.build = 26200
+        self.host._native_appearance = 'light'
+        self.host._corner_edges = Mock()
+        self.host._corner_edges.apply.side_effect = OSError('synthetic')
+        self.host._bind_corner_events = Mock()
+        self.assertFalse(self.host._apply_native_shape())
+        self.host.service.log.warning.assert_called_once()
 
     def test_dwm_failure_does_not_show_a_square_or_hard_clipped_window(self):
         self.windows_version.return_value.build = 26200
@@ -100,6 +134,12 @@ class PanelTests(unittest.TestCase):
         self.assertFalse(self.host._apply_native_shape())
         self.assertEqual(self.user.SetWindowRgn.calls, [])
         self.host.service.log.warning.assert_called_once()
+
+    def test_github_button_opens_only_the_fixed_project_url(self):
+        bridge = desktop.Bridge(SimpleNamespace(), self.host)
+        with patch.object(desktop.os, 'startfile', create=True) as open_url:
+            self.assertTrue(bridge.open_github()['ok'])
+        open_url.assert_called_once_with('https://github.com/LUMIAO9527/ChatGPTnx')
 
     def test_shape_also_works_without_dwm_library(self):
         del self.dlls.dwmapi
@@ -119,14 +159,14 @@ class PanelTests(unittest.TestCase):
                 self.dpi = dpi
                 self.size = (round(327 * dpi / 96), round(458 * dpi / 96))
                 self.assertTrue(self.host._apply_native_shape())
-                diameter = round(14 * dpi / 96) * 2
+                diameter = round(PANEL_CONFIG['radius'] * dpi / 96) * 2
                 self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1],
                                  (0, 0, self.size[0] + 1, self.size[1] + 1, diameter, diameter))
 
     def test_dpi_zero_falls_back_to_96(self):
         self.dpi = 0
         self.assertTrue(self.host._apply_native_shape())
-        self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1][-2:], (28, 28))
+        self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1][-2:], (32, 32))
 
     def test_missing_hwnd_allocates_nothing(self):
         self.find.return_value = None
@@ -178,7 +218,7 @@ class PanelTests(unittest.TestCase):
         self.size, self.dpi = (490, 687), 144
         self.assertTrue(self.host._apply_native_shape())
         self.assertEqual(self.user.SetWindowRgn.calls[-1][0], HWND + 8)
-        self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1], (0, 0, 491, 688, 42, 42))
+        self.assertEqual(self.gdi.CreateRoundRectRgn.calls[-1], (0, 0, 491, 688, 48, 48))
 
     def test_physical_size_binds_dpi_function_before_use(self):
         self.dpi = 144
@@ -316,8 +356,8 @@ class PanelTests(unittest.TestCase):
         self.assertIn('background: var(--bg); border-radius: var(--window-r);', css)
 
     def test_product_geometry_and_release_version(self):
-        self.assertEqual(APP_VERSION, '1.0.2')
-        self.assertEqual(PANEL_CONFIG['radius'], 14)
+        self.assertEqual(APP_VERSION, '1.3')
+        self.assertEqual(PANEL_CONFIG['radius'], 16)
         self.assertEqual(PANEL_CONFIG['sizes'], {'home': [327, 458], 'workspace': [327, 458]})
 
 

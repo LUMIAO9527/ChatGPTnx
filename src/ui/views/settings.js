@@ -52,22 +52,49 @@ window.NXViews.settings = c => {
       +x.disclosure(c,'message','任务接续',taskContinuationSetting(data.settings)+'<p class="inline-help">接续消息</p>'+x.message(c),data.settings.task_continuation?'已开启':'未开启')
       +link('','任务接续记录','resume-details'))
     +settingsGroup('账号',x.disclosure(c,'hotkeys','账号快捷键',x.hotkeys(c),`${(data.hotkeys||[]).filter(h=>h.shortcut).length} 个`)
-      +x.disclosure(c,'archives','已归档账号',x.archives(c),ui.archives?`${ui.archives.length} 个`:'')
-      +link('','购买账号','purchase-account'));
+      +x.disclosure(c,'archives','已归档账号',x.archives(c),ui.archives?`${ui.archives.length} 个`:''))
+    +settingsGroup('关于',link('','版本更新','open-update')
+      +link('','联系与支持','purchase-account'));
   return {title:'设置',body,cls:'settings-body'};
 };
-window.NXViews.purchase = () => ({
-  title:'购买账号',cls:'purchase-body',
-  body:`<p class="purchase-intro">联系作者，咨询账号与服务。</p>
-    <section class="purchase-services" aria-label="可咨询的服务">
-      <div class="purchase-service"><h3>Plus 账号</h3><p>购买与组合咨询</p></div>
-      <div class="purchase-service"><h3>接码服务</h3><p>适用平台与服务咨询</p></div>
+window.NXViews.purchase = c => ({
+  title:'联系与支持',cls:'purchase-body',
+  body:`<section class="purchase-contact" aria-labelledby="purchase-contact-title">
+      <h3 id="purchase-contact-title">咨询</h3>
+      <p class="purchase-services">Plus 账号 · 接码服务 · 使用咨询</p>
+      <div class="purchase-number"><label for="purchase-qq">QQ号：</label><input id="purchase-qq" class="purchase-qq" aria-label="QQ号" value="210037309" readonly spellcheck="false"></div>
+      <p class="purchase-note">添加时请备注“ChatGPTnx”</p>
+      <button class="btn primary purchase-copy" data-action="copy-purchase-qq" aria-label="复制 QQ 号">${c.icon('copy')}<span>复制 QQ 号</span></button>
     </section>
-    <section class="purchase-contact" aria-labelledby="purchase-contact-title">
-      <h3 id="purchase-contact-title">QQ联系</h3>
-      <input id="purchase-qq" class="purchase-qq" aria-label="QQ号" value="210037309" readonly spellcheck="false">
-      <button class="btn primary fill" data-action="copy-purchase-qq">复制QQ号</button>
-      <p>添加时请备注“ChatGPTnx”</p>
-    </section>
-    <p class="purchase-note">具体价格与服务内容请通过QQ咨询。</p>`
+    <section class="support-card"><div class="support-copy"><h3>打赏作者</h3>
+      <p>如果这个工具帮到了你，<br>欢迎随意打赏。</p>
+      <p class="support-scan">支付宝 · 点击放大</p></div>
+      <button class="support-code" data-action="support-qr" aria-label="放大支付宝收款码"><img src="${window.NX_SUPPORT_QR||''}" alt="支付宝收款二维码" width="528" height="528"></button>
+    </section>`
 });
+window.NXViews.supportQr = () => ({
+  title:'支付宝收款码',cls:'support-body support-zoom',
+  body:`<img class="support-full-code" src="${window.NX_SUPPORT_QR||''}" alt="支付宝收款二维码" width="528" height="528"><p class="support-note">打开支付宝扫一扫</p>`
+});
+window.NXViews.update = c => {
+  const {data,esc,icon}=c,u=data.update||{},status=u.status||'idle';
+  const working=['checking','downloading','installing'].includes(status);
+  const blocked=!!(data.adding||data.reauth||data.operation||['switching','resuming'].includes(data.resume?.phase));
+  const action=status==='ready'?'install-update':status==='available'||status==='error'&&u.available?'download-update':'check-update';
+  const label={checking:'正在检查…',downloading:`下载中 ${Number(u.progress)||0}%`,installing:'正在重启…',ready:'重启并更新',available:'下载更新'}[status]||(status==='error'?'重试':'检查更新');
+  const disabled=working||status==='ready'&&blocked||action==='download-update'&&u.installable===false;
+  const hasNotes=!!(u.available&&u.notes),notesOpen=hasNotes&&c.ui.disclosures.has('update-notes');
+  const stateTitle={idle:'检查是否有新版本',checking:'正在检查更新…',current:'当前已是最新版本',available:'发现新版本',downloading:'正在下载更新…',ready:'更新已准备好',installing:'正在重启并更新…',error:'更新未完成'}[status]||'检查是否有新版本';
+  const description=status==='ready'&&blocked?'请完成登录、切号或任务接续后更新。':status==='error'?u.message:u.available?`新版本 ${u.version}${u.installable===false?' · 内置更新仅适用于独立 EXE':status==='ready'?' · 已通过校验':''}`:'从 GitHub 获取最新正式版。';
+  return {title:'版本更新',cls:'update-body',
+    body:`<section class="update-identity">${c.brandMark('update-mark')}<h3 class="update-brand">ChatGPTnx</h3><p class="update-version">当前版本 ${esc(data.version||window.NX_CONFIG.version)}</p>
+      <button class="btn update-github" data-action="open-github" title="github.com/LUMIAO9527/ChatGPTnx">${icon('github')}<span>GitHub 项目</span>${icon('external')}</button></section>
+      <button id="update-primary" class="btn primary update-primary" data-action="${action}" aria-busy="${working}" aria-describedby="update-description" ${disabled?'disabled':''}>${icon(!working&&action==='download-update'?'download':'refresh',working?'spinner':'')}<span>${esc(label)}</span></button>
+      <section class="update-state" aria-live="polite"><h3 class="update-message">${esc(stateTitle)}</h3><p id="update-description" class="update-description" title="${esc(description)}">${esc(description)}</p>
+      <progress class="update-progress" max="100" value="${Number(u.progress)||0}" aria-label="更新下载进度" ${status==='downloading'?'':'hidden'}></progress></section>
+      <section class="update-secondary">
+      <div class="update-tools"><button class="btn update-cancel" data-action="cancel-update-download" ${status==='downloading'?'':'hidden'}>取消下载</button>
+      <button id="update-notes-toggle" class="btn update-notes-toggle" data-action="toggle-update-notes" aria-controls="update-notes-body" aria-expanded="${notesOpen}" ${hasNotes?'':'hidden'}>更新内容${icon('chevron')}</button></div>
+      <div id="update-notes-body" class="update-notes-body" tabindex="0" role="region" aria-label="更新内容" ${notesOpen?'':'hidden'}>${esc(u.notes||'')}</div></section>`,
+    foot:'<p class="update-preserve">更新后保留账号与设置</p>',footClass:'update-footer'};
+};

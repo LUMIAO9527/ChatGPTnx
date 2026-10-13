@@ -7,7 +7,7 @@
 <p>Keep a long task moving across the accounts you own. Switch accounts when quota runs out, then attempt to continue the original task.</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.0.2" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.3" height="20">
 <img src="docs/images/badges/license.svg" alt="Source available to inspect; rights reserved" height="20">
 </div>
 
@@ -26,6 +26,7 @@ https://github.com/user-attachments/assets/e1d24f80-0716-4bba-a024-7058e5c0b2e0
 - **Task continuation:** After a switch, attempt to resume the original desktop task. Configure a continuation message and review successful, skipped, and unresolved results separately. Identified background agents do not trigger independent desktop continuation.
 - **Quotas and usage:** See each account's remaining quota, reset times, and token usage. Temporary query failures retain known quotas consistently across views and handoff decisions. Normal queries and preheat share pause and cooldown rules.
 - **Credential protection and diagnostics:** Protect account snapshots with Windows current-user encryption, and preview or copy a redacted diagnostic summary.
+- **Sign-in and updates:** Keep the panel visible during sign-in, automatically verify and save completed sign-ins, and check for official GitHub updates from Settings.
 - **Lightweight desktop controls:** Keep the app in the Windows tray, with notifications, keyboard shortcuts, and light and dark themes.
 
 ### Keeping long tasks moving
@@ -58,14 +59,14 @@ The quota overview and usage statistics help you see which account is available 
 
 ## Download and run
 
-The current release is **v1.0.2**, with a 327×458 compact panel and lightweight motion. Its source archive is `ChatGPTnx-v1.0.2-source.zip`. The example screenshots show v1.0.1.
+The current version is **v1.3**. Older example screenshots show v1.0.1; open `ChatGPTnx-v1.3.html` at the project root for all current pages and states.
 
-This revision improves avatar movement, text flicker during navigation, and small shifts at the end of transitions. Repeated clicks preserve motion continuity, and background refreshes retain live page elements. No runtime dependency has been added.
+v1.3 adds automatic sign-in verification, reversible built-in updates, and one Contact and Support page for account services, QQ contact, and voluntary tips.
 
-Download `ChatGPTnx.exe` from the [v1.0.2 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.0.2). The release also provides `ChatGPTnx-v1.0.2-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, and Microsoft Edge WebView2 Runtime.
+Download `ChatGPTnx.exe` from the [v1.3 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.3). The release also provides `ChatGPTnx-v1.3-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, and Microsoft Edge WebView2 Runtime.
 
 1. Put the EXE in its own writable folder and launch it. Open the panel from the system tray.
-2. Select **Add account** and follow the prompt to open the desktop sign-in window. After signing in to an account you own, return to the panel and confirm the account to save it.
+2. Select **Add account** and sign in to ChatGPT. The app automatically verifies and saves the account. If verification is temporarily unavailable, use **Retry verification** in the panel.
 3. Try one manual handoff with **Next account**. Then enable automatic handoff in Settings and choose the participating accounts.
 4. Enable **Automatically continue tasks after switching accounts** if you want task continuation. Configure a continuation message if needed, and check the task continuation records for results.
 
@@ -82,3 +83,9 @@ See [USAGE.md](USAGE.md) (Chinese) for query recovery, continuation behavior, an
 ## License
 
 The source is available to inspect. Use and redistribution are governed by the [LICENSE](LICENSE); all rights are reserved. ChatGPTnx is an independent tool and is not affiliated with or endorsed by OpenAI.
+
+## Unified offline demo and debugging
+
+Open `ChatGPTnx-v1.3.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space; select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
+
+Regenerate it with `python tools/build_explorer.py` after editing the UI; `build.cmd` also generates it. Native Windows behavior requires separate acceptance.

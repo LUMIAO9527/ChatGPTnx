@@ -5,7 +5,7 @@ PANEL_CONFIG = {
     'name': 'ChatGPTnx · Relay',
     'mode': 'tray',
     'background': '#ffffff',
-    'radius': 14,
+    'radius': 16,
     'sizes': {
         'home': [327, 458],
         'workspace': [327, 458],

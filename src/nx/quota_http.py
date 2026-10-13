@@ -331,6 +331,7 @@ class Query:
     def run(self, email, current, usage=False, subscription=False, cancel=None):
         path = self.paths.auth if current else self.paths.snapshot(email)
         before, credential, phase, warning = None, None, 'credentials', None
+        identity_verified = False
         try:
             if cancel and cancel.is_set():
                 raise RPCError('后台查询已暂停', 'cancelled')
@@ -369,6 +370,7 @@ class Query:
             quota_read_at = self.clock()
             if raw.get('account_id') != account_id or str(raw.get('email', '')).casefold() != email.casefold():
                 raise RPCError('查询身份与账号清单不一致', 'identity_mismatch')
+            identity_verified = True
             if usage:
                 result = normalize_usage(usage_payload(get('/wham/profiles/me')))
             elif subscription:
@@ -412,9 +414,17 @@ class Query:
                     self._policy_unavailable = True
                     return self._failure(email, 'query_policy_unavailable', {'phase': 'policy'}, {'paused': True})
                 result.update(paused=False, retry_at=None)
+            result['identity_verified'] = identity_verified
             return result
         except (RPCError, OSError, ValueError, TypeError, AttributeError) as error:
             code = safe_code(getattr(error, 'code', 'credential_unreadable'))
             details = failure_details(error, phase)
             state = self._record_failure(email, credential, code, details) if credential else None
-            return self._failure(email, code, details, state)
+            result = self._failure(email, code, details, state)
+            # Distinguish successful server identity from a later quota parse
+            # or optional query failure. Revocation, cancellation and credential
+            # changes always invalidate that proof.
+            result['identity_verified'] = bool(identity_verified and code not in
+                ('reauth_required', 401, 403, 'identity_mismatch', 'cancelled')
+                and fingerprint(path) == before)
+            return result

@@ -1,6 +1,6 @@
 """Read-only native corner diagnostic for a visible ChatGPTnx panel.
 
-Checks Win11 DWM attributes or the older Windows window region. A pass does
+Checks the owned alpha edges and window region (legacy region on Windows 10). A pass does
 not prove the actual antialiasing, backdrop pixels, or absence of shadows.
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ def inspect_panel() -> dict:
     try:
         region_kind = user.GetWindowRgn(hwnd, region)
         build = sys.getwindowsversion().build
-        details = {'mode': 'dwm' if build >= 22621 else 'region',
+        details = {'mode': 'antialiased-region' if build >= 22621 else 'region',
                    'physical_size': [width, height],
                    'dpi': int(user.GetDpiForWindow(hwnd)),
                    'visual_acceptance': 'NOT_TESTED'}
@@ -71,9 +71,42 @@ def inspect_panel() -> dict:
                     raise RuntimeError(f'DwmGetWindowAttribute({attr}) failed')
                 values[attr] = value.value
             details['dwm_attributes'] = values
-            details['no_window_region'] = region_kind == 0
-            details['native_corner_check'] = (
-                values == {33: 2, 38: 1} and region_kind == 0)
+            user.GetWindow.argtypes = [wt.HWND, wt.UINT]
+            user.GetWindow.restype = wt.HWND
+            user.GetWindowTextW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
+            user.GetWindowTextW.restype = ctypes.c_int
+            user.GetWindowLongPtrW.argtypes = [wt.HWND, ctypes.c_int]
+            user.GetWindowLongPtrW.restype = ctypes.c_ssize_t
+            callback_type = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+            edges = []
+            order = []
+            panel_topmost = bool(user.GetWindowLongPtrW(hwnd, -20) & 8)
+            def collect(candidate, _):
+                if candidate == hwnd:
+                    order.append('panel')
+                if user.GetWindow(candidate, 4) != hwnd:
+                    return True
+                title = ctypes.create_unicode_buffer(128)
+                user.GetWindowTextW(candidate, title, len(title))
+                if title.value == 'ChatGPTnx Corner Edge':
+                    order.append('edge')
+                    style = user.GetWindowLongPtrW(candidate, -20)
+                    edges.append(bool(user.IsWindowVisible(candidate))
+                                 and style & 0x080800A0 == 0x080800A0
+                                 and not style & 0x00040000
+                                 and bool(style & 8) == panel_topmost)
+                return True
+            callback = callback_type(collect)
+            user.EnumWindows.argtypes = [callback_type, wt.LPARAM]
+            user.EnumWindows(callback, 0)
+            points = ((0,0),(width-1,0),(0,height-1),(width-1,height-1))
+            outside = region_kind != 0 and all(not gdi.PtInRegion(region,*p) for p in points)
+            details['alpha_edges'] = len(edges)
+            details['edges_visible_nonactivating_input_transparent'] = all(edges) and len(edges) == 4
+            details['all_edges_above_panel'] = order == ['edge']*4+['panel']
+            details['native_corner_check'] = (values == {33:1,38:1} and outside
+                                               and all(edges) and len(edges)==4
+                                               and details['all_edges_above_panel'])
         else:
             if region_kind == 0:
                 raise RuntimeError('No queryable window region')

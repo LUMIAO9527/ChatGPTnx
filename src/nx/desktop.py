@@ -372,6 +372,21 @@ class Bridge:
     def reauth_start(self, email): return self._service.reauth_start(email)
     def reauth_cancel(self): return self._service.reauth_cancel()
     def reauth_finish(self): return self._service.reauth_finish()
+    def check_update(self): return self._service.check_update()
+    def open_github(self):
+        try:
+            from .updater import REPOSITORY
+            os.startfile('https://github.com/' + REPOSITORY)
+            return {'ok': True}
+        except OSError:
+            return {'ok': False, 'error': '未能打开浏览器，请稍后重试'}
+    def download_update(self): return self._service.download_update()
+    def cancel_update_download(self): return self._service.cancel_update_download()
+    def install_update(self):
+        result = self._service.install_update()
+        if result.get('ok'):
+            self._host.shutdown_for_update()
+        return result
     def set_account_hotkey(self, email, shortcut=None): return self._service.set_account_hotkey(email, shortcut)
     def set_relay_pick(self, email=None): return self._service.set_relay_pick(email)
     def cancel_relay_pick(self, email): return self._service.cancel_relay_pick(email)
@@ -417,6 +432,11 @@ class Bridge:
         self._host.view = view
         self._host.layout()
         return {'ok': True}
+    def native_appearance(self, appearance):
+        if appearance not in ('light', 'dark'):
+            return {'ok': False}
+        self._host._dispatch_ui(lambda: self._host._set_native_appearance(appearance))
+        return {'ok': True}
     def hide(self, reason='user'):
         self._host.hide(reason=reason)
         return {'ok': True}
@@ -425,7 +445,7 @@ class Bridge:
         return {'ok': True}
 
 class Desktop:
-    def __init__(self, service):
+    def __init__(self, service, startup_ready=None):
         self.service = service
         self.window = None
         self.icon = None
@@ -440,6 +460,12 @@ class Desktop:
         self.last_auto_relay = None
         self.noticed = set()  # dedupe keys for one-shot balloon notices
         self._add_ready_seen = False
+        self._login_flow = None
+        self._login_result_seen = None
+        self.startup_ready = startup_ready
+        self._corner_edges = None
+        self._corner_form = None
+        self._native_appearance = None
         self._hide_token = 0  # show() invalidates pending blur-confirm timers
         self._relay_restore = None
         self._relay_pinned = False
@@ -450,6 +476,15 @@ class Desktop:
 
     def _on_service_change(self):
         self.changed.set()
+        flow = self._login_workflow()
+        if flow != getattr(self, '_login_flow', None):
+            previous = getattr(self, '_login_flow', None)
+            self._login_flow = flow
+            if self.visible:
+                if flow:
+                    self._dispatch_ui(lambda: self._set_panel_topmost(True) if self.visible else None)
+                elif previous and not self._relay_restore:
+                    self._dispatch_ui(lambda: self._set_panel_topmost(False) if self.visible else None)
         operation = self.service.operation
         if (operation and operation.get('kind') == 'switch' and self.visible
                 and not self._relay_restore):
@@ -557,7 +592,7 @@ class Desktop:
             self.hide(reason='shape')
 
     def _apply_native_shape(self):
-        """Use DWM's antialiased corners where available, otherwise Win32 region."""
+        """Use a smooth shared radius without exposing the WebView host color."""
         hwnd = _find_hwnd()
         if not hwnd:
             return False
@@ -565,14 +600,20 @@ class Desktop:
         if not version or version().build < 22621:
             return self._apply_native_region()
         try:
+            form = self._form()
+            if not form:
+                return False
+            if form.InvokeRequired:
+                return self._dispatch_ui(self._apply_native_shape)
             dwm = ctypes.windll.dwmapi
             dwm.DwmSetWindowAttribute.argtypes = [ctypes.c_void_p, wt.DWORD,
                                                    ctypes.c_void_p, wt.DWORD]
             dwm.DwmSetWindowAttribute.restype = ctypes.c_long
-            # 33=DWMWA_WINDOW_CORNER_PREFERENCE, 2=DWMWCP_ROUND;
+            # 33=DWMWA_WINDOW_CORNER_PREFERENCE, 1=DWMWCP_DONOTROUND.
+            # WindowCorners supplies the shared radius and pixel-alpha edges.
             # 34=DWMWA_BORDER_COLOR, COLOR_NONE suppresses the frame;
             # 38=DWMWA_SYSTEMBACKDROP_TYPE, 1=DWMSBT_NONE.
-            for attribute, setting in ((33, ctypes.c_int(2)),
+            for attribute, setting in ((33, ctypes.c_int(1)),
                                        (34, ctypes.c_uint(0xFFFFFFFE)),
                                        (38, ctypes.c_int(1))):
                 result = dwm.DwmSetWindowAttribute(
@@ -581,14 +622,58 @@ class Desktop:
                     self.service.log.warning('window_dwm_shape_failed attribute=%s hresult=%#x',
                                              attribute, result & 0xFFFFFFFF)
                     return False
+            from .window_corners import WindowCorners
+            if self._corner_edges is None:
+                self._corner_edges = WindowCorners()
+            self._bind_corner_events(form)
+            user32 = ctypes.windll.user32
+            user32.GetDpiForWindow.argtypes = [ctypes.c_void_p]
+            user32.GetDpiForWindow.restype = wt.UINT
+            dpi = int(user32.GetDpiForWindow(hwnd) or 96)
+            radius = max(1, round(self.config['radius'] * dpi / 96))
+            if self._native_appearance is None:
+                dark = self._appearance_dark(self.service.state.get('settings'))
+            else:
+                dark = self._native_appearance == 'dark'
+            self._corner_edges.apply(hwnd, radius, (29, 29, 29) if dark else (255, 255, 255))
             return True
         except Exception as error:
             self.service.log.warning('window_dwm_shape_failed type=%s',
                                      type(error).__name__)
             return False
 
+    def _bind_corner_events(self, form):
+        if self._corner_form is form:
+            return
+        self._corner_form = form
+        def move(*args):
+            try:
+                if self._corner_edges:
+                    self._corner_edges.move(visible=bool(form.Visible))
+            except Exception as error:
+                self.service.log.warning('window_corner_move_failed type=%s', type(error).__name__)
+                self.hide(reason='shape')
+        def resize(*args):
+            if not self._apply_native_shape() and self.visible:
+                self.hide(reason='shape')
+        def close(*args):
+            if self._corner_edges:
+                self._corner_edges.close()
+        form.LocationChanged += move
+        form.VisibleChanged += move
+        form.SizeChanged += resize
+        form.HandleDestroyed += close
+        self._corner_callbacks = (move, resize, close)
+
+    def _set_native_appearance(self, appearance):
+        if self._native_appearance == appearance:
+            return
+        self._native_appearance = appearance
+        if not self._apply_native_shape() and self.visible:
+            self.hide(reason='shape')
+
     def _apply_native_region(self):
-        """Windows 10 fallback: hard-clip the HWND when DWM rounding is unavailable."""
+        """Clip the HWND to the same radius used by the CSS surface geometry."""
         region = None
         stage = 'bind'
         try:
@@ -714,8 +799,7 @@ class Desktop:
             pass
 
     def _style_window(self):
-        """Apply the no-taskbar style and native shape. Win32-only, so it is
-        safe from any thread (never touches the .NET Form object)."""
+        """Set tray-only styling; corner creation queues onto the owner UI thread."""
         self._remove_from_taskbar()
         return self._apply_native_shape()
 
@@ -738,6 +822,15 @@ class Desktop:
         operation = self.service.operation
         return bool(operation and operation.get('kind') == 'switch')
 
+    def _login_workflow(self):
+        state = getattr(self.service, 'state', None)
+        if not state:
+            return None
+        pending = state.get('reauth') or state.get('adding')
+        if not pending or pending.get('phase') == 'ready':
+            return None
+        return pending.get('id') or ('login', pending.get('email'), pending.get('previous'))
+
     def _set_panel_topmost(self, enabled, hwnd=None):
         """Keep a visible relay panel above ChatGPT without taking keyboard focus."""
         hwnd = hwnd or _find_hwnd()
@@ -753,12 +846,20 @@ class Desktop:
         if not user32.SetWindowPos(hwnd, ctypes.c_void_p(-1 if enabled else -2),
                                     0, 0, 0, 0, flags):
             return False
+        if getattr(self, '_corner_edges', None):
+            try:
+                self._corner_edges.move()
+            except Exception as error:
+                self.service.log.warning('window_corner_order_failed type=%s', type(error).__name__)
+                return False
         user32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
         user32.GetWindowLongPtrW.restype = ctypes.c_longlong
         return bool(user32.GetWindowLongPtrW(hwnd, -20) & 0x00000008) == enabled
 
     def hide(self, *args, reason='user'):
         if reason in ('blur', 'focus'):
+            if self._login_workflow():
+                return
             if self._account_switch_active():
                 return
             if self._relay_restore and chatgpt_foreground():
@@ -773,6 +874,8 @@ class Desktop:
                     if rect[0] <= point.x < rect[2] and rect[1] <= point.y < rect[3]:
                         return  # Let the tray click decide whether to show or hide.
                 if self._account_switch_active():
+                    return
+                if self._login_workflow():
                     return
                 if self._relay_restore and chatgpt_foreground():
                     return
@@ -988,6 +1091,8 @@ class Desktop:
             if not self.visible and user32.IsWindowVisible(hwnd):
                 self.service.log.info('panel_visibility_reasserted')
                 self.hide(reason='repair')
+            elif self.visible and self._login_workflow():
+                self._set_panel_topmost(True, hwnd)
 
         def on_foreground(_hook, event, hwnd, _ido, _idc, _tid, _time):
             try:
@@ -1048,14 +1153,13 @@ class Desktop:
             self.changed.wait(60)
             self.changed.clear()
             data = self.service.get_data()
-            add_ready = data.get('add_login_status') == 'ready'
-            if add_ready and not self._add_ready_seen:
-                self._add_ready_seen = True
-                if self.icon:
-                    self.icon.notify('登录已完成，确认保存这个账号。', 'ChatGPTnx')
-                self.show()
-            elif not data.get('adding'):
-                self._add_ready_seen = False
+            # Explicit hiding is respected. Login completion never reopens a
+            # dismissed panel, and it is announced even if normal notices are off.
+            login_result = data.get('login_result')
+            if login_result and login_result.get('id') != self._login_result_seen:
+                self._login_result_seen = login_result['id']
+                if self.icon and not self.visible:
+                    self.icon.notify(login_result['message'], 'ChatGPTnx')
             settings = data['settings']
             self.hotkeys.configure([(item['email'], item['shortcut']) for item in data['hotkeys']])
             account = next((a for a in data['accounts'] if a['email'] == data['current']), None)
@@ -1121,10 +1225,23 @@ class Desktop:
             self.service.state.update(reset_expiry_notices=dict(list(seen.items())[-500:]))
 
     def quit(self, *args):
-        if self.service.operation or self.service.state.get('adding'):
-            self.icon.notify('请先完成当前操作，或取消添加以恢复原账号。', 'ChatGPTnx')
+        if self.service.operation or self.service.state.get('adding') or self.service.state.get('reauth'):
+            self.icon.notify('请先完成当前操作，或取消登录以恢复原账号。', 'ChatGPTnx')
             return
         self.service.log.info('shutdown_requested source=tray')
+        self.service.stop.set()
+        self.hotkeys.close()
+        self.icon.stop()
+        self.closing = True
+        def close_window():
+            form = self._form()
+            if form:
+                form.Close()
+        self._dispatch_ui(close_window)
+
+    def shutdown_for_update(self):
+        """Called only after the coordinator freezes and the helper starts."""
+        self.service.log.info('shutdown_requested source=update')
         self.service.stop.set()
         self.hotkeys.close()
         self.icon.stop()
@@ -1141,6 +1258,20 @@ class Desktop:
         self.hide()
         return False
 
+    def _acknowledge_startup(self):
+        if not self.startup_ready or not self.ready.wait(15):
+            return
+        deadline = time.monotonic() + 15
+        try:
+            while time.monotonic() < deadline and not self.closing:
+                if self._form() and self.window.evaluate_js(
+                        "Boolean(document.getElementById('app')?.children.length && window.pywebview?.api)"):
+                    self.startup_ready()
+                    return
+                time.sleep(.1)
+        except Exception as error:
+            self.service.log.warning('update_startup_not_ready type=%s', type(error).__name__)
+
     def run(self):
         import webview
         settings = self.service.state.get('settings')
@@ -1148,7 +1279,8 @@ class Desktop:
         size = self.config['sizes']['home']
         dark = settings.get('appearance', 'system') == 'dark' or (
             settings.get('appearance', 'system') == 'system' and system_prefers_dark())
-        background = '#1c1c1c' if dark else self.config['background']
+        self._native_appearance = 'dark' if dark else 'light'
+        background = '#1d1d1d' if dark else self.config['background']
         # HTML injection instead of serving the app folder; snapshots are never
         # exposed through a local file server.
         self.window = webview.create_window('ChatGPTnx', html=panel, js_api=Bridge(self.service, self),
@@ -1158,6 +1290,8 @@ class Desktop:
                                             on_top=True,
                                             background_color=background)
         self.window.events.closing += self.on_closing
+        if self.startup_ready:
+            self.window.events.loaded += self._acknowledge_startup
         if os.environ.get('CHATGPTNX_SHOW'):
             self.window.events.loaded += self.show
         # No events.shown hook: its Python callback needs the GIL on the UI

@@ -21,7 +21,11 @@ def main():
     parser.add_argument('--selfcheck-report', type=Path, help='new diagnostic journal path (refuses to reuse an existing file)')
     parser.add_argument('--locate-task', metavar='TARGET', help='open an existing task by ID only; never send or start the service')
     parser.add_argument('--acceptance-relay', metavar='THREAD', help='explicit one-relay test; requires exactly this one active task')
+    parser.add_argument('--update-ack', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--update-token', help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if bool(args.update_ack) != bool(args.update_token):
+        parser.error('update startup parameters must be paired')
     if args.acceptance_relay and (not args.home or not args.selfcheck_report or args.once or args.locate_task):
         parser.error('relay acceptance requires --home and --selfcheck-report, without other actions')
     if args.locate_task:
@@ -78,7 +82,11 @@ def main():
                          ensure_ascii=False))
     else:
         from nx.desktop import Desktop
-        Desktop(service).run()
+        startup_ready = None
+        if args.update_ack:
+            from nx.updater import startup_ack
+            startup_ready = lambda: startup_ack(root, Path(sys.executable), args.update_ack, args.update_token)
+        Desktop(service, startup_ready=startup_ready).run()
     if mutex:
         kernel.CloseHandle.argtypes = [ctypes.c_void_p]
         kernel.CloseHandle(mutex)

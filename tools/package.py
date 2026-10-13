@@ -2,14 +2,17 @@
 from __future__ import annotations
 import argparse
 import hashlib
+import sys
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'src'))
+from nx.version import APP_VERSION
 TOP = ('README.md', 'README.en.md', 'USAGE.md', 'LICENSE', '.gitignore', 'accounts.sample.txt',
        'build.cmd', 'setup.cmd', 'start.cmd', 'preview.cmd', 'requirements.txt',
-       'requirements-dev.txt', 'requirements-browser.txt')
-EXTENSIONS = {'.py', '.js', '.cjs', '.css', '.ps1', '.ico', '.svg', '.html'}
+       'requirements-dev.txt', 'requirements-browser.txt', f'ChatGPTnx-v{APP_VERSION}.html')
+EXTENSIONS = {'.py', '.js', '.cjs', '.css', '.ps1', '.ico', '.svg', '.html', '.png'}
 
 def package(output: Path) -> int:
     files = [ROOT/name for name in TOP]

@@ -4,6 +4,7 @@ window.NXDemo = (() => {
   const clone=v=>JSON.parse(JSON.stringify(v));
   let state, usages, archives=[], resumeDetails=[], serial=0, failNext=false, previous=null, generation=0;
   const sec=()=>Math.floor(Date.now()/1000);
+  const loginSaved=()=>{state.login_result={id:'demo-login-'+(++serial),message:'登录已验证并保存',quota_ok:true};};
   function demoRelayOrder() {
     const usable=a=>Number.isFinite(a.fetched_at)&&a.fetched_at>=0&&a.fetched_at<=sec()+60&&window.NXComponents.displayWindows(a).length>0&&window.NXComponents.displayWindows(a).every(w=>w.used<100&&w.resets_at>sec());
     const rank=a=>{
@@ -34,6 +35,7 @@ window.NXDemo = (() => {
         source:i===0?'credential_claim':'not_available',verified:false,checked_at:null,observed_at:n-day,account_checked_online:false}}));
     state={version:window.NX_CONFIG.version,accounts,current:accounts[0].email,updated:n-60,switching:null,operation:null,adding:false,reauth:null,resume:null,
       last_error:null,last_result:null,recent_results:[],chatgpt_running:true,pending:null,relay_wait:null,
+      update:{status:'idle',current:window.NX_CONFIG.version,installable:true,message:'检查是否有新版本',progress:0},
       hotkeys:accounts.map((a,i)=>({email:a.email,shortcut:`ctrl+alt+${i+1}`,registered:true})),
       settings:{appearance:'system',autostart:false,auto_relay:false,auto_relay_excluded:[],
         early_anchor:false,early_anchor_accounts:[],
@@ -74,6 +76,10 @@ window.NXDemo = (() => {
   async function call(method,...args){
     const [email,force]=args;
     switch(method){
+      case 'check_update':state.update={...state.update,status:'checking',message:'正在检查更新…'};setTimeout(()=>{state.update={...state.update,status:'available',available:true,version:'1.4',message:'发现新版本',notes:'改善登录体验与版本更新。'};},500);return {ok:true,accepted:true};
+      case 'download_update':state.update={...state.update,status:'downloading',progress:50,message:'正在下载更新…'};setTimeout(()=>{state.update={...state.update,status:'ready',progress:100,message:'下载已校验，点击重启并更新'};},600);return {ok:true,accepted:true};
+      case 'cancel_update_download':state.update={...state.update,status:'error',message:'下载已取消，可重新下载'};return {ok:true};
+      case 'install_update':if(state.adding||state.reauth||state.operation)return {ok:false,error:'请完成当前操作后再更新'};state.update={...state.update,status:'installing',message:'正在重启并更新…'};return {ok:true};
       case 'get_diagnostics':return {ok:true,text:JSON.stringify({version:window.NX_CONFIG.version,monitor:{state:'ok'},accounts:[{account:1,ok:true,paused:false}]},null,2)};
       case 'retry_query':return operation('refresh',email,()=>{const a=state.accounts.find(a=>a.email===email);if(a){a.ok=true;a.error_code=null;a.paused=false;a.retry_at=null;delete a.query_warning;a.fetched_at=sec();}});
       case 'get_data':{
@@ -136,10 +142,10 @@ window.NXDemo = (() => {
             fetched_at:sec(),membership:{status:'not_provided',date:null,verified:false}};
           state.accounts.push(a);state.current=who;});}
       case 'add_cancel':return operation('add_cancel',null,()=>{state.current=previous;state.adding=false;state.add_state=null;state.add_login_status=null;});
-      case 'add_finish':if(state.add_login_status!=='ready')return {ok:false,error:'请先完成新账号登录'};return operation('add_finish',null,()=>{const id=state.accounts.length+1;const a={email:`new-${id}@example.com`,alias:`新账号 ${id}`,identity_key:`new-${id}`,plan:'plus',ok:true,bucket:'codex',windows:[{label:'5h',used:0,resets_at:sec()+18000,duration_mins:300},{label:'周',used:0,resets_at:sec()+604800,duration_mins:10080}],fetched_at:sec(),membership:{status:'not_provided',date:null,verified:false}};state.accounts.push(a);state.current=a.email;state.adding=false;state.add_state=null;state.add_login_status=null;});
+      case 'add_finish':if(state.add_login_status!=='ready')return {ok:false,error:'请先完成新账号登录'};return operation('add_finish',null,()=>{const id=state.accounts.length+1;const a={email:`new-${id}@example.com`,alias:`新账号 ${id}`,identity_key:`new-${id}`,plan:'plus',ok:true,bucket:'codex',windows:[{label:'5h',used:0,resets_at:sec()+18000,duration_mins:300},{label:'周',used:0,resets_at:sec()+604800,duration_mins:10080}],fetched_at:sec(),membership:{status:'not_provided',date:null,verified:false}};state.accounts.push(a);state.current=a.email;state.adding=false;state.add_state=null;state.add_login_status=null;loginSaved();});
       case 'reauth_start':return operation('reauth_start',email,()=>{previous=state.current;state.current=null;state.reauth={email,previous,phase:'login'};});
       case 'reauth_cancel':return operation('reauth_cancel',null,()=>{state.current=state.reauth?.previous||previous;state.reauth=null;});
-      case 'reauth_finish':return operation('reauth_finish',state.reauth?.email,()=>{state.current=state.reauth.email;const a=state.accounts.find(a=>a.email===state.current);if(a){a.ok=true;a.err=null;a.error_code=null;a.fetched_at=sec();}state.reauth=null;});
+      case 'reauth_finish':return operation('reauth_finish',state.reauth?.email,()=>{state.current=state.reauth.email;const a=state.accounts.find(a=>a.email===state.current);if(a){a.ok=true;a.err=null;a.error_code=null;a.fetched_at=sec();}state.reauth=null;loginSaved();});
       case 'set_preferences':{
         const update={...args[0]};
         if(state.demo_preference_error)return {ok:false,error:'设置写入失败，请重试'};
@@ -212,12 +218,27 @@ window.NXDemo = (() => {
         if(state.demo_save_error)return {ok:false,error:'保存失败，文件暂时被占用'};
         if(state.demo_hold_save)return new Promise(()=>{});
         const a=state.accounts.find(a=>a.email===email);if(a){a.alias=args[1];a.manual_subscription_date=args[2];}return {ok:true};}
-      case 'resize_panel':case 'hide':case 'quit':return {ok:true};
+      case 'resize_panel':case 'hide':case 'quit':case 'open_github':return {ok:true};
       default:throw new Error('演示适配器不支持 '+method);
     }
   }
   function scenario(which){
     seed();
+    if(which.startsWith('update-')){
+      const updates={
+        'update-checking':{status:'checking',message:'正在检查更新…'},
+        'update-current':{status:'current',version:window.NX_CONFIG.version,message:'当前已是最新版本'},
+        'update-available':{status:'available',available:true,version:'1.4',message:'发现新版本',notes:'改善自动登录与版本更新体验。'},
+        'update-downloading':{status:'downloading',available:true,version:'1.4',progress:63,message:'正在下载更新…'},
+        'update-ready':{status:'ready',available:true,version:'1.4',progress:100,message:'下载已校验，点击重启并更新'},
+        'update-error':{status:'error',message:'连接 GitHub 失败或下载中断，请检查网络后重试。'},
+        'update-blocked':{status:'ready',available:true,version:'1.4',progress:100,message:'下载已校验，点击重启并更新'},
+        'update-source':{status:'available',available:true,version:'1.4',installable:false,message:'发现新版本'},
+        'update-notes':{status:'available',available:true,version:'1.4',notes:'改善自动登录验证。\n统一联系与支持排版。\n支持内置版本更新。\n'.repeat(8),message:'发现新版本'}
+      };
+      if(updates[which])Object.assign(state.update,updates[which]);
+      if(which==='update-blocked')state.reauth={email:state.accounts[4].email,previous:state.current,phase:'login'};
+    }
     if(which==='launch-pending')state.demo_hold_launch=true;
     if(which==='launch-failed')state.demo_launch_error=true;
     if(which==='first-launch-pending'||which==='first-launch-failed'){
@@ -405,8 +426,8 @@ window.NXDemo = (() => {
   function simulate(event) {
     if(event==='login'){
       state.chatgpt_running=true;
-      if(state.adding)state.add_login_status='ready';
-      else if(state.reauth)state.reauth.demo_login_complete=true;
+      if(state.adding){state.add_login_status='ready';call('add_finish');}
+      else if(state.reauth){state.reauth.demo_login_complete=true;call('reauth_finish',state.reauth.email);}
       else if(!state.accounts.length)state.pending='first-account@example.com';
     }else if(event==='complete-resume'){
       for(const session of resumeDetails){session.phase='done';for(const item of session.items){item.state='done';item.reason='new_turn_observed';}}
@@ -416,6 +437,7 @@ window.NXDemo = (() => {
       state.resume={id:'dynamic-resume',phase:'resuming',done:0,failed:0,total:1};
     }else if(event==='clear-status'){state.resume=null;state.last_error=null;}
     else if(event==='recover-service')state.demo_connection_error=false;
+    else if(event==='disconnect-service')state.demo_connection_error=true;
     else if(event==='restore-quota'){
       state.accounts.forEach(a=>{a.ok=true;a.err=null;a.error_code=null;a.fetched_at=sec();a.windows.forEach(w=>{w.used=20;w.resets_at=sec()+3600;});});
     }else throw new Error('未知演示事件');

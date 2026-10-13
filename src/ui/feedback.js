@@ -94,11 +94,8 @@ window.NXFeedback = (() => {
       const bounds=surface.getBoundingClientRect();
       let bottom=number('--status-bottom',12);
       const footer=surface.querySelector(':scope > footer');
-      const workflow=surface.classList.contains('is-onboarding')||['confirm','add','reauth','remove','resume-clear'].includes(surface.dataset.page);
-      if(workflow&&footer){
-        // Confirmation/login flows must never have their primary actions covered.
-        bottom=bounds.bottom-footer.getBoundingClientRect().top+8;
-      }else if(surface.id==='home') {
+      const footerVisible=footer&&!footer.hidden&&footer.getBoundingClientRect().height>0;
+      if(surface.id==='home'&&!surface.classList.contains('is-onboarding')&&footerVisible) {
         bottom=number('--status-home-bottom',52);
         const avatar=surface.querySelector('.account-list > .row:nth-child(3) .avatar');
         if(avatar&&viewport) {
@@ -107,6 +104,9 @@ window.NXFeedback = (() => {
           bottom=bounds.bottom-(r.top+viewport.scrollTop+r.height/2)-number('--status-height',40)/2;
         }
         bottom=Math.max(48,Math.min(80,bottom));
+      }else if(footerVisible) {
+        // Every persistent footer owns its space; footerless pages use the base inset.
+        bottom=bounds.bottom-footer.getBoundingClientRect().top+8;
       }
       host.style.bottom=bottom+'px';
       revealFocus();

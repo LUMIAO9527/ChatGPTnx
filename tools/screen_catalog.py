@@ -22,12 +22,13 @@ add(G,'first-waiting','首次引导 · 等待登录',scenario='first-waiting')
 add(G,'first-account','首次引导 · 检测到账号',scenario='empty')
 add(G,'first-saving','首次引导 · 保存中',scenario='first-saving')
 add(G,'first-failed','首次引导 · 保存失败',scenario='first-failed')
-add(G,'connection-error','本地服务未连接',scenario='connection-error')
+add(G,'connection-error','首次引导 · 连接中断',scenario='connection-error',note='连接错误合并到首次引导；没有独立错误页，也不显示重复错误卡片。')
 
 G='02 · 首页'
 for key,label,sc in [('home','首页 · 常规',None),('home-single','首页 · 一个账号','single-account'),('home-three','首页 · 三个账号','three-accounts'),('home-four','首页 · 四个账号','four-accounts'),('home-many','首页 · 14 个账号','many'),('home-long-names','首页 · 长名称','long-names'),('home-error','首页 · 操作失败','error-home'),('home-stale','首页 · 缓存过期','stale'),('home-expired','首页 · 到点待核验','expired'),('home-no-relay','首页 · 无可用接力账号','no-relay'),('home-desktop-off','首页 · 桌面未运行','chatgpt-off'),('home-exhausted','首页 · 已耗尽且自动接力关闭','week-exhausted-auto-off'),('home-refreshing','首页 · 正在刷新','refreshing'),('home-resuming','首页 · 接续进行中','resume-progress'),('home-waiting','首页 · 等待账号恢复','resume-waiting'),('home-failed','首页 · 接续失败','resume-failed')]:add(G,key,label,scenario=sc)
 
 G='03 · 账号详情'
+add('02 · 首页','home-connection-lost','首页 · 连接中断保留已有内容',steps=[{'simulate':'disconnect-service'}],note='保留已加载账号，只显示一处重新连接提示。')
 for key,label,sc,params in [
  ('detail','详情 · 当前账号',None,{}),('detail-other','详情 · 其他账号',None,{'email':'backup@example.com'}),
  ('detail-pro','详情 · Pro 单额度窗口',None,{'email':'studio@example.com'}),
@@ -60,11 +61,12 @@ add(G,'usage-identity-changed','个人用量 · 身份变化',route='usage',scen
 
 G='06 · 设置与参与账号'
 add(G,'settings','设置 · 三个一级分组',route='settings')
-add(G,'diagnostics','诊断摘要 · 预览后复制',route='diagnostics',steps=[click('diagnostics-refresh')])
 add(G,'query-forbidden','权限拒绝 · 暂停查询',scenario='query-forbidden')
 add(G,'query-cooling','请求过频 · 等待冷却',scenario='query-cooling')
 add(G,'monitor-degraded','任务监控 · 延迟重试',scenario='monitor-degraded')
-add(G,'purchase-account','购买账号 · QQ联系',route='purchase')
+add(G,'purchase-account','联系与支持 · 账号服务与自愿打赏',route='purchase')
+add(G,'support-author-qr','打赏作者 · 放大收款码',route='support-qr')
+add(G,'version-update','版本更新 · 检查与下载',route='update')
 add(G,'settings-automation','接力与接续 · 默认',route='automation')
 add(G,'automation-on','接力与接续 · 已开启',route='automation',scenario='automation-on')
 add(G,'automation-off','接力与接续 · 全关闭',route='automation',scenario='automation-off')
@@ -187,12 +189,16 @@ add(G,'detail-unsupported-floating','详情 · 暂不支持查询与固定悬浮
 add(G,'detail-other-floating','详情 · 其他账号底部功能仍可到达',route='detail',email='backup@example.com',steps=[{'simulate':'start-resume'}])
 add(G,'detail-editor-floating-dismissed','详情 · 关闭浮条后编辑位置不变',route='edit',steps=[{'fill':'#alias','value':'尚未保存的昵称'},{'simulate':'start-resume'},click('dismiss-status')])
 
+G='16 · 版本更新与安装保护'
+for key,label in [('checking','正在检查'),('current','已是最新'),('available','发现新版本'),('downloading','正在下载'),('ready','校验完成'),('error','网络错误与重试'),('blocked','登录中禁止安装'),('source','源码运行提示'),('notes','长更新说明')]:
+    add(G,'version-update-'+key,'版本更新 · '+label,route='update',scenario='update-'+key)
+
 # Exact expected final destination; checked for every screenshot, not inferred from its name.
 from urllib.parse import parse_qs
 for case in CASES:
     query=parse_qs(case['query']);scenario=query.get('scenario',[''])[0]
     expected=case['route']
-    if case['id'] in {'first-run','first-waiting','first-account','first-saving','first-failed','first-launch-pending','first-launch-failed','first-launch-done','first-recheck','brand-onboarding'}:expected='onboarding'
+    if case['id'] in {'first-run','first-waiting','first-account','first-saving','first-failed','first-launch-pending','first-launch-failed','first-launch-done','first-recheck','brand-onboarding','connection-error'}:expected='onboarding'
     overrides={'detail-date-entry':'detail','detail-date-saved':'detail','resume-clear':'resume-clear','switch-error':'confirm','resume-message-saved':'settings','inline-resume':'resume'}
     expected={'automation':'settings','notifications':'settings','relay-accounts':'settings','hotkeys':'settings','archives':'settings','resume-message':'settings','edit':'detail'}.get(expected,expected)
     case['expected']=overrides.get(case['id'],expected)

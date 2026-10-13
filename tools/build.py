@@ -6,6 +6,7 @@ The builder never reads or overwrites accounts.txt, snapshots/ or _data/.
 from pathlib import Path
 import json
 import hashlib
+import base64
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,7 +27,7 @@ def ui_source_digest():
     sources = sorted((ROOT / 'src/ui').rglob('*')) + [
         ROOT/'tools/screen_catalog.py', ROOT/'src/nx/design.py',
         ROOT/'src/nx/version.py', ROOT/'src/nx/resume_policy.py',
-        ROOT/'src/assets/nx-mark.svg', ROOT/'tools/build.py']
+        ROOT/'src/assets/nx-mark.svg', ROOT/'src/assets/support-alipay.png', ROOT/'tools/build.py']
     return hashlib.sha256(b''.join(p.read_bytes() for p in sources if p.is_file())).hexdigest()
 
 
@@ -39,6 +40,7 @@ def panel(*, demo=False, proposal=None):
     if not demo and ('@example.com' in js or 'function seed(' in js):
         raise RuntimeError('demonstration data leaked into production panel')
     brand = 'window.NX_BRAND_MARK='+json.dumps((ROOT/'src/assets/nx-mark.svg').read_text(encoding='utf-8').strip())+';\n'
+    brand += 'window.NX_SUPPORT_QR='+json.dumps('data:image/png;base64,' + base64.b64encode((ROOT/'src/assets/support-alipay.png').read_bytes()).decode('ascii'))+';\n'
     policy='window.NX_RESUME_POLICY='+json.dumps({'attention':sorted(ATTENTION_REASONS),'retryable':sorted(RETRYABLE_REASONS)})+';\n'
     catalog = 'window.NX_CATALOG='+json.dumps(CASES,ensure_ascii=False)+';\n' if demo else ''
     body_class = 'demo' if demo else 'live'
@@ -49,7 +51,8 @@ def panel(*, demo=False, proposal=None):
 
 def windows_version():
     """Windows file properties use the same release version as the application."""
-    version = tuple(map(int, APP_VERSION.split('.'))) + (0,)
+    parts = tuple(map(int, APP_VERSION.split('.')))
+    version = parts + (0,) * (4 - len(parts))
     return f'''VSVersionInfo(
   ffi=FixedFileInfo(filevers={version!r}, prodvers={version!r}, mask=0x3f,
     flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
@@ -72,6 +75,7 @@ def build():
     (RESOURCES / 'nx.ico').write_bytes((ROOT / 'src' / 'assets' / 'nx.ico').read_bytes())
     (RESOURCES / 'switch_account.ps1').write_bytes((ROOT / 'src' / 'switch_account.ps1').read_bytes())
     (RESOURCES / 'continue_in_desktop.ps1').write_bytes((ROOT / 'src' / 'continue_in_desktop.ps1').read_bytes())
+    (RESOURCES / 'update_app.ps1').write_bytes((ROOT / 'src' / 'update_app.ps1').read_bytes())
     print('Built ChatGPTnx resources')
 
 

@@ -43,7 +43,7 @@ def build_gallery(output:Path):
     output.parent.mkdir(parents=True,exist_ok=True);output.write_text(html,encoding='utf-8')
     # Human-readable and machine-readable inventory use the same source of truth.
     lines=[f'# 全界面与状态清单 · {APP_VERSION}','',f'{len(CASES)} 个具名页面 / 状态；每项浅色、深色各一张。共 {nimages} 张 PNG，包含可滚动页面的完整内容长图。','',
-           '打开 `ui-explorer.html` 操作真实界面组件；打开 `ui-gallery.html` 搜索、放大和对照全部截图。浏览器截图使用合成数据，不替代 Windows 本机验收。','']
+           f'正式演示入口为根目录 `ChatGPTnx-v{APP_VERSION}.html`；本次生成的截图画廊用于验证留档。浏览器截图使用合成数据，不替代 Windows 本机验收。','']
     group=None
     for case in CASES:
         if group!=case['group']:

@@ -7,7 +7,7 @@
   Component-specific values below are limited to layout or optical exceptions.
 */
 :root {
-  --radius-ui: 16px; --radius-window: 14px; --radius-card: var(--radius-ui);
+  --radius-ui: 16px; --radius-window: var(--radius-ui); --radius-card: var(--radius-ui);
   --radius-control: 12px; --radius-compact: 8px; --radius-pill: 999px;
   --window-r: var(--radius-window); --r: var(--radius-card);
   --panel-edge: 14px; --sheet-header-height: 50px; --content-top: 3px; --account-card-height: 112px;
