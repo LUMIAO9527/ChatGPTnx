@@ -15,6 +15,7 @@ class Element{
   constructor(tag='div',cls='',box={left:0,top:0,width:1,height:1},css={}){this.tagName=tag.toUpperCase();this.attrs=new Map();this.dataset={};this.style=style();this.children=[];this.parentNode=null;this.hidden=false;this.inert=false;this.scrollTop=0;this._box={...box};this._css={display:'block',opacity:'1','font-size':'14px','font-weight':'650','font-family':'Segoe UI','line-height':'18px','background-color':'transparent','border-radius':'12px',...css};this.textContent='';this.events=new Map();this.animateCalls=[];this.className=cls;}
   get id(){return this.attrs.get('id')||''}set id(v){this.setAttribute('id',v)}
   get className(){return this.attrs.get('class')||''}set className(v){this.setAttribute('class',v)}
+  get classList(){return {contains:name=>this.className.split(/\s+/).includes(name)}}
   get attributes(){return [...this.attrs].map(([name,value])=>({name,value}))}
   get isConnected(){return !!this.parentNode||this.id==='app'}
   setAttribute(n,v){this.attrs.set(n,String(v));if(n.startsWith('data-'))this.dataset[n.slice(5).replace(/-([a-z])/g,(_,c)=>c.toUpperCase())]=String(v)}
@@ -25,12 +26,12 @@ class Element{
   contains(n){return this===n||this.children.some(c=>c.contains(n))}
   remove(){if(this.parentNode)this.parentNode.children=this.parentNode.children.filter(n=>n!==this);this.parentNode=null}
   cloneNode(deep){const n=new Element(this.tagName,'',this._box,this._css);for(const a of this.attributes)n.setAttribute(a.name,a.value);n.style=this.style.copy();n.textContent=this.textContent;if(deep)n.append(...this.children.map(c=>c.cloneNode(true)));return n}
-  matches(selector){return selector.split(',').some(s=>{const ps=s.trim().split(/\s*>\s*|\s+/),simple=(n,p)=>p.startsWith('.')?p.slice(1).split('.').every(c=>n.className.split(/\s+/).includes(c)):p.startsWith('#')?n.id===p.slice(1):n.tagName.toLowerCase()===p.toLowerCase();if(!simple(this,ps.pop()))return false;let n=this.parentNode;while(ps.length){const p=ps.pop();while(n&&!simple(n,p))n=n.parentNode;if(!n)return false;n=n.parentNode}return true})}
+  matches(selector){return selector.split(',').some(s=>{const ps=s.trim().split(/\s*>\s*|\s+/),simple=(n,p)=>{const attr=p.match(/^\[([^=]+)="([^"]+)"\]$/);return attr?n.getAttribute(attr[1])===attr[2]:p.startsWith('.')?p.slice(1).split('.').every(c=>n.className.split(/\s+/).includes(c)):p.startsWith('#')?n.id===p.slice(1):n.tagName.toLowerCase()===p.toLowerCase();};if(!simple(this,ps.pop()))return false;let n=this.parentNode;while(ps.length){const p=ps.pop();while(n&&!simple(n,p))n=n.parentNode;if(!n)return false;n=n.parentNode}return true})}
   querySelectorAll(selector){const result=[];for(const c of this.children){if(selector==='*'||c.matches(selector))result.push(c);result.push(...c.querySelectorAll(selector))}return result}
   querySelector(selector){return this.querySelectorAll(selector)[0]||null}
   addEventListener(name,fn){if(!this.events.has(name))this.events.set(name,[]);this.events.get(name).push(fn)}
   emit(name,event={}){for(const fn of this.events.get(name)||[])fn(event)}
-  getBoundingClientRect(){layoutReads++;let{left,top,width,height}=this._box;const scale=this._scale||1;if(this.style.position==='fixed'){let app=this;while(app&&app.id!=='app')app=app.parentNode;if(this.style.left!=='auto')left=(app?app._box.left:0)+parseFloat(this.style.left)*scale;if(this.style.top!=='auto')top=(app?app._box.top:0)+parseFloat(this.style.top)*scale;width=parseFloat(this.style.width)*scale;height=parseFloat(this.style.height)*scale}const m=this.style.transform.match(/translate\(([-.\d]+)px,([-.\d]+)px\)\s*scale\(([-.\d]+),([-.\d]+)\)/);if(m){left+=Number(m[1])*scale;top+=Number(m[2])*scale;width*=Number(m[3]);height*=Number(m[4])}return{left,top,width,height,right:left+width,bottom:top+height}}
+  getBoundingClientRect(){layoutReads++;let{left,top,width,height}=this._box;const scale=this._scale||1;if(this.style.position==='fixed'){let app=this;while(app&&app.id!=='app')app=app.parentNode;if(this.style.left!=='auto')left=(app?app._box.left:0)+parseFloat(this.style.left)*scale;if(this.style.top!=='auto')top=(app?app._box.top:0)+parseFloat(this.style.top)*scale;width=parseFloat(this.style.width)*scale;height=parseFloat(this.style.height)*scale}const m=this.style.transform.match(/translate\(([-.\d]+)px,([-.\d]+)px\)\s*scale\(([-.\d]+),([-.\d]+)\)/);if(m){left+=Number(m[1])*scale;top+=Number(m[2])*scale;width*=Number(m[3]);height*=Number(m[4])}else{const move=this.style.transform.match(/^translate\(([-.\d]+)px,([-.\d]+)px\)$/);if(move){left+=Number(move[1])*scale;top+=Number(move[2])*scale}}return{left,top,width,height,right:left+width,bottom:top+height}}
   animate(frames,options){const a={frames,options,clock:time,elapsed:0,cancelled:false,finished:false,get currentTime(){return this.elapsed+time-this.clock},set currentTime(v){this.elapsed=v;this.clock=time},cancel(){this.cancelled=true;animations.delete(this);this.oncancel?.()}};this.animateCalls.push(a);animations.add(a);return a}
 }
 const easing=p=>{let lo=0,hi=1;for(let i=0;i<30;i++){const t=(lo+hi)/2,x=3*(1-t)**2*t*.2+3*(1-t)*t*t*.25+t**3;if(x<p)lo=t;else hi=t}const t=(lo+hi)/2;return 3*(1-t)**2*t*.7+3*(1-t)*t*t+t**3};
@@ -68,9 +69,21 @@ check('coordinate conversion handles a scaled surface',()=>{const e=setup(.8),ol
 check('thirty rapid transitions have bounded layers and zero idle frames',()=>{const e=setup();let current=e.surface('home','a');e.mount(current.node);for(let i=0;i<30;i++){e.motion.begin(current.node,i%2?-1:1,'b');current=e.surface(i%2?'home':'detail',i%2?'a':'b');e.mount(current.node);e.motion.paint(current.node);e.tick(10);clean(e)}e.tick(1000);assert.equal(e.test.scene,null);assert.equal(e.test.models.size,0);assert.equal(rafs.size,0);assert.equal(animations.size,0)});
 check('unrelated accounts remove previous moving labels',()=>{const{e,next}=entering();e.tick(30);e.motion.begin(next.node,1,'c');const other=e.surface('detail','c');e.mount(other.node);e.motion.paint(other.node);assert.equal(e.test.models.size,0);assert.equal(e.app.querySelectorAll('.nx-motion-layer').length,0);assert(!labels(e).includes('Account b'));clean(e);e.motion.stop()});
 check('missing animation support uses the normal page',()=>{const animate=Element.prototype.animate;delete Element.prototype.animate;try{const e=setup(),old=e.surface('home','a');e.mount(old.node);e.motion.begin(old.node,1,'b');const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);assert.equal(e.test.scene,null);clean(e)}finally{Element.prototype.animate=animate}});
-check('content phases cap at 32 milliseconds and ignore offscreen content',()=>{const e=setup(),old=e.surface('detail','b');e.mount(old.node);e.motion.begin(old.node,1,'b');const next=e.surface('detail','b'),second=e.el('section','second',14,378,299,25),third=e.el('section','third',14,408,299,25),edge=e.el('section','edge',14,440,299,16),offscreen=e.el('section','offscreen',14,500,299,25),foot=e.el('footer','sheet-foot',14,426,299,32);next.body.append(second,third,edge,offscreen);next.node.append(foot);e.mount(next.node);e.motion.paint(next.node);const a=next.content.animateCalls.at(-1),b=second.animateCalls.at(-1),c=third.animateCalls.at(-1),d=edge.animateCalls.at(-1);assert.equal(a.options.duration,240);assert.equal(b.options.delay-a.options.delay,16);assert.equal(c.options.delay-a.options.delay,32);assert.equal(d.options.delay,c.options.delay);assert.equal(offscreen.animateCalls.length,0);assert.equal(a.frames[0].transform,'translateY(4px)');assert(!d.frames[0].transform);assert.equal(foot.animateCalls.at(-1).options.delay,c.options.delay);assert.equal(e.test.page.endElapsed,272);e.tick(245);assert(e.test.page);e.tick(35);assert.equal(e.test.page,null);assert.equal(animations.size,0);assert.equal(rafs.size,0);clean(e)});
+check('unrelated navigation moves the body as one group without per-section staggering',()=>{
+  const e=setup(),old=e.surface('detail','c');e.mount(old.node);e.motion.begin(old.node,1,'b');
+  const next=e.surface('detail','b'),second=e.el('section','second',14,378,299,25),offscreen=e.el('section','offscreen',14,500,299,25),foot=e.el('footer','sheet-foot',14,426,299,32);
+  next.body.append(second,offscreen);next.node.append(foot);e.mount(next.node);e.motion.paint(next.node);
+  const effect=next.body.animateCalls[0];assert.equal(effect.options.duration,240);assert.equal(effect.options.delay,0);assert.equal(effect.frames[0].transform,'translateY(4px)');
+  assert.equal(next.content.animateCalls.length,0);assert.equal(second.animateCalls.length,0);assert.equal(offscreen.animateCalls.length,0);assert.equal(foot.animateCalls[0].options.delay,0);
+  e.tick(245);assert.equal(e.test.page,null);assert.equal(animations.size,0);assert.equal(rafs.size,0);clean(e);
+});
 check('time range feedback animates one chart and keeps totals fixed',()=>{const e=setup(),old=e.surface('usage','b');e.mount(old.node);const summary=e.el('section','usage-summary',14,220,299,110),total=e.el('div','usage-total',28,224,120,28),chart=e.el('div','trend',28,268,272,48);summary.append(total,chart);old.body.append(summary);e.motion.reveal(summary);assert.equal(summary.animateCalls.length,0);assert.equal(total.animateCalls.length,0);assert.equal(chart.animateCalls.length,1);assert.equal(chart.animateCalls[0].frames[0].opacity,.65);assert.equal(chart.animateCalls[0].options.duration,150);e.tick(200);assert.equal(animations.size,0);e.motion.begin(old.node,1,'b');const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);e.motion.reveal(summary);assert.equal(chart.animateCalls.length,1);e.motion.stop();e.motion.setEnabled(false);e.motion.reveal(summary);assert.equal(chart.animateCalls.length,1)});
-check('return uses a smaller offset and resumes after data rebuild',()=>{const e=setup(),old=e.surface('detail','b');e.mount(old.node);e.motion.begin(old.node,-1,'b');const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);assert.equal(next.content.animateCalls.at(-1).frames[0].transform,'translateY(-3px)');e.tick(30);const rebuilt=e.surface('detail','b');e.mount(rebuilt.node);e.motion.paint(rebuilt.node);assert.equal(rebuilt.content.animateCalls.at(-1).currentTime,30);e.tick(260);assert.equal(e.test.page,null);assert.equal(animations.size,0);clean(e)});
+check('unrelated return uses one smaller body offset and resumes after data rebuild',()=>{
+  const e=setup(),old=e.surface('detail','c');e.mount(old.node);e.motion.begin(old.node,-1,'b');
+  const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);assert.equal(next.body.animateCalls.at(-1).frames[0].transform,'translateY(-3px)');e.tick(30);
+  const rebuilt=e.surface('detail','b');e.mount(rebuilt.node);e.motion.paint(rebuilt.node);assert.equal(rebuilt.body.animateCalls.at(-1).currentTime,30);
+  e.tick(260);assert.equal(e.test.page,null);assert.equal(animations.size,0);clean(e);
+});
 check('hiding the panel and unloading remove temporary layers',()=>{const{e,next}=entering();e.tick(30);e.document.hidden=true;e.document.emit('visibilitychange');assert.equal(rafs.size,0);assert.equal(animations.size,0);assert.equal(e.test.scene,null);assert.equal(next.profile.avatar.style.opacity,'');clean(e);e.document.hidden=false;e.motion.begin(next.node,-1);const back=e.surface('home','a');e.mount(back.node);e.motion.paint(back.node);e.window.emit('pagehide');assert.equal(rafs.size,0);assert.equal(e.test.scene,null);clean(e)});
 check('account names always use the real unscaled and unclipped element',()=>{
   const {e,next}=entering();
@@ -276,8 +289,137 @@ check('mixed rapid navigation stays finite within the panel and releases all wor
   e.tick(1200);assert.equal(e.test.scene,null);assert.equal(e.test.bindings.size,0);assert.equal(e.test.models.size,0);
   assert.equal(rafs.size,0);assert.equal(animations.size,0);assert.equal(e.app.querySelectorAll('*').filter(n=>n.__nxMotionPlaceholder).length,0);
 });
-check('production embeds the version and excludes demo controls and accounts',()=>{assert(html.includes('"version": "1.0.2"'));for(const s of['data-preview-density','data-preview-motion','layout-preview-tools','@example.com'])assert(!html.includes(s));assert.equal(html.split('window.NXMotion =').length-1,1);const app=fs.readFileSync(path.join(root,'src/ui/app.js'),'utf8');assert(app.includes('window.nxHidden=()=>{window.NXMotion?.stop();'));assert(app.includes('closeSheet(false)'));assert(app.includes('restoreScroll(sheet,saved.scroll);restoreFocus(sheet,saved.focus)'));assert(app.includes('patchHTML(sheet,markup,{preserveFields:preserve})'));assert(!app.includes('sheet.innerHTML=markup'))});
+check('production embeds the version and excludes demo controls and accounts',()=>{const version=fs.readFileSync(path.join(root,'src/nx/version.py'),'utf8').match(/APP_VERSION = "([^"]+)"/)[1];assert(html.includes('"version": '+JSON.stringify(version)));for(const s of['data-preview-density','data-preview-motion','layout-preview-tools','@example.com'])assert(!html.includes(s));assert.equal(html.split('window.NXMotion =').length-1,1);const app=fs.readFileSync(path.join(root,'src/ui/app.js'),'utf8');assert(app.includes('window.nxHidden=()=>{window.NXMotion?.stop();'));assert(app.includes('closeSheet(false)'));assert(app.includes('restoreScroll(sheet,saved.scroll);restoreFocus(sheet,saved.focus)'));assert(app.includes('patchHTML(sheet,markup,{preserveFields:preserve})'));assert(!app.includes('sheet.innerHTML=markup'))});
+// A navigation chooses one spatial anchor. Other content fades as a group.
+function primaryFixture(e,surface,action,box,footer=false){
+  const parent=footer?e.el('footer','sheet-foot',14,394,299,64):surface.body;
+  if(footer){surface.body._box.height=344;surface.node.append(parent);}
+  const button=e.el('button','btn primary',...box,{'border-radius':'12px','font-size':'12px'});
+  button.setAttribute('data-action',action);button.textContent=action;
+  const copy=e.el('span','control-content',box[0]+12,box[1]+10,Math.max(30,box[2]-24),18);copy.textContent=action;
+  button.append(copy);parent.append(button);return {button,copy,parent};
+}
+check('different primary actions morph across home body and confirmation footer',()=>{
+  for(const scale of [1,1.25,1.75,2]){
+    const e=setup(scale),old=e.surface('home','a'),from=primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1,'b');
+    const next=e.surface('confirm','b'),to=primaryFixture(e,next,'execute-switch',[170,404,143,44],true);e.mount(next.node);e.motion.paint(next.node);
+    const model=e.test.models.get('primary-action');assert(model);assert.equal(e.test.models.size,1);assert.equal(model.live,to.button);
+    assert.equal(to.parent.animateCalls.length,0);assert.equal(to.copy.animateCalls.length,1);assert.equal(to.button.style.opacity,'');
+    assert(!next.content.animateCalls[0].frames[0].transform);
+    for(const step of [0,35,55,60,80,69.9]){
+      e.tick(step);const r=to.button.getBoundingClientRect();
+      assert(Math.abs((r.left-100)/scale-(model.pose.x-model.pose.w/2))<.001);
+      assert(Math.abs((r.top-100)/scale-(model.pose.y-model.pose.h/2))<.001);
+      assert(Math.abs(r.width/scale-model.pose.w)<.001);assert(!to.button.style.transform.includes('scale'));
+    }
+    e.tick(1);assert.equal(to.button.style.position,'');assert.equal(to.button.style.width,'');e.tick(1000);clean(e);
+  }
+});
+check('rapid primary action reversal preserves position velocity and acceleration',()=>{
+  const e=setup(),old=e.surface('home','a');primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1,'b');
+  const next=e.surface('confirm','b');primaryFixture(e,next,'execute-switch',[170,404,143,44],true);e.mount(next.node);e.motion.paint(next.node);e.tick(90);
+  const model=e.test.models.get('primary-action'),pose={...model.pose},velocity={...model.velocity},acceleration={...model.acceleration};
+  e.motion.begin(next.node,-1);const back=e.surface('home','a');primaryFixture(e,back,'relay',[14,173,299,62]);e.mount(back.node);e.motion.paint(back.node);
+  assert.equal(e.test.models.get('primary-action'),model);assert.deepEqual({...model.pose},pose);assert.deepEqual({...model.velocity},velocity);assert.deepEqual({...model.acceleration},acceleration);
+  e.tick(1200);assert.equal(e.test.bindings.size,0);assert.equal(e.test.models.size,0);assert.equal(animations.size,0);clean(e);
+});
+check('a passive refresh keeps the primary clock and never starts an avatar too',()=>{
+  const e=setup(),old=e.surface('home','a');primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1,'b');
+  const next=e.surface('detail','b'),to=primaryFixture(e,next,'pick',[14,174,174,42]);e.mount(next.node);e.motion.paint(next.node);
+  const model=e.test.models.get('primary-action'),slot=model.slot,start=model.start;
+  for(let i=0;i<20;i++){e.tick(5);e.motion.paint(next.node);assert.equal(e.test.models.size,1);assert.equal(model.start,start);assert.equal(model.slot,slot);}
+  e.tick(1200);assert.equal(to.button.style.transform,'');assert.equal(e.test.bindings.size,0);clean(e);
+});
+check('secondary primary controls fade while only the first primary surface moves',()=>{
+  const e=setup(),old=e.surface('home','a');primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1);
+  const next=e.surface('detail','b');primaryFixture(e,next,'pick',[14,174,174,42]);const secondary=primaryFixture(e,next,'extra',[194,174,119,42]);e.mount(next.node);e.motion.paint(next.node);
+  assert.equal(e.test.models.size,1);assert.equal(secondary.button.style.position,'');assert.equal(secondary.button.animateCalls.length,1);assert(!secondary.button.animateCalls[0].frames[0].transform);
+  e.motion.stop();clean(e);
+});
+check('primary slots retain the layout flex basis across horizontal and vertical parents',()=>{
+  for(const [footer,flex,box] of [[false,'0 0 62px',[14,173,299,62]],[true,'1 1 0%',[170,404,143,44]]]){
+    const e=setup(),old=e.surface('detail','b');primaryFixture(e,old,'pick',[14,174,174,42]);e.mount(old.node);e.motion.begin(old.node,1);
+    const next=e.surface(footer?'confirm':'home','b'),to=primaryFixture(e,next,footer?'execute-switch':'relay',box,footer);to.button._css.flex=flex;
+    e.mount(next.node);e.motion.paint(next.node);const model=e.test.models.get('primary-action');
+    assert.equal(model.slot.style.flex,flex);assert.equal(model.slot.style.height,box[3]+'px');e.tick(400);clean(e);
+  }
+});
+check('a passive primary paint never mistakes the live radius for a new goal',()=>{
+  const e=setup(),old=e.surface('home','a'),from=primaryFixture(e,old,'relay',[14,173,299,62]);from.button._css['border-radius']='26px';e.mount(old.node);e.motion.begin(old.node,1);
+  const next=e.surface('confirm','b');primaryFixture(e,next,'execute-switch',[170,404,143,44],true);e.mount(next.node);e.motion.paint(next.node);
+  const model=e.test.models.get('primary-action');
+  for(let i=0;i<20;i++){e.tick(10);e.motion.paint(next.node);assert.equal(model.goal.r,12);assert.equal(model.start,0);}
+  e.tick(100);assert.equal(model.live.style.position,'');assert.equal(e.test.models.size,0);clean(e);
+});
+check('late primary controls retire an existing entrance on their ancestor path',()=>{
+  const e=setup(),old=e.surface('home','a');primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1);
+  const next=e.surface('detail','c'),actions=e.el('section','detail-actions',14,174,299,42);next.body.append(actions);e.mount(next.node);e.motion.paint(next.node);
+  const entrance=next.body.animateCalls[0];assert(entrance.frames[0].transform);e.tick(60);
+  const to=primaryFixture(e,next,'pick',[14,174,174,42]);actions.append(to.button);e.motion.paint(next.node);
+  assert(entrance.cancelled);assert.equal(e.test.models.size,1);assert.equal(e.test.models.get('primary-action').live,to.button);e.tick(400);clean(e);
+});
 // Real view functions are exercised with synthetic data, without mounting a browser.
+function contextFixture(surface,height){surface.profile.root.setAttribute('data-motion-surface','account-context');surface.profile.root._box.height=height;surface.profile.root._css['border-radius']='16px';surface.profile.root._css['background-color']='rgb(245, 245, 245)';}
+check('account-context cards morph one background while their real content remains unscaled',()=>{
+  const e=setup(),old=e.surface('home','a');contextFixture(old,112);e.mount(old.node);e.motion.begin(old.node,1);
+  const next=e.surface('usage','all');contextFixture(next,72);e.mount(next.node);e.motion.paint(next.node);
+  const model=e.test.models.get('context-surface');assert(model);assert.equal(model.kind,'surface');assert.equal(e.test.models.size,1);assert.equal(model.target,next.profile.root);
+  assert.equal(next.profile.avatar.style.transform,'');assert.equal(next.profile.name.style.transform,'');assert.equal(next.profile.root.style.backgroundColor,'transparent');
+  e.tick(120);e.motion.paint(next.node);assert.equal(model.start,0);assert.equal(model.goal.h,72);assert.equal(model.goal.r,16);
+  e.tick(180);assert.equal(next.profile.root.style.backgroundColor,'');assert.equal(next.profile.root.querySelectorAll('.motion-surface').length,0);assert.equal(e.test.models.size,0);clean(e);
+});
+check('account-context background reversals retain the same continuous trajectory',()=>{
+  const e=setup(),old=e.surface('home','a');contextFixture(old,112);e.mount(old.node);e.motion.begin(old.node,1);
+  const next=e.surface('usage','all');contextFixture(next,72);e.mount(next.node);e.motion.paint(next.node);e.tick(80);
+  const model=e.test.models.get('context-surface'),pose={...model.pose},velocity={...model.velocity},acceleration={...model.acceleration};
+  e.motion.begin(next.node,-1);const back=e.surface('home','a');contextFixture(back,112);e.mount(back.node);e.motion.paint(back.node);
+  assert.equal(e.test.models.get('context-surface'),model);assert.deepEqual({...model.pose},pose);assert.deepEqual({...model.velocity},velocity);assert.deepEqual({...model.acceleration},acceleration);
+  e.tick(1000);assert.equal(e.test.bindings.size,0);assert.equal(e.app.querySelectorAll('.motion-surface').length,0);clean(e);
+});
+check('a stationary shared card yields the one moving role to the main action',()=>{
+  const e=setup(),old=e.surface('home','a');contextFixture(old,112);primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1,'a');
+  const next=e.surface('detail','a');contextFixture(next,112);primaryFixture(e,next,'current-status',[14,174,299,42]);e.mount(next.node);e.motion.paint(next.node);
+  assert.equal(e.test.models.size,1);assert(e.test.models.has('primary-action'));assert(!e.test.models.has('context-surface'));e.tick(400);clean(e);
+});
+function disclosureFixture(kind='details'){
+  const e=setup(),surface=e.surface('detail','b');e.mount(surface.node);
+  const source=fs.readFileSync(path.join(root,'src/ui/disclosure.js'),'utf8').replace('  return {transact,afterPatch,popup,stop,isOpen:desired};','  window.__disclosureTest={models,popups};\n  return {transact,afterPatch,popup,stop,isOpen:desired};');
+  vm.runInNewContext(source,{window:e.window,Element,getComputedStyle:computed,performance:{now:()=>time},requestAnimationFrame:fn=>{const id=++sequence;rafs.set(id,fn);return id},cancelAnimationFrame:id=>rafs.delete(id)});
+  const node=e.el(kind,kind==='details'?'settings-disclosure':'resume-session',14,180,299,44),head=e.el(kind==='details'?'summary':'button','',14,180,299,44),body=e.el('div',kind==='details'?'disclosure-body':'resume-tasks',14,224,299,120);
+  head.setAttribute('aria-expanded','false');node.setAttribute('data-disclosure','fixture');node.open=false;node.append(head);if(kind==='details')node.append(body);surface.body.append(node);
+  let contentHeight=120;
+  node.getBoundingClientRect=()=>{const h=parseFloat(node.style.height)||44+((kind==='details'?node.open:body.parentNode===node)?contentHeight:0);return {...node._box,height:h,bottom:node._box.top+h};};
+  const set=open=>{head.setAttribute('aria-expanded',String(open));if(kind==='details')node.open=open;else open?node.append(body):body.remove();};
+  return {...e,node,head,body,disclosure:e.window.NXDisclosure,inspect:e.window.__disclosureTest,set,setHeight:h=>contentHeight=h};
+}
+check('all inline disclosures smoothly reveal height and retire every owned style',()=>{
+  const e=disclosureFixture();e.disclosure.transact(e.app,()=>e.set(true));const model=e.inspect.models.get(e.node);assert(model);assert.equal(model.pose.height,44);assert.equal(model.goal.height,164);
+  e.tick(110);assert(parseFloat(e.node.style.height)>44&&parseFloat(e.node.style.height)<164);assert(Number(e.body.style.opacity)>0&&Number(e.body.style.opacity)<1);
+  e.tick(110);assert.equal(e.node.style.height,'');assert.equal(e.body.style.opacity,'');assert.equal(e.node.open,true);assert.equal(e.inspect.models.size,0);assert.equal(rafs.size,0);
+});
+check('closing retains the real body only until the collapse reaches its endpoint',()=>{
+  const e=disclosureFixture('section');e.set(true);e.disclosure.transact(e.app,()=>e.set(false));assert.equal(e.body.parentNode,e.node);assert.equal(e.body.__nxMotionRetained,true);assert.equal(e.body.inert,true);
+  e.tick(100);assert(parseFloat(e.node.style.height)>44&&parseFloat(e.node.style.height)<164);e.tick(120);assert.equal(e.body.parentNode,null);assert.equal(e.body.__nxMotionRetained,undefined);assert.equal(e.inspect.models.size,0);
+});
+check('a rapid disclosure reversal retains height velocity and acceleration',()=>{
+  const e=disclosureFixture();e.disclosure.transact(e.app,()=>e.set(true));e.tick(70);const previous=e.inspect.models.get(e.node),pose={...previous.pose},velocity={...previous.velocity},acceleration={...previous.acceleration};
+  e.disclosure.transact(e.app,()=>e.set(false));const model=e.inspect.models.get(e.node);assert.deepEqual({...model.pose},pose);assert.deepEqual({...model.velocity},velocity);assert.deepEqual({...model.acceleration},acceleration);
+  e.tick(220);assert.equal(e.node.open,false);assert.equal(e.node.style.height,'');assert.equal(e.inspect.models.size,0);
+});
+check('async disclosure content retargets once while unchanged refresh keeps its clock',()=>{
+  const e=disclosureFixture();e.disclosure.transact(e.app,()=>e.set(true));e.tick(60);const model=e.inspect.models.get(e.node),pose={...model.pose};e.setHeight(200);e.disclosure.afterPatch(e.app);assert.equal(model.goal.height,244);assert.deepEqual({...model.pose},pose);const start=model.start;
+  for(let i=0;i<10;i++){e.tick(5);e.disclosure.afterPatch(e.app);assert.equal(model.start,start);}e.tick(220);assert.equal(e.node.style.height,'');assert.equal(e.inspect.models.size,0);
+});
+check('reduced motion and explicit stop commit the intended disclosure state',()=>{
+  const e=disclosureFixture();e.disclosure.transact(e.app,()=>e.set(true));e.tick(50);e.motion.setEnabled(false);assert.equal(e.node.open,true);assert.equal(e.node.style.height,'');assert.equal(rafs.size,0);
+  e.disclosure.transact(e.app,()=>e.set(false));assert.equal(e.node.open,false);assert.equal(e.inspect.models.size,0);
+});
+check('floating popup refresh never replays its entrance and reverses on dismissal',()=>{
+  const e=disclosureFixture(),node=e.el('div','status-dock',16,400,295,40);node.hidden=true;node.innerHTML='';e.app.append(node);
+  e.disclosure.popup(node,'Ready');const first=node.animateCalls[0];for(let i=0;i<10;i++){e.tick(5);e.disclosure.popup(node,'Ready');}assert.equal(node.animateCalls.length,1);assert(!first.cancelled);
+  e.disclosure.popup(node,'');assert(first.cancelled);assert.equal(node.inert,true);e.tick(50);e.disclosure.popup(node,'Again');e.tick(180);assert.equal(node.hidden,false);assert.equal(node.innerHTML,'Again');assert.equal(node.__nxPopupActive,undefined);
+  e.disclosure.popup(node,'');e.tick(140);assert.equal(node.hidden,true);assert.equal(node.innerHTML,'');assert.equal(e.inspect.popups.size,0);
+});
 const viewCtx={window:{NX_BRAND_MARK:'<svg viewBox="0 0 32 32"></svg>'}};vm.createContext(viewCtx);
 for(const file of ['components.js','usage.js','views/usage.js','views/accounts.js'])vm.runInContext(fs.readFileSync(path.join(root,'src/ui',file),'utf8'),viewCtx);
 const C=viewCtx.window.NXComponents,M=viewCtx.window.NXMath;

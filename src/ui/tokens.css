@@ -11,6 +11,7 @@
   --radius-control: 12px; --radius-compact: 8px; --radius-pill: 999px;
   --window-r: var(--radius-window); --r: var(--radius-card);
   --panel-edge: 14px; --sheet-header-height: 50px; --content-top: 3px; --account-card-height: 112px;
+  --roster-heading-height: 32px; --home-row-height: 44px;
   --space-1: 2px; --space-2: 4px; --space-3: 6px; --space-4: 8px; --space-5: 10px;
   --space-6: 12px; --space-8: 16px; --space-10: 20px; --space-12: 24px;
   --font-micro: 8px; --font-caption: 9px; --font-small: 10px; --font-body: 11px;

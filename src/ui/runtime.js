@@ -46,8 +46,8 @@ window.NXRuntime = (() => {
   function patchChildren(root, incoming, preserveFields) {
     // A moving live avatar keeps an inert layout slot beside it. This is not
     // product markup: preserve it during refresh, and reconcile the real node.
-    const previous = [...root.childNodes].filter(node => !node.__nxMotionPlaceholder), unused = new Set(previous);
-    const nextContent = node => { while (node?.__nxMotionPlaceholder) node = node.nextSibling; return node; };
+    const previous = [...root.childNodes].filter(node => !node.__nxMotionPlaceholder&&!node.__nxMotionRetained), unused = new Set(previous);
+    const nextContent = node => { while (node?.__nxMotionPlaceholder||node?.__nxMotionRetained) node = node.nextSibling; return node; };
     const reusable = (old, next) => compatible(old, next) &&
       (preserveFields || !old.matches?.('.field'));
     let cursor = nextContent(root.firstChild);
@@ -64,11 +64,15 @@ window.NXRuntime = (() => {
         // composition, caret and validation state, as well as the actual node.
         if (!node.matches('.field')) {
           for (const attr of [...node.attributes]) {
-            if (attr.name === 'style' && node.__nxMotionOwned) continue;
+            if (attr.name === 'style' && (node.__nxMotionOwned||node.__nxDisclosureOwned)) continue;
+            if(attr.name==='open'&&node.__nxDisclosureIntent!==undefined)continue;
+            if(attr.name==='hidden'&&node.__nxDisclosureOwned)continue;
             if (!next.hasAttribute(attr.name)) node.removeAttribute(attr.name);
           }
           for (const attr of [...next.attributes]) {
-            if (attr.name === 'style' && node.__nxMotionOwned) continue;
+            if (attr.name === 'style' && (node.__nxMotionOwned||node.__nxDisclosureOwned)) continue;
+            if(attr.name==='open'&&node.__nxDisclosureIntent!==undefined)continue;
+            if(attr.name==='hidden'&&node.__nxDisclosureOwned)continue;
             if (node.getAttribute(attr.name) !== attr.value) node.setAttribute(attr.name, attr.value);
           }
           patchChildren(node, next, preserveFields);
@@ -81,7 +85,18 @@ window.NXRuntime = (() => {
   function patchHTML(root, html, {preserveFields = true} = {}) {
     const template = root.ownerDocument.createElement('template');
     template.innerHTML = html;
+    // The action's surface and its content have separate motion roles. Normalize
+    // every primary control here so all views share one structure, including
+    // plain text labels, icons, loading feedback and the wide relay button.
+    for (const button of template.content.querySelectorAll('button')) {
+      if (!button.matches('.primary') && !button.matches('.relay')) continue;
+      const copy = root.ownerDocument.createElement('span');
+      copy.setAttribute('class','control-content');
+      while (button.firstChild) copy.appendChild(button.firstChild);
+      button.appendChild(copy);
+    }
     patchChildren(root, template.content, preserveFields);
+    window.NXDisclosure?.afterPatch(root);
   }
   return {readEpoch, coalescedRefresh, focusKey, restoreFocus, captureScroll, restoreScroll, patchHTML};
 })();

@@ -31,7 +31,9 @@ CASES = [
 ('update/version-entry-expands-without-moving-surrounding-content', 'open=update&scenario=update-notes', r'''async()=>{
  const positions=()=>['.update-identity','.update-primary','.update-state','.update-footer'].map(selector=>{const r=document.querySelector(selector).getBoundingClientRect();return [r.x,r.y,r.width,r.height];});
  const before=JSON.stringify(positions()),entry=document.querySelector('#update-notes-toggle');if(!entry||!entry.textContent.includes(NXDemo.state().update.version))return false;
- entry.click();await new Promise(r=>setTimeout(r,80));const notes=document.querySelector('#update-notes-body');return document.querySelector('#update-notes-toggle').getAttribute('aria-expanded')==='true'&&!notes.hidden&&notes.scrollHeight>notes.clientHeight&&JSON.stringify(positions())===before&&!document.querySelector('.update-tools #update-notes-toggle');}'''),
+ entry.click();await new Promise(r=>setTimeout(r,200));const notes=document.querySelector('#update-notes-body'),gap=notes.getBoundingClientRect().top-entry.getBoundingClientRect().bottom;
+ notes.scrollTop=notes.scrollHeight;
+ return document.querySelector('#update-notes-toggle').getAttribute('aria-expanded')==='true'&&!notes.hidden&&notes.scrollHeight>notes.clientHeight&&notes.scrollTop+notes.clientHeight>=notes.scrollHeight-1&&JSON.stringify(positions())===before&&notes.parentElement===entry.closest('.update-release')&&gap>=0&&gap<=8&&getComputedStyle(notes).scrollbarWidth==='none';}'''),
 ('demo/message-validation-matches-product', '', r'''async()=>{const before=NXDemo.state().settings.resume_message;const r=await NXDemo.call('set_preferences',{resume_message:'x\ny'});return r.ok===false&&NXDemo.state().settings.resume_message===before;}'''),
 ]
 

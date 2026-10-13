@@ -30,9 +30,9 @@ fs.mkdirSync(output, {recursive:true});
     for(const appearance of ['light','dark']){
       const name=test=>appearance+'/'+test;
       await load('resume-subagent-history',appearance);
-      await check(name('success-count-and-breakdown'),async()=>{
-        assert((await page.locator('.resume-summary').innerText()).includes('已接续 2/6'));
-        assert.equal(await page.locator('.resume-session-stats').innerText(),'成功 2 · 跳过 3 · 需查看 1');
+      await check(name('compact-progress-and-retained-task-history'),async()=>{
+        assert.equal(await page.locator('.resume-summary .resume-progress').innerText(),'2/6');
+        assert.equal(await page.locator('.resume-session-stats').count(),0);
         assert.equal(await page.locator('.resume-task-row').count(),6);
       });
       await check(name('children-retain-history-and-no-retry'),async()=>{

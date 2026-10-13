@@ -132,8 +132,9 @@ window.NXFeedback = (() => {
       if(moved){clearRunway(true);surface=next;viewport=nextViewport;}
       if(host.parentElement!==next)next.append(host);
       const wasHidden=host.hidden;
-      if(host.innerHTML!==html)host.innerHTML=html;
-      host.hidden=!html;layout();
+      if(window.NXDisclosure)window.NXDisclosure.popup(host,html,{reappear:moved});
+      else {if(host.innerHTML!==html)host.innerHTML=html;host.hidden=!html;}
+      layout();
       if((html||held)&&(moved||wasHidden||!runway))reserveScroll();
       if(!html&&!held)clearRunway();
       holdRunway=held;

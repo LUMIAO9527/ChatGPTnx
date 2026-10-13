@@ -1,4 +1,4 @@
-/* Navigation moves live elements. No snapshots, copied text or avatar handoff. */
+/* One visual anchor per navigation; stable layout and live DOM underneath. */
 (() => {
   const preference = matchMedia('(prefers-reduced-motion: reduce)');
   const running = new Set(), animationTargets = new WeakMap();
@@ -29,9 +29,11 @@
   };
   const restore = () => { for (const node of [...bindings.keys()]) restoreNode(node); };
   const release = model => {
-    // The same avatar stays in its original DOM parent and keeps its native font.
-    // Remove its temporary fixed positioning and layout slot in the same frame.
-    restoreNode(model.live); model.slot?.remove(); model.slot = null; model.applied = null;
+    // Keep the original DOM parent, native font and static-position raster origin.
+    // Retire positioning and its layout slot together at the exact endpoint.
+    restoreNode(model.live);
+    if(model.kind==='surface'){restoreNode(model.target);model.live?.remove();}
+    model.slot?.remove(); model.slot = null; model.applied = null;
   };
   const cancelAnimations = () => { for (const animation of [...running]) animation.cancel(); running.clear(); };
   const finish = () => {
@@ -39,7 +41,7 @@
     for (const model of models.values()) release(model);
     restore(); models.clear(); page = null; scene = null;
   };
-  const stop = finish;
+  const stop = () => {finish();window.NXDisclosure?.stop();};
   const run = (node, frames, length = duration, elapsed = 0, delay = 0) => {
     if (!node || !allowed() || elapsed >= length + delay) return;
     // Background state refreshes patch the same DOM. They must not cancel and
@@ -80,10 +82,12 @@
       const safe = ['x','y'].every(key => {
         const from = model.pose[key], to = model.goal[key], speed = model.velocity[key], acceleration = model.acceleration[key];
         const margin = Math.max(6, Math.min(64, Math.abs(to-from)*.08 + speed*speed/32000 + Math.abs(acceleration)/1000));
-        const half = Math.max(model.pose[key==='x'?'w':'h'],model.goal[key==='x'?'w':'h'])/2;
+        const dimension=key==='x'?'w':'h';
         const limit = scene[key==='x'?'width':'height'];
         for (let i=1; i<16; i++) {
-          const value = trajectory(from,speed,acceleration,to,length/1000*i/16,length/1000)[0];
+          const at=length/1000*i/16;
+          const value = trajectory(from,speed,acceleration,to,at,length/1000)[0];
+          const half=trajectory(model.pose[dimension],model.velocity[dimension],model.acceleration[dimension],model.goal[dimension],at,length/1000)[0]/2;
           if (value < Math.min(from,to)-margin || value > Math.max(from,to)+margin) return false;
           if (value < half || value > limit-half) return false;
         }
@@ -123,7 +127,8 @@
   };
   const visible = (node, surface) => {
     if (!node) return false;
-    const box = node.getBoundingClientRect(), viewport = (surface.querySelector('.sheet-body') || surface).getBoundingClientRect();
+    const body=surface.querySelector('.sheet-body');
+    const box = node.getBoundingClientRect(), viewport = (body?.contains(node)?body:surface).getBoundingClientRect();
     return box.width>0 && box.height>0 && box.bottom>viewport.top && box.top<viewport.bottom && box.right>viewport.left && box.left<viewport.right;
   };
   const findAnchor = (surface, identity) => {
@@ -133,13 +138,40 @@
     if (!root || !visible(root, surface)) return null;
     return {identity, root, avatar:root.querySelector('.avatar, .usage-brand')};
   };
-  const prepareAvatar = model => {
-    const node = model.live, slot = document.createElement('span');
+  const primaryControl = surface => {
+    if (!surface) return null;
+    for (const node of surface.querySelectorAll('.primary, .relay')) {
+      const value=capturePart(node,surface);
+      if (value) return {node,...value,r:parseFloat(getComputedStyle(node).borderRadius)||0};
+    }
+    return null;
+  };
+  const contextSurface = surface => {
+    const node=surface?.querySelector('[data-motion-surface="account-context"]'),value=node&&capturePart(node,surface);
+    if(!value)return null;
+    const existing=models.get('context-surface'),css=getComputedStyle(node);
+    return {node,...value,r:existing?.target===node?existing.goal.r:parseFloat(css.borderRadius)||0,color:existing?.target===node?existing.color:css.backgroundColor};
+  };
+  const capturePart = (node,surface) => {
+    if (!visible(node,surface)) return null;
+    const box = node.getBoundingClientRect();
+    // A partially clipped control or avatar uses the ordinary page entrance.
+    for (let parent=node.parentNode; parent && parent!==surface; parent=parent.parentNode) {
+      const css=getComputedStyle(parent), clip=parent.getBoundingClientRect();
+      if (['hidden','auto','scroll','clip'].includes(css.overflowY) && (box.top<clip.top-.5 || box.bottom>clip.bottom+.5)) return null;
+      if (['hidden','auto','scroll','clip'].includes(css.overflowX) && (box.left<clip.left-.5 || box.right>clip.right+.5)) return null;
+    }
+    if (node.scrollWidth>node.clientWidth+1) return null;
+    return {box:rect(node),text:node.textContent,font:parseFloat(getComputedStyle(node).fontSize)||0};
+  };
+  const prepareFixed = model => {
+    const node = model.live, css=getComputedStyle(node), slot = document.createElement('span');
     slot.__nxMotionPlaceholder = true; slot.setAttribute('aria-hidden','true'); slot.inert = true;
-    Object.assign(slot.style, {display:'inline-block', flex:`0 0 ${model.goal.w}px`, width:`${model.goal.w}px`, height:`${model.goal.h}px`, visibility:'hidden', pointerEvents:'none'});
+    Object.assign(slot.style, {display:css.display==='block'?'block':'inline-block', flex:css.flex||'0 0 auto', alignSelf:css.alignSelf, width:`${model.goal.w}px`, height:`${model.goal.h}px`, visibility:'hidden', pointerEvents:'none',
+      marginTop:css.marginTop,marginRight:css.marginRight,marginBottom:css.marginBottom,marginLeft:css.marginLeft,verticalAlign:css.verticalAlign});
     node.parentNode.insertBefore(slot, node); model.slot = slot;
     // Fixed positioning escapes the list's scroll clip without reparenting the
-    // real avatar. A slot preserves every sibling's layout and the scroll extent.
+    // real part. The slot preserves siblings and the scroll extent.
     for (let ancestor=node.parentNode; ancestor && ancestor!==scene.app; ancestor=ancestor.parentNode) {
       page.sharedPath.add(ancestor);
       const css = getComputedStyle(ancestor), transform = css.transform;
@@ -157,10 +189,15 @@
     // changes the glyph raster phase at fractional Windows display scales,
     // even when the final bounding rectangles agree to a fraction of a pixel.
     for (const [property,value] of Object.entries({transition:'none', position:'fixed', left:'auto', top:'auto', right:'auto', bottom:'auto', margin:'0', width:`${model.goal.w}px`, height:`${model.goal.h}px`, 'z-index':'6', 'pointer-events':'none', 'transform-origin':'0 0', transform:'none', 'will-change':'transform'})) style(node, property, value);
+    if(model.kind==='control') {
+      // A button changes its physical surface, rather than scaling its text.
+      // Fixed positioning isolates these size writes from the document layout.
+      for(const [property,value] of Object.entries({'min-width':'0','min-height':'0','max-width':'none','max-height':'none',left:`${model.goal.x-model.goal.w/2}px`,top:`${model.goal.y-model.goal.h/2}px`}))style(node,property,value);
+    }
     model.base = rect(node); model.cssWidth = model.goal.w; model.cssHeight = model.goal.h;
-    if (!model.base) throw new Error('Avatar bounds unavailable');
+    if (!model.base) throw new Error('Shared element bounds unavailable');
   };
-  const upsert = (key, kind, initial, goal, live) => {
+  const upsert = (key, kind, initial, goal, live, extra={}) => {
     if (page.completed.has(key)) return null;
     let model = models.get(key);
     const different = Object.keys(goal).some(property => Math.abs(initial[property]-goal[property]) > .25);
@@ -172,7 +209,13 @@
     const changed = model.navigation !== page || Object.keys(goal).some(property => Math.abs(model.goal[property]-goal[property]) > .01);
     if (model.live !== live || model.navigation !== page) {
       release(model); model.live = live; model.base = goal;
-      if (kind === 'avatar') { model.goal = goal; prepareAvatar(model); }
+      if(kind==='surface'){
+        model.target=extra.target;model.color=extra.color;
+        live.__nxMotionPlaceholder=true;live.setAttribute('aria-hidden','true');live.inert=true;live.className='motion-surface';
+        model.target.insertBefore(live,model.target.firstChild);style(model.target,'background-color','transparent');
+        for(const [property,value] of Object.entries({position:'fixed',left:`${goal.x-goal.w/2}px`,top:`${goal.y-goal.h/2}px`,width:`${goal.w}px`,height:`${goal.h}px`,'z-index':'-1','background-color':extra.color,'pointer-events':'none',transition:'none','transform-origin':'0 0'}))style(live,property,value);
+      }
+      else if (kind === 'fixed' || kind === 'control') { model.goal = goal; prepareFixed(model); }
       else { style(live,'transition','none'); style(live,'transform-origin','0 0'); style(live,'will-change','transform'); }
     }
     model.goal = goal;
@@ -185,30 +228,40 @@
   const bindShared = surface => {
     const source = page.source, target = source && findAnchor(surface,source.identity);
     page.sharedCard = target?.root || null;
-    if (source?.avatar && target?.avatar) {
-      const key = source.identity+':avatar', existing = models.get(key);
-      const box = rect(existing?.live === target.avatar && existing.slot ? existing.slot : target.avatar);
-      if (existing?.live === target.avatar && existing.applied) {
-        // Auto insets follow the static position when a restored scroll offset
-        // or passive layout update moves the parent. Read once per patch, never
-        // in the frame loop, and remove the already applied transform.
-        const liveBox=rect(existing.live), p=existing.applied;
-        if (liveBox) {
-          const w=liveBox.w/p.sx, h=liveBox.h/p.sy;
-          existing.base={x:liveBox.x-p.x-(liveBox.w-w)/2,y:liveBox.y-p.y-(liveBox.h-h)/2,w,h};
-        }
+    const targetBox=target && rect(target.root);
+    page.stationaryCard=source?.card && target?.root.matches('.current-card') && targetBox && Object.keys(targetBox).every(key=>Math.abs(targetBox[key]-source.box[key])<.25);
+    const control=primaryControl(surface),filter=surface.querySelector('.usage-filter'),context=contextSurface(surface);
+    const sharedSurface=source?.surface&&context&&['x','y','w','h'].some(key=>Math.abs(source.surface.box[key]-context.box[key])>.25);
+    const chosen=sharedSurface?'surface':source?.control&&control?'control':page.filter&&visible(filter,surface)?'filter':source?.avatar&&target?.avatar?'avatar':null;
+    const key=chosen==='surface'?'context-surface':chosen==='control'?'primary-action':chosen==='avatar'?source.identity+':avatar':'usage-filter';
+    const live=chosen==='surface'?context.node:chosen==='control'?control.node:chosen==='avatar'?target.avatar:filter;
+    const existing=models.get(key);
+    // An async page can expose its shared part after an entrance already began.
+    // Retire effects on that path before measuring its final, static geometry.
+    if(chosen)for(let node=live;node&&node!==surface;node=node.parentNode){
+      for(const animation of [...running])if(animationTargets.get(animation)===node)animation.cancel();
+    }
+    let box=live&&rect(existing?.live===live&&existing.slot?existing.slot:live);
+    if(chosen==='surface'&&box){
+      const decoration=existing?.navigation===page&&existing.target===live?existing.live:document.createElement('span');
+      upsert(key,'surface',{...source.surface.box,r:source.surface.r},{...box,r:context.r},decoration,{target:live,color:context.color});
+      page.sharedCard=live;for(let node=live;node&&node!==surface;node=node.parentNode)page.sharedPath.add(node);
+    }else if(chosen==='control'&&box) {
+      // The live radius is an intermediate pose, not a new destination.
+      box={...box,r:existing?.live===live&&existing.slot?existing.goal.r:control.r};
+      upsert(key,'control',{...source.control.box,r:source.control.r},box,live);
+      for(let node=live;node&&node!==surface;node=node.parentNode)page.sharedPath.add(node);
+      if(source.control.text!==control.text)run(live.querySelector('.control-content'),fade,180,performance.now()-page.start,40);
+    } else if(chosen==='avatar'&&box&&(existing||capturePart(live,surface))) {
+      if(existing?.live===live&&existing.applied) {
+        const liveBox=rect(live),p=existing.applied;
+        if(liveBox){const w=liveBox.w/p.sx,h=liveBox.h/p.sy;existing.base={x:liveBox.x-p.x-(liveBox.w-w)/2,y:liveBox.y-p.y-(liveBox.h-h)/2,w,h};}
       }
-      if (box) upsert(key,'avatar',source.avatar.box,box,target.avatar);
-    }
-    const filter = surface.querySelector('.usage-filter'), existing = models.get('usage-filter');
-    let box = filter && rect(filter);
-    if (box && existing?.live === filter && existing.applied) {
-      const p = existing.applied, w = box.w/p.sx, h = box.h/p.sy;
-      box = {x:box.x-p.x-(box.w-w)/2,y:box.y-p.y-(box.h-h)/2,w,h};
-    }
-    if (page.filter && box && visible(filter,surface)) {
-      upsert('usage-filter','live',page.filter,box,filter);
-      page.sharedPath.add(filter);
+      upsert(key,'fixed',source.avatar.box,box,live);
+      for(let node=live;node&&node!==surface;node=node.parentNode)page.sharedPath.add(node);
+    } else if(chosen==='filter'&&box) {
+      if(existing?.live===live&&existing.applied){const p=existing.applied,w=box.w/p.sx,h=box.h/p.sy;box={x:box.x-p.x-(box.w-w)/2,y:box.y-p.y-(box.h-h)/2,w,h};}
+      upsert(key,'live',page.filter,box,live);page.sharedPath.add(live);
     }
     for (const [key,model] of models) if (!page.active.has(key)) { release(model); models.delete(key); }
     for (const model of models.values()) for (let node=model.live; node && node!==surface; node=node.parentNode) page.sharedPath.add(node);
@@ -216,9 +269,15 @@
   const renderModels = () => {
     // No layout/style reads, element allocation or DOM replacement in this loop.
     for (const model of models.values()) {
-      const p = model.pose, base = model.kind === 'avatar' ? model.base : model.goal;
+      const p = model.pose, base = model.kind === 'fixed' ? model.base : model.goal;
+      if(model.kind==='control'||model.kind==='surface') {
+        style(model.live,'left',`${model.goal.x-model.goal.w/2}px`);style(model.live,'top',`${model.goal.y-model.goal.h/2}px`);
+        style(model.live,'width',`${p.w}px`);style(model.live,'height',`${p.h}px`);style(model.live,'border-radius',`${Math.max(0,p.r)}px`);
+        style(model.live,'transform',`translate(${p.x-p.w/2-(base.x-base.w/2)}px,${p.y-p.h/2-(base.y-base.h/2)}px)`);
+        continue;
+      }
       const x = p.x-base.x+(base.w-p.w)/2, y = p.y-base.y+(base.h-p.h)/2, sx = p.w/base.w, sy = p.h/base.h;
-      const rx = model.kind === 'avatar' ? model.cssWidth/base.w : 1, ry = model.kind === 'avatar' ? model.cssHeight/base.h : 1;
+      const rx = model.kind === 'fixed' ? model.cssWidth/base.w : 1, ry = model.kind === 'fixed' ? model.cssHeight/base.h : 1;
       const number = value => Number(value.toFixed(5));
       style(model.live,'transform',`translate(${number(x*rx)}px,${number(y*ry)}px) scale(${number(sx)},${number(sy)})`);
       model.applied = {x:x*rx,y:y*ry,sx,sy};
@@ -238,12 +297,13 @@
     frameId = requestAnimationFrame(frame);
   };
   const begin = (surface,direction=1,preferredIdentity=null) => {
+    window.NXDisclosure?.stop();
     if (!allowed() || !surface || !ensureScene()) { stop(); return; }
     try {
       const now = performance.now(); advance(now); renderModels();
       const identity = surface.querySelector('.current-card')?.dataset.motionIdentity || null;
       const anchor = findAnchor(surface,preferredIdentity) || findAnchor(surface,identity);
-      const source = anchor && {identity:anchor.identity,avatar:anchor.avatar && {box:rect(anchor.avatar)}};
+      const source = {identity:anchor?.identity||null,avatar:anchor?.avatar?capturePart(anchor.avatar,surface):null,control:primaryControl(surface),surface:contextSurface(surface),card:!!anchor?.root.matches('.current-card'),box:anchor?rect(anchor.root):null};
       const filterNode = surface.querySelector('.usage-filter'), filter = visible(filterNode,surface) ? rect(filterNode) : null;
       cancelAnimations();
       for (const model of models.values()) release(model);
@@ -269,33 +329,29 @@
     const viewport = body.getBoundingClientRect(), distance = page.direction>0 ? 4 : -3;
     const frames = [{opacity:0,transform:`translateY(${distance}px)`},{opacity:1,transform:'translateY(0)'}];
     let section = 0;
-    const entrance = node => {
+    const entrance = (node,clip=viewport) => {
       if (node.hidden || node.__nxMotionPlaceholder || node.matches('.header, .status-region, .status-stack')) return;
-      if (node===page.sharedCard && node.matches('.current-card')) {
-        if (!page.identity || node.dataset.motionIdentity!==page.identity) {
-          run(node.querySelector('.identity-copy'),fade,duration,elapsed);
-          run(node.querySelector('.quota-bars'),fade,duration,elapsed);
-        }
-        return;
-      }
+      if (node===page.sharedCard && page.stationaryCard) return;
       // Never translate or fade the parent of a moving real control. Animate
       // its siblings individually; otherwise two coordinate systems compete.
       if (page.sharedPath.has(node)) {
-        if ([...models.values()].some(model=>model.live===node) || node.matches('.usage-filter')) return;
-        for (const child of node.children) entrance(child);
+        if ([...models.values()].some(model=>model.live===node) || node.matches('.avatar, .usage-brand, .usage-filter, .primary, .relay')) return;
+        for (const child of node.children) entrance(child,clip);
         return;
       }
       if (node.__nxMotionOwned) return;
       const bounds = node.getBoundingClientRect();
-      if (bounds.bottom<=viewport.top || bounds.top>=viewport.bottom || bounds.right<=viewport.left || bounds.left>=viewport.right) return;
+      if (bounds.bottom<=clip.top || bounds.top>=clip.bottom || bounds.right<=clip.left || bounds.left>=clip.right) return;
       const delay = Math.min(section++*stagger,maxStagger);
       page.endElapsed = Math.max(page.endElapsed,duration+delay);
-      const fits = distance>0 ? bounds.bottom+distance<=viewport.bottom : bounds.top+distance>=viewport.top;
-      run(node,node.matches('.current-card, .usage-filter') || !fits ? fade : frames,duration,elapsed,delay);
+      const fits = distance>0 ? bounds.bottom+distance<=clip.bottom : bounds.top+distance>=clip.top;
+      run(node,models.size||page.stationaryCard||node.matches('.current-card, .usage-filter') || !fits ? fade : frames,duration,elapsed,delay);
     };
-    for (const node of body.children) entrance(node);
+    if(models.size||page.stationaryCard){for (const node of body.children) entrance(node);}
+    else run(body,frames,duration,elapsed);
     run(surface.querySelector('.sheet-head h2, .header .brand'),fade,140,elapsed);
-    run(surface.querySelector('.sheet-foot'),fade,duration,elapsed,page.endElapsed-duration);
+    const footer=surface.querySelector('.sheet-foot');
+    if(footer){if(page.sharedPath.has(footer))entrance(footer,surface.getBoundingClientRect());else run(footer,fade,duration,elapsed,page.endElapsed-duration);}
     if (!frameId) frameId = requestAnimationFrame(frame);
   };
   const reveal = node => {
@@ -304,7 +360,7 @@
     else run(node,[{opacity:.55,transform:'translateY(-2px)'},{opacity:1,transform:'translateY(0)'}],160);
   };
   window.NXMotion = {
-    begin,paint,reveal,stop,enabled:()=>enabled && !preference.matches,
+    begin,paint,reveal,stop,curve:trajectory,enabled:()=>enabled && !preference.matches,
     setEnabled(value) { enabled=!!value; stop(); paintPreference(); }
   };
   preference.addEventListener('change',()=>{ stop(); paintPreference(); });

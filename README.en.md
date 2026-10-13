@@ -88,4 +88,6 @@ The source is available to inspect. Use and redistribution are governed by the [
 
 Open `ChatGPTnx-v1.3.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space; select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
 
+The console can check all light/dark scenarios and record intermediate navigation frames, including interrupted returns, inline disclosures, floating notices, passive refreshes, and long release notes. A shared rule prioritizes information-card backgrounds, then main buttons or account avatars; unrelated pages use a grouped body transition.
+
 Regenerate it with `python tools/build_explorer.py` after editing the UI; `build.cmd` also generates it. Native Windows behavior requires separate acceptance.

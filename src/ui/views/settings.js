@@ -4,7 +4,7 @@ window.NXViews ??= {};
 window.NXSettingsContent = (()=>{
   function disclosure(c,key,label,content,count='') {
     const {ui,esc,icon}=c;
-    return `<details class="settings-disclosure" ${ui.page==='settings'?'name="nx-settings"':''} data-disclosure="${esc(key)}" ${ui.disclosures.has(key)?'open':''}><summary><span>${esc(label)}</span><span class="disclosure-meta">${esc(count)}</span>${icon('chevron')}</summary><div class="disclosure-body">${content}</div></details>`;
+    return `<details class="settings-disclosure" data-disclosure="${esc(key)}" ${ui.disclosures.has(key)?'open':''}><summary aria-expanded="${ui.disclosures.has(key)}"><span>${esc(label)}</span><span class="disclosure-meta">${esc(count)}</span>${icon('chevron')}</summary><div class="disclosure-body">${content}</div></details>`;
   }
   function collection(c,key,items,render) {
     if(!items.length)return '<div class="inline-empty" role="status">暂无条目</div>';
@@ -93,11 +93,11 @@ window.NXViews.update = c => {
     body:`<section class="update-identity">${c.brandMark('update-mark')}<h3 class="update-brand">ChatGPTnx</h3><p class="update-version">当前版本 ${esc(data.version||window.NX_CONFIG.version)}</p>
       <button class="btn update-github" data-action="open-github" title="github.com/LUMIAO9527/ChatGPTnx">${icon('github')}<span>GitHub 项目</span>${icon('external')}</button></section>
       <button id="update-primary" class="btn primary update-primary" data-action="${action}" aria-busy="${working}" aria-describedby="update-description update-context" ${disabled?'disabled':''}>${icon(!working&&action==='download-update'?'download':'refresh',working?'spinner':'')}<span>${esc(label)}</span></button>
-      <section class="update-state" aria-live="polite"><h3 class="update-message">${esc(stateTitle)}</h3><p id="update-description" class="update-description">${versionEntry}</p>
-      <progress class="update-progress" max="100" value="${Number(u.progress)||0}" aria-label="更新下载进度" ${status==='downloading'?'':'hidden'}></progress></section>
-      <section class="update-secondary">
-      <div class="update-tools"><button class="btn update-cancel" data-action="cancel-update-download" ${status==='downloading'?'':'hidden'}>取消下载</button>
-      <p id="update-context" class="update-context" aria-live="polite" ${contextMessage?'':'hidden'}>${esc(contextMessage||'')}</p></div>
-      <div id="update-notes-body" class="update-notes-body" tabindex="0" role="region" aria-label="更新内容" ${notesOpen?'':'hidden'}>${esc(u.notes||'')}</div></section>`,
+      <section class="update-state" aria-live="polite"><h3 class="update-message">${esc(stateTitle)}</h3>
+      <div class="update-release" data-disclosure="update-notes"><div id="update-description" class="update-description">${versionEntry}</div>
+      <div id="update-notes-body" class="update-notes-body" tabindex="0" role="region" aria-label="更新内容" ${notesOpen?'':'hidden'}>${esc(u.notes||'')}</div></div>
+      <div class="update-tools" ${status==='downloading'||contextMessage?'':'hidden'}><button class="btn update-cancel" data-action="cancel-update-download" ${status==='downloading'?'':'hidden'}>取消下载</button>
+      <p id="update-context" class="update-context" aria-live="polite" ${contextMessage?'':'hidden'}>${esc(contextMessage||'')}</p>
+      <progress class="update-progress" max="100" value="${Number(u.progress)||0}" aria-label="更新下载进度" ${status==='downloading'?'':'hidden'}></progress></div></section>`,
     foot:'<p class="update-preserve">更新后保留账号与设置</p>',footClass:'update-footer'};
 };

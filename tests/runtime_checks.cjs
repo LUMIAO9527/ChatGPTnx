@@ -15,7 +15,7 @@ const results=[];
 async function check(name, run){await run();results.push({name,passed:true});}
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return {promise,resolve,reject};};
 // DOM contract fixture for node identity, ordering and refresh behavior.
-const dom={next:null,createElement(){return {set innerHTML(value){this.content=dom.next;}};}};
+const dom={next:null,createElement(tag){return tag==='template'?{set innerHTML(value){this.content=dom.next;}}:new DomNode(tag);}};
 class DomNode {
   constructor(tag,attrs={},children=[]){
     this.nodeType=tag==='#text'?3:1;this.nodeName=tag.toUpperCase();this.namespaceURI=this.nodeType===1?'html':null;
@@ -32,11 +32,12 @@ class DomNode {
   hasAttribute(name){return this.attrs.has(name);}
   setAttribute(name,value){this.attrs.set(name,String(value));}
   removeAttribute(name){this.attrs.delete(name);}
-  matches(selector){return selector.startsWith('.')&&(this.getAttribute('class')||'').split(' ').includes(selector.slice(1));}
+  matches(selector){return selector.startsWith('.')?(this.getAttribute('class')||'').split(' ').includes(selector.slice(1)):this.nodeName===selector.toUpperCase();}
   querySelectorAll(selector){const found=[];for(const child of this.childNodes){if(child.matches(selector))found.push(child);found.push(...child.querySelectorAll(selector));}return found;}
   querySelector(selector){return this.querySelectorAll(selector)[0]||null;}
   contains(other){return this===other||this.childNodes.some(child=>child.contains(other));}
   insertBefore(node,cursor){node.remove();const index=cursor?this.childNodes.indexOf(cursor):this.childNodes.length;if(index<0)throw Error('Invalid cursor');this.childNodes.splice(index,0,node);node.parentNode=this;return node;}
+  appendChild(node){return this.insertBefore(node,null);}
   remove(){if(this.parentNode){const siblings=this.parentNode.childNodes;siblings.splice(siblings.indexOf(this),1);this.parentNode=null;}}
 }
 const text=value=>new DomNode('#text',{text:value});
@@ -83,6 +84,15 @@ const patch=(root,next,options)=>{dom.next=next;context.window.NXRuntime.patchHT
     assert.equal(root.childNodes[0],b);assert.equal(root.childNodes[2],a);assert.equal(root.childNodes[1].dataset.email,'c');
     patch(root,node('div',{},[row('a')]));assert.equal(root.childNodes.length,1);assert.equal(root.firstChild,a);assert.equal(b.parentNode,null);
   });
+  await check('primary-controls/share-one-content-wrapper-and-preserve-label-nodes',()=>{
+    const root=node('section');
+    const incoming=label=>node('section',{},[node('button',{class:'primary','data-action':'update'},[node('svg'),text(label)])]);
+    patch(root,incoming('检查更新'));
+    const button=root.firstChild,copy=button.firstChild,label=copy.childNodes[1];
+    assert.equal(copy.getAttribute('class'),'control-content');assert.equal(button.childNodes.length,1);
+    patch(root,incoming('正在检查…'));
+    assert.equal(root.firstChild,button);assert.equal(button.firstChild,copy);assert.equal(copy.childNodes[1],label);assert.equal(label.nodeValue,'正在检查…');
+  });
   await check('refresh/editing-field-keeps-caret-composition-and-validation',()=>{
     const field=node('input',{id:'alias',class:'field','aria-invalid':'true',value:'saved'});field.value='正在输入';field.selectionStart=2;field.composing=true;
     const root=node('div',{},[field]);patch(root,node('div',{},[node('input',{id:'alias',class:'field',value:'server'})]));
@@ -92,6 +102,19 @@ const patch=(root,next,options)=>{dom.next=next;context.window.NXRuntime.patchHT
     const control=node('button',{'data-action':'refresh',style:'opacity:0','aria-label':'Refresh'});control.__nxMotionOwned=true;
     const root=node('div',{},[control]);patch(root,node('div',{},[node('button',{'data-action':'refresh',disabled:'','aria-label':'Refreshing'})]));
     assert.equal(root.firstChild,control);assert.equal(control.getAttribute('style'),'opacity:0');assert(control.hasAttribute('disabled'));assert.equal(control.getAttribute('aria-label'),'Refreshing');
+  });
+  await check('refresh/closing-disclosure-keeps-visual-height-and-queued-open-until-finished',()=>{
+    const details=node('details',{'data-disclosure':'relay',open:'',style:'height:92px'}),body=node('div',{class:'disclosure-body',style:'opacity:.4'});
+    details.__nxDisclosureIntent=false;details.__nxDisclosureOwned=true;body.__nxDisclosureOwned=true;details.appendChild(body);
+    const root=node('section',{},[details]);
+    patch(root,node('section',{},[node('details',{'data-disclosure':'relay'},[node('div',{class:'disclosure-body'})])]));
+    assert.equal(root.firstChild,details);assert.equal(details.firstChild,body);assert(details.hasAttribute('open'));assert.equal(details.getAttribute('style'),'height:92px');assert.equal(body.getAttribute('style'),'opacity:.4');
+  });
+  await check('refresh/retained-closing-content-does-not-disrupt-keyed-sibling-order',()=>{
+    const closing=node('div',{class:'resume-tasks'},[text('Task')]);closing.__nxMotionRetained=true;
+    const head=node('button',{'data-action':'resume-toggle'},[text('Count')]),root=node('section',{},[head,closing]);
+    for(let i=0;i<12;i++)patch(root,node('section',{},[node('button',{'data-action':'resume-toggle'},[text('Count')])]));
+    assert.equal(root.firstChild,head);assert.equal(closing.parentNode,root);assert.equal(root.childNodes.length,2);closing.remove();assert.equal(root.childNodes.length,1);
   });
   await check('refresh/live-avatar-slot-is-preserved-without-replacing-its-glyph',()=>{
     const slot=node('span',{'aria-hidden':'true'});slot.__nxMotionPlaceholder=true;
@@ -154,7 +177,7 @@ const patch=(root,next,options)=>{dom.next=next;context.window.NXRuntime.patchHT
       const tip={offsetWidth:120,offsetHeight:30,style:{},hidden:true};
       const panel={getBoundingClientRect:()=>({left,top,width:327*scale,height:458*scale})};
       const el={dataset:{floatTip:'Fixture'},getBoundingClientRect:()=>({left:left+(x-4)*scale,top:top+y*scale,width:8*scale})};
-      vm.runInNewContext(code+'floatTip(el);',{$:()=>tip,app:panel,el,requestAnimationFrame:fn=>fn(),getComputedStyle:()=>({width:'327px',height:'458px'})});
+      vm.runInNewContext(code+'floatTip(el);',{window:{},$:()=>tip,app:panel,el,requestAnimationFrame:fn=>fn(),getComputedStyle:()=>({width:'327px',height:'458px'})});
       assert(Math.abs(parseFloat(tip.style.left)-Math.max(8,Math.min(199,x-60)))<1e-10);
       assert(Math.abs(parseFloat(tip.style.top)-(y-38))<1e-10);assert.equal(tip.hidden,false);
     }

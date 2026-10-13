@@ -23,6 +23,7 @@ button, input, select, .row, .field, .detail-line, .link-row, .confirm-account,
 button { position: relative; border: 1px solid transparent; background: transparent;
   transition: background 160ms var(--ease), box-shadow 160ms var(--ease), transform 140ms var(--ease);
   overflow: hidden; outline: none; }
+.control-content { width: 100%; min-width: 0; display: flex; align-items: inherit; justify-content: inherit; gap: inherit; }
 button::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
   background: currentColor; opacity: 0; transition: opacity 160ms var(--ease); }
 button:hover:not(:disabled) { box-shadow: var(--hover-shadow); }
@@ -39,8 +40,8 @@ button:disabled { cursor: not-allowed; opacity: .46; box-shadow: none; }
   box-shadow: var(--shadow-window); isolation: isolate; contain: paint; }
 body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-shadow: none; border-radius: 0; overflow: hidden; }
 #home, .sheet { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-#home { padding: 14px 16px 6px; gap: 10px; }
-.header { display: flex; align-items: center; gap: var(--space-3); flex-shrink: 0; min-height: var(--height-control); }
+#home { padding: 11px 14px 5px; gap: 8px; }
+.header { display: flex; align-items: center; gap: 5px; flex: 0 0 34px; min-height: 34px; }
 .brand { display: flex; align-items: center; gap: 9px; margin-right: auto; font-size: var(--font-emphasis); font-weight: 650; letter-spacing: -.35px; }
 .mark { font-size: var(--font-brand-mark); font-weight: 750; letter-spacing: -1.5px; display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; background: var(--ink); color: var(--bg); }
@@ -70,32 +71,33 @@ body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-sh
 .support-note { color: var(--muted); font-size: var(--font-body); line-height: var(--line-normal); }
 .support-note { text-align: center; }
 .support-full-code { display: block; width: 100%; height: auto; background: #fff; border-radius: 8px; }
-/* State changes replace content within stable identity/action/status/notes/footer slots. */
-.sheet-body.update-body { display: grid; grid-template-rows: 130px 40px 58px minmax(0,1fr); gap: 10px; padding: 20px 26px 10px; overflow: hidden; text-align: center; }
+/* Fixed identity and action; the version and its notes form one disclosure. */
+.sheet-body.update-body { display: grid; grid-template-rows: 130px 40px minmax(0,1fr); gap: 10px; padding: 20px 26px 10px; overflow: hidden; text-align: center; }
 .sheet-foot.update-footer { height: 35px; min-height: 35px; padding: 0 26px 18px; border: 0; display: block; text-align: center; }
 .update-identity { display: flex; flex-direction: column; align-items: center; }
 .update-identity > .update-mark { width: 40px; height: 40px; border-radius: 13px; flex-shrink: 0; }
 .update-mark svg { width: 30px; height: 30px; }
 .update-brand { font-size: 20px; font-weight: 650; letter-spacing: -.4px; line-height: 27px; margin-top: 9px; }
 .update-version { font-size: 11px; line-height: 18px; color: var(--muted); margin-top: 2px; }
-.update-state { width: 100%; position: relative; min-height: 0; }
-.update-message { font-size: 14px; line-height: 22px; font-weight: 650; letter-spacing: -.3px; }
-.update-description { margin-top: 4px; font-size: 10.5px; line-height: 15px; color: var(--muted); overflow-wrap: anywhere; max-height: 30px; overflow: auto; }
+.update-state { width: 100%; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+.update-message { flex: 0 0 22px; font-size: 14px; line-height: 22px; font-weight: 650; letter-spacing: -.3px; }
+.update-release { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.update-description { flex: 0 0 24px; height: 24px; display: flex; align-items: center; justify-content: center; font-size: 10.5px; line-height: 15px; color: var(--muted); overflow-wrap: anywhere; overflow: auto; }
 .update-body .update-primary { width: 100%; height: 40px; min-height: 40px; padding: 9px 14px; border-radius: 11px; gap: 7px; font-size: 12px; font-weight: 600; line-height: 18px; }
 .update-primary .icon { width: 16px; height: 16px; }
 .update-body .update-github { flex-shrink: 0; height: 26px; min-height: 26px; margin-top: 8px; padding: 4px 6px; gap: 6px; border-radius: 9px; font-size: 11px; font-weight: 400; line-height: 18px; color: var(--muted); }
 .update-github .icon { width: 16px; height: 16px; color: var(--ink); }
 .update-github .icon:last-child { width: 13px; height: 13px; color: var(--muted); margin-left: 3px; }
 .update-preserve { font-size: 10.5px; line-height: 17px; color: var(--muted); }
-.update-secondary { display: grid; grid-template-rows: 26px minmax(0,1fr); gap: 6px; min-height: 0; }
-.update-tools { display: flex; align-items: center; min-height: 0; }
+.update-tools { flex: 0 0 26px; min-height: 0; position: relative; display: flex; align-items: center; }
 .update-body .update-cancel { height: 26px; min-height: 26px; padding: 4px 6px; font-size: 10.5px; line-height: 18px; color: var(--muted); }
 .update-progress { display: block; position: absolute; bottom: 0; width: 100%; height: 3px; accent-color: var(--ink); }
 .update-body .update-notes-toggle { height: 24px; min-height: 24px; padding: 3px 5px; gap: 4px; font-size: 10.5px; line-height: 18px; font-weight: 400; color: var(--muted); }
-.update-notes-toggle .icon { width: 13px; height: 13px; }
+.update-notes-toggle .icon { width: 13px; height: 13px; transition: transform 160ms var(--ease); }
 .update-notes-toggle[aria-expanded="true"] .icon { transform: rotate(90deg); }
 .update-context { flex: 1; max-height: 26px; overflow-y: auto; overflow-wrap: anywhere; color: var(--muted); font-size: 10.5px; line-height: 13px; }
-.update-notes-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; font-size: 10.5px; line-height: 16px; color: var(--muted); padding: 6px 3px 0 0; border-top: 1px solid var(--line); }
+.update-notes-body { flex: 1; min-height: 0; width: calc(100% - 32px); align-self: center; margin-top: 6px; padding-top: 7px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; white-space: pre-wrap; overflow-wrap: anywhere; text-align: center; font-size: 10.5px; line-height: 16px; color: var(--muted); border-top: 1px solid var(--line); }
+.update-notes-body::-webkit-scrollbar { width: 0; height: 0; }
 .muted { color: var(--muted); }
 .small { font-size: var(--font-body); }
 .danger { color: var(--danger); }
@@ -134,16 +136,16 @@ h3 { font-size: var(--font-page-title); font-weight: 620; }
 .low .track > span { background: var(--danger); }
 .low b { color: var(--danger); }
 .reset { color: var(--muted); font-size: var(--font-caption); font-weight: 400; }
-.relay { width: 100%; min-height: 68px; display: flex; align-items: center; justify-content: space-between;
-  text-align: left; padding: 13px 16px; background: var(--action); color: var(--action-ink); }
+.relay { width: 100%; height: 62px; min-height: 62px; flex: 0 0 62px; display: flex; align-items: center; justify-content: space-between;
+  text-align: left; padding: 10px 13px; background: var(--action); color: var(--action-ink); }
 .relay:hover:not(:disabled) { box-shadow: var(--primary-hover-shadow); }
 .relay:hover:not(:disabled)::after { opacity: var(--primary-hover-overlay); }
 .relay:hover:not(:disabled) .relay-arrow { border-color: color-mix(in srgb, currentColor 35%, transparent); background: color-mix(in srgb, currentColor 10%, transparent); }
 .relay:active:not(:disabled) .relay-arrow { transform: scale(.92); }
-.relay > span:first-child { flex: 1; min-width: 0; margin-right: 10px; }
+.relay .control-content > span:first-child { flex: 1; min-width: 0; margin-right: 10px; }
 .relay strong { font-size: var(--font-emphasis); display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.relay small { display: block; margin-top: 5px; font-size: var(--font-body); opacity: .7; }
-.relay .relay-arrow { flex: 0 0 34px; display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border: 1px solid color-mix(in srgb, currentColor 17%, transparent); border-radius:50%; }
+.relay small { display: block; margin-top: 4px; font-size: var(--font-body); opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.relay .relay-arrow { flex: 0 0 32px; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid color-mix(in srgb, currentColor 17%, transparent); border-radius:50%; }
 .add-progress { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 11px; counter-reset: step; }
 .add-progress li { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: var(--font-control); line-height: 1.55; }
 .add-progress li::before { counter-increment: step; content: counter(step); width: 20px; height: 20px; flex: 0 0 20px;
@@ -156,14 +158,14 @@ h3 { font-size: var(--font-page-title); font-weight: 620; }
 
 .relay-label { display: flex; align-items: center; gap: 7px; }
 .relay-label .icon { width: 16px; height: 16px; }
-.section-head { display: flex; align-items: center; justify-content: space-between; font-size: var(--font-body); color: var(--muted); margin-bottom: var(--space-3); }
-.section-link { width: 100%; min-height: 38px; margin: -1px 0 4px; padding: 8px 12px; text-align: left; border-radius: var(--radius-control); }
+.section-head { display: flex; align-items: center; justify-content: space-between; font-size: var(--font-body); color: var(--muted); }
+.section-link { width: 100%; height: var(--roster-heading-height); min-height: var(--roster-heading-height); flex: 0 0 var(--roster-heading-height); margin: -1px 0 2px; padding: 5px 12px; text-align: left; border-radius: var(--radius-control); }
 .section-link > span:last-child { display: inline-flex; align-items: center; gap: 3px; }
 .section-link .icon { width: 13px; height: 13px; }
-.account-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px; margin: -8px; }
-.row { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 9px; min-height: 50px; text-align: left; }
+.account-list { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px; margin: -8px; scrollbar-gutter: stable; }
+.row { width: 100%; height: var(--home-row-height); min-height: var(--home-row-height); display: flex; align-items: center; gap: 8px; padding: 4px 7px; text-align: left; }
 .row:hover { background: var(--surface); }
-.row .avatar { width: var(--avatar-list-size); height: var(--avatar-list-size); font-size: var(--font-control); }
+.row .avatar { width: 34px; height: 34px; font-size: calc(var(--font-emphasis) * .85); }
 .row .meta { flex: 1; min-width: 0; }
 .row small { display: block; color: var(--muted); margin-top: var(--space-2); font-size: var(--font-small); }
 .roster-quotas { flex:0 0 auto; display:grid; grid-template-columns:repeat(var(--quota-count,2),minmax(58px,max-content)); gap:8px; align-items:center; }
@@ -291,17 +293,18 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 @media (max-width: 430px) { body.demo { padding: 8px; } }
 
 /* Relay home: one action-first visual system. */
-.current-card { height:123px; min-height:123px; flex:0 0 123px; padding:12px 14px 13px; }
+.current-card { position:relative; isolation:isolate; height:var(--account-card-height); min-height:var(--account-card-height); flex:0 0 var(--account-card-height); padding:10px 12px; }
+.motion-surface { pointer-events:none; }
 .current-identity { display: flex; align-items: center; width: calc(100% + 16px); margin: 0 -8px;
-  height:56px; min-height:56px; padding:7px 14px; border:1px solid transparent; text-align:left; border-radius:var(--radius-control); }
+  height:50px; min-height:50px; padding:5px 12px; border:1px solid transparent; text-align:left; border-radius:var(--radius-control); }
 .current-identity .identity { flex: 1; }
 .current-identity > .icon { width: 15px; margin-left: 8px; color: var(--muted); }
 .current-card .avatar { width: var(--avatar-size); height: var(--avatar-size); }
-.current-card .quota-slot { height:31px; min-height:31px; margin-top:11px; }
-.current-card .quota-bars { gap:10px; }
-.roster { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-bottom: -4px; overflow: hidden; }
+.current-card .quota-slot { height:29px; min-height:29px; margin-top:9px; }
+.current-card .quota-bars { gap:8px; }
+.roster { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; margin-bottom: -4px; overflow: hidden; }
 
-.roster .account-list { flex: 1 1 auto; display: grid; grid-auto-rows: minmax(50px,max-content); align-content: start; gap: 4px; max-height: none; padding-bottom: 4px; margin-bottom: -4px; }
+.roster .account-list { display: grid; grid-auto-rows: var(--home-row-height); align-content: start; gap: 2px; padding-bottom: 2px; margin-bottom: -4px; }
 
 /* The scroll viewport owns a real shadow gutter. Hover elevation therefore
    fades naturally instead of being cut by an invisible list boundary. */
@@ -512,7 +515,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .settings-disclosure > summary:focus-visible { outline-offset:-2px; }
 .disclosure-meta { min-width:0; margin-left:auto; color:var(--muted); font-size:var(--font-small); font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .settings-disclosure > summary > .icon { width:14px; height:14px; color:var(--muted); transition:transform 120ms var(--ease); }
-.settings-disclosure[open] > summary > .icon { transform:rotate(90deg); }
+.settings-disclosure > summary[aria-expanded="true"] > .icon { transform:rotate(90deg); }
 .disclosure-body { padding:0 12px; border-top:1px solid var(--line); }
 .disclosure-body .relay-account-list,.disclosure-body .hotkey-list { background:transparent; border-radius:0; }
 .disclosure-body .toggle-line { padding-inline:0; }
@@ -601,7 +604,6 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .resume-task:hover:not(:disabled)::after {opacity:0;}
 .resume-task {border-radius:0;}
 .resume-session:has(.resume-task-row:hover) {box-shadow:var(--hover-shadow);}
-.resume-session-stats { padding:8px 12px; color:var(--muted); font-size:var(--font-small); }
 .resume-subagent-note { margin:0; padding:0 12px 8px; color:var(--muted); font-size:var(--font-small); line-height:1.5; }
 .resume-task-row.is-subagent,.is-subagent > .resume-task { height:auto; min-height:54px; }
 .is-subagent .resume-task-copy { flex-direction:column; align-items:stretch; gap:2px; }
@@ -609,30 +611,11 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .is-subagent > .resume-task:disabled { opacity:1; cursor:default; }
 
 /* Compact product geometry; type sizes retain the shared design scale. */
-#home {
-  padding: 11px 14px 5px;
-  gap: 8px;
-}
-.header { min-height: 34px; gap: 5px; }
 .header .mark { width: 28px; height: 28px; flex: 0 0 28px; font-size: 18px; }
 .tool { min-width: 34px; height: 34px; padding: 7px; }
-.current-card {
-  height: var(--account-card-height); min-height: var(--account-card-height); flex-basis: var(--account-card-height); padding: 10px 12px 10px;
-}
 .current-identity {
-  width: calc(100% + 14px); margin: 0 -7px; height: 50px; min-height: 50px; padding: 5px 12px;
+  width: calc(100% + 14px); margin: 0 -7px;
 }
-.current-card .quota-slot { height: 29px; min-height: 29px; margin-top: 9px; }
-.current-card .quota-bars { gap: 8px; }
-.relay { min-height: 62px; padding: 10px 13px; }
-.relay .relay-arrow { flex-basis: 32px; width: 32px; height: 32px; }
-.relay small { margin-top: 4px; }
-.section-head { min-height: 26px; margin-bottom: 2px; }
-.roster .account-list {
-  grid-auto-rows: minmax(44px, max-content); gap: 2px; padding-bottom: 2px;
-}
-.row { min-height: 44px; padding: 5px 7px; gap: 8px; }
-.row .avatar { width: 34px; height: 34px; font-size: calc(var(--font-emphasis) * .85); }
 .footer.slim { min-height: 32px; padding: 2px 1px 0; gap: 4px; }
 .footer.slim .refresh-status,
 .footer.slim .add { min-height: 32px; }
@@ -749,8 +732,9 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 #home[inert] { visibility: hidden; }
 :root[data-motion="on"] #app button {
   --nx-press-scale: .98;
-  transition: background 140ms var(--ease), box-shadow 160ms var(--ease),
-    transform 200ms cubic-bezier(.2,.7,.25,1);
+  transition: background-color 180ms var(--ease), color 180ms var(--ease),
+    border-color 180ms var(--ease), opacity 180ms var(--ease),
+    box-shadow 160ms var(--ease), transform 200ms cubic-bezier(.2,.7,.25,1);
 }
 :root[data-motion="on"] #app button:is(.row, .quota-overview-row, .account-usage-row, .current-identity, .relay, .link-row, .relay-account-row) {
   --nx-press-scale: .995;

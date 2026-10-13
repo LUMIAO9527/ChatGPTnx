@@ -135,7 +135,7 @@
     const top=detail
       ? `<div class="current-identity detail-profile">${identity(a,note)}${tool('refresh','refresh-one','刷新此账号额度',`data-email="${esc(a.email)}" ${disabled()}`)}</div>`
       : `<button class="current-identity" data-action="detail" data-email="${esc(a.email)}">${identity(a,note)}${icon('chevron')}</button>`;
-    return `<section class="card current-card${detail?' detail-overview':''}" data-motion-identity="${esc(a?.email||'')}">${top}${bars(a,detail&&!a.archived)}</section>`;
+    return `<section class="card current-card${detail?' detail-overview':''}" data-motion-surface="account-context" data-motion-identity="${esc(a?.email||'')}">${top}${bars(a,detail&&!a.archived)}</section>`;
   }
   function header() {
     return `<header class="header"><div class="brand pywebview-drag-region">${brandMark()}ChatGPTnx${config.demo?'<span class="demo-tag">演示</span>':''}</div>${tool('chart','usage-all','用量总览与分账号')}${tool('settings','settings','设置')}</header>`;
@@ -298,7 +298,7 @@
       content+=`<div class="reset-credit"><span>上次重置待确认</span><button class="btn primary small-action reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(a.reset_attempt.credit_id)}" ${disabled()}>${confirming?'确认':'重试'}</button></div>`;
     }
     if(a.query_warning?.scope==='reset_credits'&&a.query_warning.paused) content+=`<p>重置详情查询已暂停，主额度查询正常。</p><button class="btn secondary" data-action="retry-query" data-email="${esc(a.email)}">恢复详情查询</button>`;
-    return `<div class="detail-reset"><button class="detail-line detail-action reset-summary" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div class="reset-credit-details">${content}</div>`:''}</div>`;
+    return `<div class="detail-reset" data-disclosure="reset:${esc(a.email)}"><button class="detail-line detail-action reset-summary" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div class="reset-credit-details">${content}</div>`:''}</div>`;
   }
   function scopeUsage() {
     if (!ui.usage) return null;
@@ -567,17 +567,18 @@
     }
   }
   const settingDisclosureKeys=new Set(['appearance','notifications','relay','early-anchor','message','hotkeys','archives']);
+  const disclose=change=>window.NXDisclosure?window.NXDisclosure.transact(sheet,change):change();
   function selectSettingDisclosure(key) {
     for(const k of settingDisclosureKeys)if(k!==key)ui.disclosures.delete(k);
     ui.disclosures.add(key);
     for(const node of sheet.querySelectorAll('.settings-body details[data-disclosure]')) {
-      if(node.dataset.disclosure!==key)node.open=false;
+      if(node.dataset.disclosure!==key){if(node.__nxDisclosureIntent===undefined)node.open=false;node.querySelector('summary')?.setAttribute('aria-expanded','false');}
     }
     if(key!=='hotkeys')ui.recording=null;
   }
   function syncDisclosure(d) {
     const key=d.dataset?.disclosure;if(!key||!d.isConnected||!sheet.contains(d))return;
-    if(d.open){
+    if(window.NXDisclosure?.isOpen(d)??d.open){
       if(ui.page==='settings'&&settingDisclosureKeys.has(key))selectSettingDisclosure(key);
       else {ui.disclosures.add(key);if(ui.page==='detail'&&key.startsWith('meta:')&&ui.resetExpanded.size){ui.resetExpanded.clear();renderSheet();}}
       if(ui.inlineLoading[key]!=='error')loadInline(key);
@@ -605,10 +606,9 @@
   app.addEventListener('click',async e=>{
     const summary=e.target.closest('details[data-disclosure] > summary');
     if(summary){
-      e.preventDefault();const d=summary.parentElement,opening=!d.open;
-      if(opening&&ui.page==='settings')selectSettingDisclosure(d.dataset.disclosure);
-      d.open=opening;syncDisclosure(d);
-      if(opening&&d.isConnected)window.NXMotion?.reveal(d.querySelector('.disclosure-body'));
+      e.preventDefault();const d=summary.parentElement,opening=!(window.NXDisclosure?.isOpen(d)??d.open);
+      summary.focus({preventScroll:true});
+      disclose(()=>{if(opening&&ui.page==='settings')selectSettingDisclosure(d.dataset.disclosure);d.open=opening;summary.setAttribute('aria-expanded',String(opening));syncDisclosure(d);});
       // Collapsing a preceding section may move the new heading above the
       // viewport. Reveal the heading only; never reset the whole page scroll.
       if(opening&&d.isConnected){const body=d.closest('.sheet-body'),r=summary.getBoundingClientRect(),v=body?.getBoundingClientRect();if(v&&r.top<v.top)body.scrollTop-=v.top-r.top;}
@@ -638,7 +638,7 @@
       case 'purchase-account':show('purchase');break;
       case 'support-qr':show('support-qr');break;
       case 'open-update':show('update');break;
-      case 'toggle-update-notes':{const key='update-notes';ui.disclosures.has(key)?ui.disclosures.delete(key):ui.disclosures.add(key);renderSheet();break;}
+      case 'toggle-update-notes':disclose(()=>{const key='update-notes';ui.disclosures.has(key)?ui.disclosures.delete(key):ui.disclosures.add(key);renderSheet();});break;
       case 'open-github':await actionFrom(b,'open_github');break;
       case 'check-update':await actionFrom(b,'check_update');break;
       case 'download-update':await actionFrom(b,'download_update');break;
@@ -675,15 +675,12 @@
       case 'resume-toggle':{
         const session=ui.resumeDetails.find(s=>s.id===val);
         if(!session)break;
-        const set=ui.resumeExpanded;
-        if(set.has(val))set.clear();
-        else {set.clear();set.add(val);}
-        renderSheet();break;}
+        disclose(()=>{const set=ui.resumeExpanded;if(set.has(val))set.clear();else {set.clear();set.add(val);}renderSheet();});break;}
       case 'open-resume-task':await run('open_resume_task',val);break;
       case 'retry-resume-task':await run('retry_resume_task',b.dataset.session,val);break;
       case 'home':closeSheet();break;
       case 'detail':show('detail',target);break;
-      case 'toggle-reset-credits':resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.disclosures.delete('meta:'+target);}renderSheet();if(ui.resetExpanded.has(target))window.NXMotion?.reveal(sheet.querySelector('.reset-credit-details'));break;
+      case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.disclosures.delete('meta:'+target);}renderSheet();});break;
       case 'use-reset':{
         const account=data.accounts.find(a=>a.email===target),creditId=b.dataset.credit;
         if(!account||busy()||acting)break;
@@ -705,7 +702,7 @@
       case 'auto-relay-account':preferences.set('account:'+target,b.getAttribute('aria-checked')!=='true');break;
       case 'early-anchor-account':preferences.set('anchor:'+target,b.getAttribute('aria-checked')!=='true');break;
       case 'pref':preferences.set(b.dataset.key,val);break;
-      case 'collection-more':ui.fullCollections.has(val)?ui.fullCollections.delete(val):ui.fullCollections.add(val);renderSheet();break;
+      case 'collection-more':disclose(()=>{ui.fullCollections.has(val)?ui.fullCollections.delete(val):ui.fullCollections.add(val);renderSheet();});break;
       case 'inline-reload':await loadInline(val,true);break;
       case 'hotkeys':show('hotkeys');break;
       case 'record-hotkey':ui.recording=target;renderSheet();break;
@@ -763,7 +760,7 @@
   });
   function floatTip(el){
     const tip=$('#float-tip');if(!tip||!el?.dataset.floatTip)return;
-    tip.textContent=el.dataset.floatTip;tip.hidden=false;
+    if(window.NXDisclosure)window.NXDisclosure.popup(tip,esc(el.dataset.floatTip));else {tip.textContent=el.dataset.floatTip;tip.hidden=false;}
     const r=el.getBoundingClientRect();requestAnimationFrame(()=>{
       // #app contains fixed motion and tooltip painting. Work in its CSS
       // coordinates, including a scaled/off-centre standalone preview.
@@ -777,7 +774,7 @@
   }
   for(const event of ['mouseover','focusin'])app.addEventListener(event,e=>{const el=e.target.closest('[data-float-tip]');if(el)floatTip(el);});
   app.addEventListener('mousemove',e=>{const el=e.target.closest('[data-float-tip]');if(el)floatTip(el);});
-  for(const event of ['mouseout','focusout'])app.addEventListener(event,e=>{if(e.target.closest('[data-float-tip]')){const tip=$('#float-tip');if(tip)tip.hidden=true;}});
+  for(const event of ['mouseout','focusout'])app.addEventListener(event,e=>{if(e.target.closest('[data-float-tip]')){const tip=$('#float-tip');if(tip){if(window.NXDisclosure)window.NXDisclosure.popup(tip,'');else tip.hidden=true;}}});
   document.addEventListener('keydown',async e=>{
     if(ui.recording){
       e.preventDefault();e.stopPropagation();

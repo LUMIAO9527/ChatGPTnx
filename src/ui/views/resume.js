@@ -96,7 +96,7 @@ window.NXViews.resume = context => {
       const counts=`成功 ${done} · 跳过 ${skipped} · 需查看 ${failed}${pending?' · 待处理 '+pending:''}`;
       const hint=`${account?name(account):'账号接力'} · ${time} · 已接续 ${progress} · ${counts}`;
       const explanation=s.items.some(i=>i.is_subagent===true)?'<p class="resume-subagent-note">后台子任务，当前版本不单独接续；可点击的记录打开所属主任务。原处理结果保留如下。</p>':'';
-      return `<section class="resume-session"><button class="resume-summary" data-action="resume-toggle" data-value="${esc(s.id)}" aria-expanded="${expanded}" title="${esc(hint)}" aria-label="${esc(hint)}"><span>${esc(account?name(account):'账号接力')} · ${esc(time)}</span><strong class="resume-progress mono">已接续 ${progressMarkup(progress,s.items.some(i=>i.state==='failed'&&!attention(i)))}</strong>${icon('chevron')}</button>${expanded?`<div class="resume-tasks"><div class="resume-session-stats">${esc(counts)}</div>${explanation}${rows}</div>`:''}</section>`;
+      return `<section class="resume-session" data-disclosure="resume:${esc(s.id)}"><button class="resume-summary" data-action="resume-toggle" data-value="${esc(s.id)}" aria-expanded="${expanded}" title="${esc(hint)}" aria-label="${esc(hint)}"><span>${esc(account?name(account):'账号接力')} · ${esc(time)}</span><strong class="resume-progress mono">${progressMarkup(progress,s.items.some(i=>i.state==='failed'&&!attention(i)))}</strong>${icon('chevron')}</button>${expanded?`<div class="resume-tasks">${explanation}${rows}</div>`:''}</section>`;
     };
     return groups.filter(([,items])=>items.length).map(([label,items])=>`<section class="resume-group"><div class="resume-group-head"><strong>${label}</strong><span>${items.length} 次</span></div>${items.map(row).join('')}</section>`).join('');
   }

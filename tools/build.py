@@ -19,7 +19,7 @@ from nx.resume_policy import ATTENTION_REASONS, RETRYABLE_REASONS
 from screen_catalog import CASES
 
 STYLES = ('tokens.css', 'common.css', 'feedback.css')
-SCRIPTS = ('usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'motion.js', 'app.js')
+SCRIPTS = ('usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'motion.js', 'disclosure.js', 'app.js')
 
 
 def ui_source_digest():
