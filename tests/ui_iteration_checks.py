@@ -1,4 +1,4 @@
-"""Regression cases for maintained product flows; removed compact/manual-message UI retired in 5.7.5."""
+"""Browser regression cases for the maintained product and standalone explorer."""
 from __future__ import annotations
 import argparse,json,sys
 from pathlib import Path
@@ -11,12 +11,12 @@ CASES = [
 ('first-use/waiting-has-clear-primary-action', 'scenario=first-waiting', r'''()=>document.querySelector('.onboarding-main').textContent.includes('等待你完成登录')&&document.querySelector('.onboarding-foot .primary').textContent.includes('回到 ChatGPT')'''),
 ('first-use/adoption-never-overlaps-write', 'scenario=first-saving', r'''()=>document.querySelector('[data-action="adopt"]').disabled&&document.querySelector('.onboarding-main').textContent.includes('正在保存')'''),
 ('home/long-relay-name-preserves-card-height-and-quota', 'scenario=long-names', r'''()=>{const relay=document.querySelector('.relay'),label=relay.querySelector('strong'),quota=relay.querySelector('small');return relay.getBoundingClientRect().height===68&&label.scrollWidth>label.clientWidth&&quota.scrollWidth<=quota.clientWidth+1;}'''),
-('choices/participation-single-row-name-plan-switch', 'open=relay-accounts&scenario=long-names', r'''()=>[...document.querySelectorAll('.relay-account-row')].every(row=>{
- const name=row.querySelector('.relay-account-name'),plan=row.querySelector('.badge'),sw=row.querySelector('.switch');
- return name&&plan&&sw&&row.getBoundingClientRect().height===42&&!row.querySelector('.choice-quotas,.current-chip')&&name.getBoundingClientRect().right<=plan.getBoundingClientRect().left;})'''),
+('choices/participation-single-row-name-plan-checkbox', 'open=relay-accounts&scenario=long-names', r'''()=>[...document.querySelectorAll('.relay-account-row')].every(row=>{
+ const name=row.querySelector('.relay-account-name'),plan=row.querySelector('.badge'),selection=row.querySelector('.account-select');
+ return name&&plan&&selection&&selection.getAttribute('role')==='checkbox'&&!row.querySelector('.choice-quotas,.current-chip')&&name.getBoundingClientRect().right<=plan.getBoundingClientRect().left;})'''),
 ('choices/membership-does-not-get-clipped', 'open=relay-accounts&scenario=plan-types', r'''()=>[...document.querySelectorAll('.relay-account-row .badge')].every(q=>q.scrollWidth<=q.clientWidth+1)&&document.querySelector('[data-disclosure="relay"]').textContent.includes('Enterprise')'''),
-('choices/toggle-is-persisted-across-refresh', 'open=relay-accounts', r'''async()=>{const sw=document.querySelector('.relay-account-row .switch'),email=sw.dataset.email;sw.click();await new Promise(r=>setTimeout(r,120));await NXPreview.refresh();return NXDemo.state().settings.auto_relay_excluded.includes(email)&&document.querySelector('.relay-account-row .switch').getAttribute('aria-checked')==='false';}'''),
-('choices/switch-knob-stays-inside-control', 'open=relay-accounts', r'''()=>[...document.querySelectorAll('.relay-account-row .switch')].every(s=>s.querySelector('i').getBoundingClientRect().right<=s.getBoundingClientRect().right-1)'''),
+('choices/toggle-is-persisted-across-refresh', 'open=relay-accounts', r'''async()=>{const selection=document.querySelector('.relay-account-row .account-select'),email=selection.dataset.email;selection.click();await new Promise(r=>setTimeout(r,120));await NXPreview.refresh();return NXDemo.state().settings.auto_relay_excluded.includes(email)&&document.querySelector('.relay-account-row .account-select').getAttribute('aria-checked')==='false';}'''),
+('choices/checkmark-stays-inside-control', 'open=relay-accounts', r'''()=>[...document.querySelectorAll('.relay-account-row .account-select')].every(s=>{const mark=s.querySelector('.selection-mark').getBoundingClientRect(),control=s.getBoundingClientRect();return mark.left>=control.left&&mark.right<=control.right;})'''),
 ('credits/unknown-stays-visible', 'open=detail', r'''()=>[...document.querySelectorAll('.detail-line')].some(n=>n.textContent==='Credits未提供')'''),
 ('credits/zero-is-not-hidden', 'open=detail&scenario=credits-zero', r'''()=>[...document.querySelectorAll('.detail-line')].some(n=>n.textContent==='Credits0.00')'''),
 ('credits/unlimited-is-not-zero', 'open=detail&scenario=credits-unlimited', r'''()=>[...document.querySelectorAll('.detail-line')].some(n=>n.textContent==='Credits不限额')'''),
@@ -25,9 +25,13 @@ CASES = [
 ('credits/current-detail-fits-normal-frame', 'open=detail&scenario=detail-dense', r'''()=>{const b=document.querySelector('.sheet-body');return b.scrollHeight<=b.clientHeight+1;}'''),
 ('usage/single-account-fits', 'open=usage&email=work-01%40example.com', r'''()=>{const b=document.querySelector('.sheet-body');return b.scrollHeight<=b.clientHeight+1;}'''),
 ('demo/reset-invalidates-late-operations', '', r'''async()=>{await NXDemo.call('switch','work-02@example.com');NXDemo.scenario('first-run');await new Promise(r=>setTimeout(r,1650));return NXDemo.state().accounts.length===0&&NXDemo.state().current===null;}'''),
-('demo/add-login-save-roundtrip', 'open=add', r'''async()=>{
+('demo/add-login-auto-save-roundtrip', 'open=add', r'''async()=>{
  document.querySelector('[data-action="start-add"]').click();await new Promise(r=>setTimeout(r,1100));NXDemo.simulate('login');await NXPreview.refresh();
- const finish=document.querySelector('[data-action="finish-add"]');if(!finish||finish.disabled)return false;finish.click();await new Promise(r=>setTimeout(r,1100));return NXDemo.state().accounts.length===6&&!NXDemo.state().adding;}'''),
+ for(let attempt=0;attempt<10&&NXDemo.state().adding;attempt++){await new Promise(r=>setTimeout(r,150));await NXPreview.refresh();}return NXDemo.state().accounts.length===6&&!NXDemo.state().adding;}'''),
+('update/version-entry-expands-without-moving-surrounding-content', 'open=update&scenario=update-notes', r'''async()=>{
+ const positions=()=>['.update-identity','.update-primary','.update-state','.update-footer'].map(selector=>{const r=document.querySelector(selector).getBoundingClientRect();return [r.x,r.y,r.width,r.height];});
+ const before=JSON.stringify(positions()),entry=document.querySelector('#update-notes-toggle');if(!entry||!entry.textContent.includes(NXDemo.state().update.version))return false;
+ entry.click();await new Promise(r=>setTimeout(r,80));const notes=document.querySelector('#update-notes-body');return document.querySelector('#update-notes-toggle').getAttribute('aria-expanded')==='true'&&!notes.hidden&&notes.scrollHeight>notes.clientHeight&&JSON.stringify(positions())===before&&!document.querySelector('.update-tools #update-notes-toggle');}'''),
 ('demo/message-validation-matches-product', '', r'''async()=>{const before=NXDemo.state().settings.resume_message;const r=await NXDemo.call('set_preferences',{resume_message:'x\ny'});return r.ok===false&&NXDemo.state().settings.resume_message===before;}'''),
 ]
 
@@ -48,7 +52,8 @@ def main(browser,output,explorer=None):
    page.set_content((explorer or ROOT/f'ChatGPTnx-v{APP_VERSION}.html').read_text(encoding='utf-8'))
    page.locator('#status').filter(has_text="可操作").wait_for(timeout=5000)
    frame=page.frames[1]
-   results.append({'name':'explorer/initial-flow-operable','passed':frame.locator('.onboarding-main').count()==1,'errors':list(errors)})
+   results.append({'name':'explorer/initial-home-operable','passed':frame.locator('.current-card').count()==1,'errors':list(errors)})
+   page.locator('[data-case="first-run"]').click();frame=page.frames[1];frame.wait_for_selector('.onboarding-main')
    page.locator('[data-simulate="login"]').click();frame.wait_for_selector('[data-action="adopt"]');frame.locator('[data-action="adopt"]').click()
    frame.wait_for_selector('.current-card',timeout=5000)
    results.append({'name':'explorer/external-login-then-real-ui-save','passed':frame.evaluate('NXDemo.state().accounts.length')==1,'errors':list(errors)})

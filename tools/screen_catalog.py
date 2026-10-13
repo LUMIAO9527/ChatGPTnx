@@ -191,7 +191,8 @@ add(G,'detail-editor-floating-dismissed','详情 · 关闭浮条后编辑位置�
 
 G='16 · 版本更新与安装保护'
 for key,label in [('checking','正在检查'),('current','已是最新'),('available','发现新版本'),('downloading','正在下载'),('ready','校验完成'),('error','网络错误与重试'),('blocked','登录中禁止安装'),('source','源码运行提示'),('notes','长更新说明')]:
-    add(G,'version-update-'+key,'版本更新 · '+label,route='update',scenario='update-'+key)
+    add(G,'version-update-'+key,'版本更新 · '+label,route='update',scenario='update-'+key,
+        steps=[{'click':'#update-notes-toggle'}] if key=='notes' else None)
 
 # Exact expected final destination; checked for every screenshot, not inferred from its name.
 from urllib.parse import parse_qs

@@ -89,11 +89,12 @@ body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-sh
 .update-preserve { font-size: 10.5px; line-height: 17px; color: var(--muted); }
 .update-secondary { display: grid; grid-template-rows: 26px minmax(0,1fr); gap: 6px; min-height: 0; }
 .update-tools { display: flex; align-items: center; min-height: 0; }
-.update-body .update-cancel,.update-body .update-notes-toggle { height: 26px; min-height: 26px; padding: 4px 6px; gap: 4px; font-size: 10.5px; line-height: 18px; color: var(--muted); }
+.update-body .update-cancel { height: 26px; min-height: 26px; padding: 4px 6px; font-size: 10.5px; line-height: 18px; color: var(--muted); }
 .update-progress { display: block; position: absolute; bottom: 0; width: 100%; height: 3px; accent-color: var(--ink); }
-.update-notes-toggle { margin-left: auto; }
+.update-body .update-notes-toggle { height: 24px; min-height: 24px; padding: 3px 5px; gap: 4px; font-size: 10.5px; line-height: 18px; font-weight: 400; color: var(--muted); }
 .update-notes-toggle .icon { width: 13px; height: 13px; }
 .update-notes-toggle[aria-expanded="true"] .icon { transform: rotate(90deg); }
+.update-context { flex: 1; max-height: 26px; overflow-y: auto; overflow-wrap: anywhere; color: var(--muted); font-size: 10.5px; line-height: 13px; }
 .update-notes-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; font-size: 10.5px; line-height: 16px; color: var(--muted); padding: 6px 3px 0 0; border-top: 1px solid var(--line); }
 .muted { color: var(--muted); }
 .small { font-size: var(--font-body); }

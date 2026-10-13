@@ -86,15 +86,18 @@ window.NXViews.update = c => {
   const hasNotes=!!(u.available&&u.notes),notesOpen=hasNotes&&c.ui.disclosures.has('update-notes');
   const stateTitle={idle:'检查是否有新版本',checking:'正在检查更新…',current:'当前已是最新版本',available:'发现新版本',downloading:'正在下载更新…',ready:'更新已准备好',installing:'正在重启并更新…',error:'更新未完成'}[status]||'检查是否有新版本';
   const description=status==='ready'&&blocked?'请完成登录、切号或任务接续后更新。':status==='error'?u.message:u.available?`新版本 ${u.version}${u.installable===false?' · 内置更新仅适用于独立 EXE':status==='ready'?' · 已通过校验':''}`:'从 GitHub 获取最新正式版。';
+  const versionLabel=`新版本 ${u.version||''}`;
+  const versionEntry=hasNotes?`<button id="update-notes-toggle" class="btn update-notes-toggle" data-action="toggle-update-notes" aria-controls="update-notes-body" aria-expanded="${notesOpen}" aria-label="${notesOpen?'收起':'查看'}${esc(versionLabel)}的更新说明">${esc(versionLabel)}${icon('chevron')}</button>`:esc(description);
+  const contextMessage=hasNotes?(status==='error'?u.message:status==='ready'&&blocked?'请完成登录、切号或任务接续后更新。':u.installable===false?'内置更新仅适用于独立 EXE':status==='ready'?'已通过校验':''):'';
   return {title:'版本更新',cls:'update-body',
     body:`<section class="update-identity">${c.brandMark('update-mark')}<h3 class="update-brand">ChatGPTnx</h3><p class="update-version">当前版本 ${esc(data.version||window.NX_CONFIG.version)}</p>
       <button class="btn update-github" data-action="open-github" title="github.com/LUMIAO9527/ChatGPTnx">${icon('github')}<span>GitHub 项目</span>${icon('external')}</button></section>
-      <button id="update-primary" class="btn primary update-primary" data-action="${action}" aria-busy="${working}" aria-describedby="update-description" ${disabled?'disabled':''}>${icon(!working&&action==='download-update'?'download':'refresh',working?'spinner':'')}<span>${esc(label)}</span></button>
-      <section class="update-state" aria-live="polite"><h3 class="update-message">${esc(stateTitle)}</h3><p id="update-description" class="update-description" title="${esc(description)}">${esc(description)}</p>
+      <button id="update-primary" class="btn primary update-primary" data-action="${action}" aria-busy="${working}" aria-describedby="update-description update-context" ${disabled?'disabled':''}>${icon(!working&&action==='download-update'?'download':'refresh',working?'spinner':'')}<span>${esc(label)}</span></button>
+      <section class="update-state" aria-live="polite"><h3 class="update-message">${esc(stateTitle)}</h3><p id="update-description" class="update-description">${versionEntry}</p>
       <progress class="update-progress" max="100" value="${Number(u.progress)||0}" aria-label="更新下载进度" ${status==='downloading'?'':'hidden'}></progress></section>
       <section class="update-secondary">
       <div class="update-tools"><button class="btn update-cancel" data-action="cancel-update-download" ${status==='downloading'?'':'hidden'}>取消下载</button>
-      <button id="update-notes-toggle" class="btn update-notes-toggle" data-action="toggle-update-notes" aria-controls="update-notes-body" aria-expanded="${notesOpen}" ${hasNotes?'':'hidden'}>更新内容${icon('chevron')}</button></div>
+      <p id="update-context" class="update-context" aria-live="polite" ${contextMessage?'':'hidden'}>${esc(contextMessage||'')}</p></div>
       <div id="update-notes-body" class="update-notes-body" tabindex="0" role="region" aria-label="更新内容" ${notesOpen?'':'hidden'}>${esc(u.notes||'')}</div></section>`,
     foot:'<p class="update-preserve">更新后保留账号与设置</p>',footClass:'update-footer'};
 };

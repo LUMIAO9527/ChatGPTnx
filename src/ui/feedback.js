@@ -63,7 +63,7 @@ window.NXFeedback = (() => {
     return {begin,finish,paint,clear};
   }
   /* A single out-of-flow dock. On home it covers the third roster avatar;
-     sheets use a fixed bottom inset, independent of footer/expanded content.
+     sheets clear persistent footers; footerless pages use the base inset.
      Only scroll reachability is extended. No content node is inserted in flow. */
   function createDock({root,changed=()=>{}}) {
     const host=document.createElement('div');
