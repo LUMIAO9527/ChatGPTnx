@@ -18,7 +18,7 @@ class BuildTests(unittest.TestCase):
         resource = windows_version()
         self.assertIn(f"StringStruct('FileVersion', '{APP_VERSION}')", resource)
         self.assertIn(f"StringStruct('ProductVersion', '{APP_VERSION}')", resource)
-        self.assertIn('filevers=(1, 3, 0, 0)', resource)
+        self.assertIn('filevers=(1, 3, 1, 0)', resource)
 
     def test_production_has_no_demo_data_or_external_resources(self):
         html = panel()

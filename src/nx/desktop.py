@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 from .design import PANEL_CONFIG as DEFAULT_CONFIG
+from .win_compat import window_dpi
 
 CHATGPT_DEFAULT_AUMID = 'OpenAI.Codex_2p2nqsd0c76g0!App'
 RUN_KEY = r'Software\Microsoft\Windows\CurrentVersion\Run'
@@ -576,10 +577,7 @@ class Desktop:
 
     def _physical_size(self, hwnd):
         width, height = self.config['sizes'].get(self.view, self.config['sizes']['home'])
-        user32 = ctypes.windll.user32
-        user32.GetDpiForWindow.argtypes = [ctypes.c_void_p]
-        user32.GetDpiForWindow.restype = wt.UINT
-        dpi = int(user32.GetDpiForWindow(hwnd) or 96)
+        dpi = window_dpi(hwnd)
         return round(width * dpi / 96), round(height * dpi / 96)
 
     def _apply_layout(self):
@@ -626,10 +624,7 @@ class Desktop:
             if self._corner_edges is None:
                 self._corner_edges = WindowCorners()
             self._bind_corner_events(form)
-            user32 = ctypes.windll.user32
-            user32.GetDpiForWindow.argtypes = [ctypes.c_void_p]
-            user32.GetDpiForWindow.restype = wt.UINT
-            dpi = int(user32.GetDpiForWindow(hwnd) or 96)
+            dpi = window_dpi(hwnd)
             radius = max(1, round(self.config['radius'] * dpi / 96))
             if self._native_appearance is None:
                 dark = self._appearance_dark(self.service.state.get('settings'))
@@ -681,8 +676,6 @@ class Desktop:
             gdi32 = ctypes.windll.gdi32
             user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(wt.RECT)]
             user32.GetWindowRect.restype = wt.BOOL
-            user32.GetDpiForWindow.argtypes = [ctypes.c_void_p]
-            user32.GetDpiForWindow.restype = wt.UINT
             user32.SetWindowRgn.argtypes = [ctypes.c_void_p, ctypes.c_void_p, wt.BOOL]
             user32.SetWindowRgn.restype = ctypes.c_int
             gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_int] * 6
@@ -700,7 +693,7 @@ class Desktop:
             if width <= 0 or height <= 0:
                 return False
             stage = 'GetDpiForWindow'
-            dpi = int(user32.GetDpiForWindow(hwnd) or 96)
+            dpi = window_dpi(hwnd)
             radius = max(1, round(float(self.config.get('radius', 16)) * dpi / 96))
             stage = 'CreateRoundRectRgn'
             region = gdi32.CreateRoundRectRgn(0, 0, width + 1, height + 1,

@@ -56,6 +56,12 @@ def main():
             return
     elif not args.once:
         raise SystemExit('桌面应用需要 Windows + WebView2；浏览器预览请打开 demo.html。')
+    if os.name == 'nt' and not (args.once or args.acceptance_relay):
+        from nx.win_compat import desktop_runtime_issue
+        issue = desktop_runtime_issue()
+        if issue:
+            ctypes.windll.user32.MessageBoxW(None, issue, 'ChatGPTnx · 运行环境', 0x10)
+            raise SystemExit(1)
     paths = Paths(root, resource_root=resources)
     from nx.credentials import protect_store
     try:

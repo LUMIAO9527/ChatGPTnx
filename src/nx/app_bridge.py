@@ -15,7 +15,8 @@ import uuid
 
 
 MAX_FRAME = 8 * 1024 * 1024
-PIPE_PREFIX = '\\\\.\\pipe\\codex-browser-use-'
+PIPE_ROOT = '\\\\.\\pipe\\'
+PIPE_NAMES = re.compile(r'codex-(?:app-tools|browser-use)-[0-9a-f-]{36}')
 
 
 class BridgeUnavailable(Exception):
@@ -105,10 +106,11 @@ def candidates():
     # The executor's endpoint is preferred, never a saved endpoint from before
     # account switching. Other app-owned pipes are probed with tools/list only.
     inherited = os.environ.get('CODEX_APP_TOOLS_PIPE_PATH', '')
-    paths = [inherited] if re.fullmatch(re.escape(PIPE_PREFIX) + r'[0-9a-f-]{36}', inherited) else []
+    paths = ([inherited] if inherited.startswith(PIPE_ROOT)
+             and PIPE_NAMES.fullmatch(inherited[len(PIPE_ROOT):]) else [])
     try:
-        paths += ['\\\\.\\pipe\\' + name for name in os.listdir('\\\\.\\pipe\\')
-                  if re.fullmatch(r'codex-browser-use-[0-9a-f-]{36}', name)]
+        paths += [PIPE_ROOT + name for name in os.listdir(PIPE_ROOT)
+                  if PIPE_NAMES.fullmatch(name)]
     except OSError:
         pass
     return list(dict.fromkeys(paths))

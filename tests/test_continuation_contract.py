@@ -430,6 +430,59 @@ class BridgeCatalogTests(unittest.TestCase):
                           for name, keys in [('read_thread', ['threadId']),
                                              ('send_message_to_thread', ['threadId', 'prompt'])]]}
 
+    def test_new_app_tools_pipe_is_discovered_alongside_legacy_names(self):
+        current = 'codex-app-tools-11111111-1111-4111-8111-111111111111'
+        legacy = 'codex-browser-use-22222222-2222-4222-8222-222222222222'
+        names = [current, legacy, current, 'codex-app-tools-invalid',
+                 'unrelated-11111111-1111-4111-8111-111111111111']
+        with patch.dict('nx.app_bridge.os.environ', {'CODEX_APP_TOOLS_PIPE_PATH': ''}), \
+             patch('nx.app_bridge.os.listdir', return_value=names), \
+             patch('nx.app_bridge.os.name', 'nt'):
+            self.assertEqual(app_bridge.candidates(), [app_bridge.PIPE_ROOT + current,
+                                                     app_bridge.PIPE_ROOT + legacy])
+
+    def test_new_inherited_pipe_is_preferred_without_requiring_enumeration(self):
+        inherited = app_bridge.PIPE_ROOT + 'codex-app-tools-11111111-1111-4111-8111-111111111111'
+        live = Mock(); live.request.return_value = self.catalog()
+        with patch.dict('nx.app_bridge.os.environ', {'CODEX_APP_TOOLS_PIPE_PATH': inherited}), \
+             patch('nx.app_bridge.os.listdir', side_effect=OSError()), \
+             patch('nx.app_bridge.os.name', 'nt'), \
+             patch('nx.app_bridge.Pipe', return_value=live) as open_pipe:
+            selected = app_bridge.discover()
+        self.assertIs(selected, live)
+        open_pipe.assert_called_once_with(inherited, timeout=.6)
+        live.request.assert_called_once_with('tools/list', {'threadStartKind': 'all'})
+
+    def test_unrelated_inherited_pipe_is_not_opened(self):
+        with patch.dict('nx.app_bridge.os.environ', {'CODEX_APP_TOOLS_PIPE_PATH': r'\\remote\pipe\codex-app-tools-11111111-1111-4111-8111-111111111111'}), \
+             patch('nx.app_bridge.os.listdir', return_value=[]), \
+             patch('nx.app_bridge.os.name', 'nt'), patch('nx.app_bridge.Pipe') as open_pipe:
+            with self.assertRaisesRegex(app_bridge.BridgeUnavailable, 'desktop_bridge_unavailable'):
+                app_bridge.discover()
+        open_pipe.assert_not_called()
+
+    def test_working_new_pipe_survives_stale_legacy_pipes(self):
+        current = app_bridge.PIPE_ROOT + 'codex-app-tools-11111111-1111-4111-8111-111111111111'
+        stale = app_bridge.PIPE_ROOT + 'codex-browser-use-22222222-2222-4222-8222-222222222222'
+        live = Mock(); live.request.return_value = self.catalog()
+        with patch.dict('nx.app_bridge.os.environ', {'CODEX_APP_TOOLS_PIPE_PATH': ''}), \
+             patch('nx.app_bridge.candidates', return_value=[stale, current]), \
+             patch('nx.app_bridge.Pipe', side_effect=[OSError(), live]):
+            self.assertIs(app_bridge.discover(), live)
+        live.request.assert_called_once_with('tools/list', {'threadStartKind': 'all'})
+
+    def test_new_pipe_name_does_not_bypass_schema_check(self):
+        path = app_bridge.PIPE_ROOT + 'codex-app-tools-11111111-1111-4111-8111-111111111111'
+        incompatible = self.catalog()
+        incompatible['tools'][1]['inputSchema']['properties'].pop('prompt')
+        live = Mock(); live.request.return_value = incompatible
+        with patch('nx.app_bridge.candidates', return_value=[path]), \
+             patch('nx.app_bridge.Pipe', return_value=live):
+            with self.assertRaisesRegex(app_bridge.BridgeUnavailable, 'desktop_bridge_unavailable'):
+                app_bridge.discover()
+        live.close.assert_called_once()
+        self.assertEqual(live.request.call_args.args[0], 'tools/list')
+
     def test_stale_pipe_names_do_not_count_as_ambiguity(self):
         names = [f'codex-browser-use-{i:08x}-0000-4000-8000-000000000000'
                  for i in range(14)]
