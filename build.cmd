@@ -8,6 +8,9 @@ if not exist tools\build.py (
 if exist .venv\Scripts\python.exe (set "PYTHON=.venv\Scripts\python.exe") else (set "PYTHON=py")
 set "BUILD_ROOT=%CD%\_wip\build"
 set "PYINSTALLER_CONFIG_DIR=%BUILD_ROOT%\cache"
+set "TEMP=%BUILD_ROOT%\temp"
+set "TMP=%TEMP%"
+if not exist "%TEMP%" mkdir "%TEMP%"
 
 "%PYTHON%" tools\build.py
 if errorlevel 1 exit /b 1
@@ -18,7 +21,7 @@ if errorlevel 1 (
   echo PyInstaller is missing. Install requirements-dev.txt first.
   exit /b 1
 )
-"%PYTHON%" -m PyInstaller --noconfirm --clean --onefile --noconsole ^
+"%PYTHON%" -m PyInstaller --noconfirm --clean --onedir --noconsole ^
   --name ChatGPTnx.Core --icon "%BUILD_ROOT%\resources\nx.ico" ^
   --version-file "%BUILD_ROOT%\resources\version.txt" ^
   --paths "%CD%\src" ^

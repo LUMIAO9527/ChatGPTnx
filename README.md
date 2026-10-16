@@ -59,7 +59,7 @@ ChatGPTnx 的核心，是让多个 Plus 账号接力推进同一个长任务。�
 
 当前版本为 **v1.3.2**。早期页面示意图来自 v1.0.1；最新全部页面与状态可用根目录的 `ChatGPTnx-v1.3.2.html` 离线查看。
 
-v1.3.2 修复新版桌面桥接通道未被发现而导致的任务接续失败，兼容旧通道；更新改为独立 Windows 更新器接管下载后的退出、替换、启动确认和失败恢复；补充旧版 Windows 10 的缩放接口回退，以及缺少 WebView2 / .NET 时的启动提示。
+v1.3.2 修复内置更新后自动重启失败：独立 Windows 启动器和更新器负责退出、替换、启动确认及失败恢复，核心程序按版本保存在固定目录。新版启动成功后自动清理更早的更新文件，保留最近一版备份。继续包含新版桌面桥接通道发现、旧版 Windows 10 缩放回退和启动依赖提示。
 
 公开发布版可从 [v1.3.2 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.3.2) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.3.2-source.zip`，完整演示可下载 `ChatGPTnx-v1.3.2.html`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用、Microsoft .NET Framework 4.6.2 或更高版本，以及 Microsoft Edge WebView2 Runtime。
 

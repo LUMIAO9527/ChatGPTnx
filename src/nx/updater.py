@@ -217,7 +217,7 @@ class UpdateManager:
             self.cancel.set()
         return {'ok': True}
 
-    def install(self, parent_pid, popen=subprocess.Popen):
+    def install(self, parent_pid, popen=subprocess.Popen, *, ready_timeout=15):
         with self.lock:
             if self.state['status'] != 'ready' or not self.batch or not self.installable:
                 return {'ok': False, 'error': '请先下载并校验更新'}
@@ -229,27 +229,50 @@ class UpdateManager:
             if not helper_source.is_file() or helper_source.stat().st_size < 1024:
                 raise UpdateError('更新组件缺失，请重新安装当前版本')
             helper = batch / 'ChatGPTnx.Update.exe'
-            with helper_source.open('rb') as source, helper.open('xb') as target:
-                shutil.copyfileobj(source, target, length=256 * 1024)
-                target.flush()
-                os.fsync(target.fileno())
+            if helper.exists():
+                if digest_file(helper) != digest_file(helper_source):
+                    raise UpdateError('更新组件发生变化，请重新下载更新')
+            else:
+                atomic_bytes(helper, helper_source.read_bytes())
             token = uuid.uuid4().hex
             previous_sha256 = digest_file(self.executable)
-            plan = {'root': str(self.root), 'executable': str(self.executable),
-                    'parent_pid': parent_pid, 'version': asset['version'],
+            plan = {'schema': 2, 'root': str(self.root), 'executable': str(self.executable),
+                    'parent_pid': parent_pid, 'worker_pid': os.getpid(), 'version': asset['version'],
                     'sha256': asset['sha256'], 'size': asset['size'], 'token': token,
                     'previous_version': self.current,
                     'previous_sha256': previous_sha256,
-                    'previous_size': self.executable.stat().st_size}
+                    'previous_size': self.executable.stat().st_size,
+                    'previous_payload_id': os.environ.get('CHATGPTNX_PAYLOAD_ID', '')}
             journal = batch / 'plan.json'
             atomic_bytes(journal, json.dumps(plan).encode('utf-8'))
             environment = dict(os.environ)
             # The helper is a standalone .NET process. It builds a clean
             # environment for the candidate and never inherits PyInstaller's
             # private one-file variables into the restarted application.
-            popen([str(helper), '-Plan', str(journal)], cwd=str(batch),
-                  env=environment, creationflags=0x08000000 if os.name == 'nt' else 0,
-                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            process = popen([str(helper), '-Plan', str(journal)], cwd=str(batch),
+                            env=environment, creationflags=0x08000000 if os.name == 'nt' else 0,
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Keep the running app available unless the independent updater has
+            # acquired ownership and validated both executables.
+            deadline = time.monotonic() + ready_timeout
+            prepared = False
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    break
+                try:
+                    ready = json.loads((batch / 'prepared.json').read_text(encoding='utf-8'))
+                    if (ready.get('ready') is True and ready.get('token') == token
+                            and ready.get('pid') == process.pid):
+                        prepared = True
+                        break
+                except (OSError, ValueError, TypeError):
+                    pass
+                time.sleep(.05)
+            if not prepared:
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=5)
+                return {'ok': False, 'error': '更新器未能就绪，当前程序保持运行，请重试'}
             self.state.update(status='installing', message='正在重启并更新…')
         self.notify()
         return {'ok': True}
@@ -269,4 +292,6 @@ def startup_ack(root, executable, ack, token):
             or executable.parent != root or digest_file(executable) != plan.get('sha256')):
         raise UpdateError('更新程序未通过启动校验')
     atomic_bytes(ack, json.dumps({'ready': True, 'version': APP_VERSION,
-                                'token': token, 'pid': os.getpid()}).encode('utf-8'))
+                                'token': token, 'pid': os.getpid(),
+                                'launcher_pid': int(os.environ.get('CHATGPTNX_LAUNCHER_PID', '0')),
+                                'payload_id': os.environ.get('CHATGPTNX_PAYLOAD_ID', '')}).encode('utf-8'))

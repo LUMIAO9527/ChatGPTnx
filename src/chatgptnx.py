@@ -25,6 +25,7 @@ def main():
     parser.add_argument('--update-token', help=argparse.SUPPRESS)
     parser.add_argument('--launcher-executable', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--launcher-pid', type=int, help=argparse.SUPPRESS)
+    parser.add_argument('--runtime-check-report', type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if bool(args.update_ack) != bool(args.update_token):
         parser.error('update startup parameters must be paired')
@@ -45,6 +46,35 @@ def main():
     frozen = getattr(sys, 'frozen', False)
     root = args.home or Path(os.environ.get('CHATGPTNX_HOME') or (Path(sys.executable).parent if frozen else Path(__file__).resolve().parents[1]))
     resources = Path(getattr(sys, '_MEIPASS', root / '_wip' / 'build' / 'resources'))
+    if args.runtime_check_report:
+        # Build acceptance runs before the single-instance mutex and account
+        # initialization, so the installed application can keep running.
+        report = args.runtime_check_report.resolve()
+        if (root.resolve() / '_wip') not in report.parents:
+            parser.error('runtime report must be inside the isolated home/_wip')
+        from nx.version import APP_VERSION
+        from nx.win_compat import desktop_runtime_issue
+        with report.open('x', encoding='utf-8') as stream:
+            json.dump({'phase': 'dependencies'}, stream)
+        from nx.storage import atomic_bytes
+        result = {'version': APP_VERSION, 'runtime': str(resources),
+                  'temporary': os.environ.get('TEMP', ''),
+                  'launcher': str(args.launcher_executable), 'dependencies_ready': False}
+        try:
+            issue = desktop_runtime_issue()
+            if issue:
+                raise RuntimeError(issue)
+            import win32api
+            import webview.platforms.winforms
+            required = ('panel.html', 'nx.ico', 'switch_account.ps1',
+                        'continue_in_desktop.ps1', 'ChatGPTnx.Update.exe')
+            if not all((resources / name).is_file() for name in required):
+                raise RuntimeError('runtime resources missing')
+            result['dependencies_ready'] = True
+        except Exception as error:
+            result.update(error_type=type(error).__name__, error=str(error))
+        atomic_bytes(report, json.dumps(result).encode('utf-8'))
+        return
     mutex = None
     if os.name == 'nt':
         kernel = ctypes.WinDLL('kernel32', use_last_error=True)

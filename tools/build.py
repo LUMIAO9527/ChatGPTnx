@@ -85,7 +85,7 @@ def build_update_helper():
     output = RESOURCES / 'ChatGPTnx.Update.exe'
     command = [str(compiler), '/nologo', '/target:exe', '/optimize+',
                '/out:' + str(output), '/r:' + str(extensions),
-               str(ROOT / 'src' / 'update_helper.cs')]
+               str(ROOT / 'src' / 'update_common.cs'), str(ROOT / 'src' / 'update_helper.cs')]
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True, encoding='utf-8', errors='replace')
     if result.returncode:

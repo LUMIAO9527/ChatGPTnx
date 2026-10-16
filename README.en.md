@@ -61,7 +61,7 @@ The quota overview and usage statistics help you see which account is available 
 
 The current version is **v1.3.2**. Older example screenshots show v1.0.1; open `ChatGPTnx-v1.3.2.html` at the project root for all current pages and states.
 
-v1.3.2 restores task continuation through the new desktop app-tools pipe while retaining legacy discovery. It moves replacement, clean relaunch, startup confirmation, and rollback into an independent Windows updater, and adds DPI fallbacks for older Windows 10 builds plus clear startup messages for missing WebView2 or .NET prerequisites.
+v1.3.2 fixes automatic restart after an in-app update. An independent Windows launcher and updater own replacement, startup confirmation, and rollback, with the core stored in a permanent directory for each version. A successful update removes older update files while retaining one previous-version backup. It also includes the desktop bridge discovery fix, Windows 10 DPI fallbacks, and startup dependency checks.
 
 Download `ChatGPTnx.exe` from the [v1.3.2 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.3.2). The release also provides `ChatGPTnx-v1.3.2-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
 

@@ -61,6 +61,17 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.accounts.read_bytes(),b'synthetic-account-list')
         self.assertEqual((self.data/'settings.json').read_bytes(),b'original-settings')
 
+    def prepared_launcher(self):
+        process = Mock(pid=4242)
+        process.poll.return_value = None
+        def launch(*args, **kwargs):
+            batch = Path(kwargs['cwd'])
+            plan = json.loads((batch / 'plan.json').read_text(encoding='utf-8'))
+            (batch / 'prepared.json').write_text(json.dumps(
+                {'ready': True, 'token': plan['token'], 'pid': process.pid}), encoding='utf-8')
+            return process
+        return Mock(side_effect=launch)
+
     def test_version_comparison_is_numeric_and_stable_only(self):
         self.assertGreater(version_key('v1.0.10'),version_key('1.0.9'))
         self.assertEqual(version_key('v1.3'), version_key('1.3.0'))
@@ -120,9 +131,9 @@ class UpdateTests(unittest.TestCase):
         launcher.assert_not_called()
         self.unchanged()
 
-    def test_helper_uses_only_bundled_script_and_structured_arguments(self):
+    def test_helper_uses_only_bundled_executable_and_structured_arguments(self):
         self.download()
-        launcher=Mock()
+        launcher=self.prepared_launcher()
         self.assertTrue(self.manager.install(123,launcher)['ok'])
         args,kw=launcher.call_args
         self.assertEqual((self.manager.batch/'ChatGPTnx.Update.exe').read_bytes(),
@@ -132,6 +143,7 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(args[0][1], '-Plan')
         plan=json.loads((self.manager.batch/'plan.json').read_text())
         self.assertEqual(plan['parent_pid'],123)
+        self.assertEqual(plan['worker_pid'],os.getpid())
         self.assertEqual(plan['sha256'],hashlib.sha256(self.content).hexdigest())
         self.assertEqual(plan['previous_version'], '1.3')
         self.assertEqual(plan['previous_sha256'], hashlib.sha256(self.original).hexdigest())
@@ -140,7 +152,7 @@ class UpdateTests(unittest.TestCase):
 
     def test_independent_helper_owns_restart_environment_without_changing_parent_environment(self):
         self.download()
-        launcher = Mock()
+        launcher = self.prepared_launcher()
         inherited = {'_PYI_APPLICATION_HOME_DIR': 'old-extracted-runtime',
                      'PYINSTALLER_RESET_ENVIRONMENT': '0'}
         with patch.dict(os.environ, inherited):
@@ -151,6 +163,36 @@ class UpdateTests(unittest.TestCase):
             self.assertEqual(environment['TMP'], os.environ['TMP'])
             self.assertEqual(os.environ['PYINSTALLER_RESET_ENVIRONMENT'], '0')
             self.assertEqual(os.environ['_PYI_APPLICATION_HOME_DIR'], 'old-extracted-runtime')
+        self.unchanged()
+
+    def test_failed_helper_preparation_keeps_current_app_available(self):
+        self.download()
+        process = Mock(pid=4242)
+        process.poll.return_value = 1
+        result = self.manager.install(123, Mock(return_value=process))
+        self.assertFalse(result['ok'])
+        self.assertEqual(self.manager.snapshot()['status'], 'ready')
+        self.unchanged()
+
+    def test_unresponsive_helper_is_stopped_without_closing_current_app(self):
+        self.download()
+        process = Mock(pid=4242)
+        process.poll.return_value = None
+        # A confirmation from another process cannot authorize shutdown.
+        (self.manager.batch / 'prepared.json').write_text(json.dumps(
+            {'ready': True, 'token': 'a'*32, 'pid': 4241}), encoding='utf-8')
+        result = self.manager.install(123, Mock(return_value=process), ready_timeout=.02)
+        self.assertFalse(result['ok'])
+        process.terminate.assert_called_once()
+        self.assertEqual(self.manager.snapshot()['status'], 'ready')
+        self.unchanged()
+
+    def test_failed_preparation_can_be_retried_in_same_download_batch(self):
+        self.download()
+        process = Mock(pid=4242)
+        process.poll.return_value = 1
+        self.assertFalse(self.manager.install(123, Mock(return_value=process))['ok'])
+        self.assertTrue(self.manager.install(123, self.prepared_launcher())['ok'])
         self.unchanged()
 
     def test_source_mode_can_check_but_cannot_replace_interpreter(self):
@@ -167,6 +209,12 @@ class UpdateTests(unittest.TestCase):
         (ack.parent/'plan.json').write_text(json.dumps(plan),encoding='utf-8')
         with self.assertRaises(UpdateError):startup_ack(self.root,self.exe,ack,'b'*32)
         self.assertFalse(ack.exists())
+        plan['version'] = '0.0.1'
+        (ack.parent/'plan.json').write_text(json.dumps(plan),encoding='utf-8')
+        with self.assertRaises(UpdateError):startup_ack(self.root,self.exe,ack,'a'*32)
+        self.assertFalse(ack.exists())
+        plan['version'] = APP_VERSION
+        (ack.parent/'plan.json').write_text(json.dumps(plan),encoding='utf-8')
         startup_ack(self.root,self.exe,ack,'a'*32)
         self.assertTrue(json.loads(ack.read_text())['ready'])
         self.unchanged()
