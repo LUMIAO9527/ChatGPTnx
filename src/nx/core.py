@@ -80,7 +80,7 @@ def relay_candidate(accounts, current, picked=None):
                 candidates[0] if candidates else None)
 
 class Service:
-    def __init__(self, paths: Paths, query=None, runner=None):
+    def __init__(self, paths: Paths, query=None, runner=None, executable=None, update_parent_pid=None):
         self.paths, self.accounts, self.state = paths, Accounts(paths), State(paths)
         self.lock = threading.RLock()
         self.gate = threading.Lock()
@@ -128,7 +128,9 @@ class Service:
         self.resetter = ResetCredits(paths, self.accounts.current, lambda: self.state.get('settings'),
                                      self._record_reset_limits)
         from .updater import UpdateManager
-        self.updater = UpdateManager(paths.root, paths.resources, self.notify)
+        self.updater = UpdateManager(paths.root, paths.resources, self.notify,
+                                     executable=executable)
+        self.update_parent_pid = update_parent_pid
         if self.state.recovery_path or self.resumer.recovery_path:
             self.last_error = {'id': uuid.uuid4().hex, 'kind': 'recovery', 'target': None,
                 'message': '本地状态文件损坏，已保留原文件并恢复；请检查设置与接续记录',
@@ -540,7 +542,7 @@ class Service:
             if (not desktop_locked or self.operation or self.state.get('adding') or self.state.get('reauth')
                     or resume.get('phase') in ('switching', 'resuming') or self.stop.is_set()):
                 return {'ok': False, 'error': '请完成登录、切号或任务接续后再更新'}
-            result = self.updater.install(os.getpid())
+            result = self.updater.install(self.update_parent_pid or os.getpid())
             if result.get('ok'):
                 self.stop.set()
                 committed = True

@@ -20,6 +20,8 @@ class PackageTests(unittest.TestCase):
                              'src/ui/views/settings.js','tests/runtime_checks.cjs',
                              'tests/ui_refactor_checks.py','tools/browser_session.py',
                              'src/continue_in_desktop.ps1',
+                             'src/update_helper.cs',
+                             'src/update_wrapper.cs',
                              'preview.cmd','src/ui/views/onboarding.js','src/ui/preview.js',
                              'tools/screen_catalog.py','tools/templates/explorer.html',
                              'tools/build_explorer.py','tools/build_gallery.py',

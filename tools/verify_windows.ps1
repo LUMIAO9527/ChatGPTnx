@@ -2,7 +2,7 @@
 param([string]$Python = 'python')
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path -Parent $PSScriptRoot)
-foreach ($file in @('src/switch_account.ps1','src/continue_in_desktop.ps1','src/update_app.ps1')) {
+foreach ($file in @('src/switch_account.ps1','src/continue_in_desktop.ps1')) {
     $tokens = $null
     $parseErrors = $null
     $null = [System.Management.Automation.Language.Parser]::ParseFile(

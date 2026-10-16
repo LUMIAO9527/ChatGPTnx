@@ -7,6 +7,8 @@ from pathlib import Path
 import json
 import hashlib
 import base64
+import os
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,6 +69,30 @@ def windows_version():
 '''
 
 
+def build_update_helper():
+    """Compile the updater without Python so it can outlive a one-file build."""
+    if os.name != 'nt':
+        return None
+    framework = Path(os.environ.get('WINDIR', r'C:\Windows')) / 'Microsoft.NET'
+    compiler = next((path / 'csc.exe' for path in (
+        framework / 'Framework64' / 'v4.0.30319',
+        framework / 'Framework' / 'v4.0.30319') if (path / 'csc.exe').is_file()), None)
+    extensions = next((path / 'System.Web.Extensions.dll' for path in (
+        framework / 'Framework64' / 'v4.0.30319',
+        framework / 'Framework' / 'v4.0.30319') if (path / 'System.Web.Extensions.dll').is_file()), None)
+    if not compiler or not extensions:
+        raise RuntimeError('Microsoft .NET Framework compiler is required to build the updater')
+    output = RESOURCES / 'ChatGPTnx.Update.exe'
+    command = [str(compiler), '/nologo', '/target:exe', '/optimize+',
+               '/out:' + str(output), '/r:' + str(extensions),
+               str(ROOT / 'src' / 'update_helper.cs')]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding='utf-8', errors='replace')
+    if result.returncode:
+        raise RuntimeError('Updater compilation failed:\n' + result.stdout[-4000:])
+    return output
+
+
 def build():
     RESOURCES.mkdir(parents=True, exist_ok=True)
     (RESOURCES / 'panel.html').write_text(panel(demo=False), encoding='utf-8')
@@ -75,7 +101,9 @@ def build():
     (RESOURCES / 'nx.ico').write_bytes((ROOT / 'src' / 'assets' / 'nx.ico').read_bytes())
     (RESOURCES / 'switch_account.ps1').write_bytes((ROOT / 'src' / 'switch_account.ps1').read_bytes())
     (RESOURCES / 'continue_in_desktop.ps1').write_bytes((ROOT / 'src' / 'continue_in_desktop.ps1').read_bytes())
-    (RESOURCES / 'update_app.ps1').write_bytes((ROOT / 'src' / 'update_app.ps1').read_bytes())
+    helper = build_update_helper()
+    if helper:
+        print('Built independent Windows updater')
     print('Built ChatGPTnx resources')
 
 

@@ -19,16 +19,18 @@ if errorlevel 1 (
   exit /b 1
 )
 "%PYTHON%" -m PyInstaller --noconfirm --clean --onefile --noconsole ^
-  --name ChatGPTnx --icon "%BUILD_ROOT%\resources\nx.ico" ^
+  --name ChatGPTnx.Core --icon "%BUILD_ROOT%\resources\nx.ico" ^
   --version-file "%BUILD_ROOT%\resources\version.txt" ^
   --paths "%CD%\src" ^
   --add-data "%BUILD_ROOT%\resources\panel.html;." ^
   --add-data "%BUILD_ROOT%\resources\nx.ico;." ^
   --add-data "%BUILD_ROOT%\resources\switch_account.ps1;." ^
   --add-data "%BUILD_ROOT%\resources\continue_in_desktop.ps1;." ^
-  --add-data "%BUILD_ROOT%\resources\update_app.ps1;." ^
+  --add-data "%BUILD_ROOT%\resources\ChatGPTnx.Update.exe;." ^
   --distpath "%BUILD_ROOT%\dist" --workpath "%BUILD_ROOT%\work" ^
   --specpath "%BUILD_ROOT%\spec" src\chatgptnx.py
+if errorlevel 1 exit /b 1
+"%PYTHON%" tools\build_wrapper.py
 if errorlevel 1 exit /b 1
 copy /Y "%BUILD_ROOT%\dist\ChatGPTnx.exe" "ChatGPTnx.exe" 1>%SystemRoot%\System32\NUL 2>&1
 if errorlevel 1 (

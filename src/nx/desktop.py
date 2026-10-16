@@ -162,7 +162,8 @@ def set_autostart(enable: bool):
     try:
         if enable:
             if getattr(sys, 'frozen', False):
-                command = f'"{Path(sys.executable)}"'
+                executable = Path(os.environ.get('CHATGPTNX_LAUNCHER_EXE', sys.executable))
+                command = f'"{executable}"'
             else:
                 script = Path(__file__).resolve().parents[1] / 'chatgptnx.py'
                 pythonw = Path(sys.executable).with_name('pythonw.exe')

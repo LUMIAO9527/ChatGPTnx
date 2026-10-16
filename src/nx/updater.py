@@ -225,21 +225,29 @@ class UpdateManager:
             stage = batch / 'ChatGPTnx.new.exe'
             if not stage.is_file() or digest_file(stage) != asset['sha256']:
                 return {'ok': False, 'error': '更新文件发生变化，请重新下载'}
-            helper = batch / 'apply.ps1'
-            atomic_bytes(helper, (self.resources / 'update_app.ps1').read_bytes())
+            helper_source = self.resources / 'ChatGPTnx.Update.exe'
+            if not helper_source.is_file() or helper_source.stat().st_size < 1024:
+                raise UpdateError('更新组件缺失，请重新安装当前版本')
+            helper = batch / 'ChatGPTnx.Update.exe'
+            with helper_source.open('rb') as source, helper.open('xb') as target:
+                shutil.copyfileobj(source, target, length=256 * 1024)
+                target.flush()
+                os.fsync(target.fileno())
             token = uuid.uuid4().hex
+            previous_sha256 = digest_file(self.executable)
             plan = {'root': str(self.root), 'executable': str(self.executable),
                     'parent_pid': parent_pid, 'version': asset['version'],
-                    'sha256': asset['sha256'], 'size': asset['size'], 'token': token}
+                    'sha256': asset['sha256'], 'size': asset['size'], 'token': token,
+                    'previous_version': self.current,
+                    'previous_sha256': previous_sha256,
+                    'previous_size': self.executable.stat().st_size}
             journal = batch / 'plan.json'
             atomic_bytes(journal, json.dumps(plan).encode('utf-8'))
-            shell = Path(os.environ.get('SystemRoot', r'C:\Windows')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
             environment = dict(os.environ)
-            runtime = batch / 'runtime'
-            runtime.mkdir(exist_ok=True)
-            environment.update(TEMP=str(runtime), TMP=str(runtime))
-            popen([str(shell), '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy',
-                   'Bypass', '-File', str(helper), '-Plan', str(journal)], cwd=str(batch),
+            # The helper is a standalone .NET process. It builds a clean
+            # environment for the candidate and never inherits PyInstaller's
+            # private one-file variables into the restarted application.
+            popen([str(helper), '-Plan', str(journal)], cwd=str(batch),
                   env=environment, creationflags=0x08000000 if os.name == 'nt' else 0,
                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.state.update(status='installing', message='正在重启并更新…')

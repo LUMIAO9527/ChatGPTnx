@@ -6,7 +6,8 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+import os
 from nx.updater import UpdateManager, UpdateError, release_asset, safe_url, version_key, startup_ack
 from nx.version import APP_VERSION
 
@@ -27,7 +28,7 @@ class UpdateTests(unittest.TestCase):
         self.original = self.exe.read_bytes()
         self.resources = self.root/'resources'
         self.resources.mkdir()
-        (self.resources/'update_app.ps1').write_text('# bundled helper', encoding='utf-8')
+        (self.resources/'ChatGPTnx.Update.exe').write_bytes(b'MZ' + b'helper' * 300)
         self.content = b'MZ' + b'new'*1000
         self.document = fixture_release(self.content)
         self.accounts = self.root/'accounts.txt'
@@ -110,18 +111,46 @@ class UpdateTests(unittest.TestCase):
         launcher.assert_not_called()
         self.unchanged()
 
+    def test_missing_standalone_updater_stops_before_launch(self):
+        self.download()
+        (self.resources / 'ChatGPTnx.Update.exe').unlink()
+        launcher = Mock()
+        with self.assertRaises(UpdateError):
+            self.manager.install(123, launcher)
+        launcher.assert_not_called()
+        self.unchanged()
+
     def test_helper_uses_only_bundled_script_and_structured_arguments(self):
         self.download()
         launcher=Mock()
         self.assertTrue(self.manager.install(123,launcher)['ok'])
         args,kw=launcher.call_args
-        self.assertEqual((self.manager.batch/'apply.ps1').read_text(encoding='utf-8'),'# bundled helper')
+        self.assertEqual((self.manager.batch/'ChatGPTnx.Update.exe').read_bytes(),
+                         (self.resources/'ChatGPTnx.Update.exe').read_bytes())
         self.assertNotIn('shell',kw)
-        self.assertIn('-File',args[0])
+        self.assertEqual(args[0][0], str(self.manager.batch/'ChatGPTnx.Update.exe'))
+        self.assertEqual(args[0][1], '-Plan')
         plan=json.loads((self.manager.batch/'plan.json').read_text())
         self.assertEqual(plan['parent_pid'],123)
         self.assertEqual(plan['sha256'],hashlib.sha256(self.content).hexdigest())
+        self.assertEqual(plan['previous_version'], '1.3')
+        self.assertEqual(plan['previous_sha256'], hashlib.sha256(self.original).hexdigest())
         self.assertNotIn('accounts',plan)
+        self.unchanged()
+
+    def test_independent_helper_owns_restart_environment_without_changing_parent_environment(self):
+        self.download()
+        launcher = Mock()
+        inherited = {'_PYI_APPLICATION_HOME_DIR': 'old-extracted-runtime',
+                     'PYINSTALLER_RESET_ENVIRONMENT': '0'}
+        with patch.dict(os.environ, inherited):
+            self.assertTrue(self.manager.install(123, launcher)['ok'])
+            environment = launcher.call_args.kwargs['env']
+            self.assertEqual(environment['PYINSTALLER_RESET_ENVIRONMENT'], '0')
+            self.assertEqual(environment['TEMP'], os.environ['TEMP'])
+            self.assertEqual(environment['TMP'], os.environ['TMP'])
+            self.assertEqual(os.environ['PYINSTALLER_RESET_ENVIRONMENT'], '0')
+            self.assertEqual(os.environ['_PYI_APPLICATION_HOME_DIR'], 'old-extracted-runtime')
         self.unchanged()
 
     def test_source_mode_can_check_but_cannot_replace_interpreter(self):

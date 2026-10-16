@@ -12,7 +12,7 @@ from nx.version import APP_VERSION
 TOP = ('README.md', 'README.en.md', 'USAGE.md', 'LICENSE', '.gitignore', 'accounts.sample.txt',
        'build.cmd', 'setup.cmd', 'start.cmd', 'preview.cmd', 'requirements.txt',
        'requirements-dev.txt', 'requirements-browser.txt', f'ChatGPTnx-v{APP_VERSION}.html')
-EXTENSIONS = {'.py', '.js', '.cjs', '.css', '.ps1', '.ico', '.svg', '.html', '.png'}
+EXTENSIONS = {'.py', '.js', '.cjs', '.css', '.ps1', '.cs', '.ico', '.svg', '.html', '.png'}
 
 def package(output: Path) -> int:
     files = [ROOT/name for name in TOP]

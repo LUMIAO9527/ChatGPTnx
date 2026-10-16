@@ -23,6 +23,8 @@ def main():
     parser.add_argument('--acceptance-relay', metavar='THREAD', help='explicit one-relay test; requires exactly this one active task')
     parser.add_argument('--update-ack', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--update-token', help=argparse.SUPPRESS)
+    parser.add_argument('--launcher-executable', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--launcher-pid', type=int, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if bool(args.update_ack) != bool(args.update_token):
         parser.error('update startup parameters must be paired')
@@ -62,6 +64,9 @@ def main():
         if issue:
             ctypes.windll.user32.MessageBoxW(None, issue, 'ChatGPTnx · 运行环境', 0x10)
             raise SystemExit(1)
+    launcher_executable = (args.launcher_executable or Path(sys.executable)).resolve()
+    if args.launcher_executable:
+        os.environ['CHATGPTNX_LAUNCHER_EXE'] = str(launcher_executable)
     paths = Paths(root, resource_root=resources)
     from nx.credentials import protect_store
     try:
@@ -73,7 +78,8 @@ def main():
                 '凭据保护未完成，程序已停止。请保留现有文件，检查目录权限后重试。',
                 'ChatGPTnx', 0x10)
         raise SystemExit('Credential protection failed; no service started') from None
-    service = Service(paths)
+    service = Service(paths, executable=launcher_executable,
+                      update_parent_pid=args.launcher_pid)
     if args.acceptance_relay:
         from nx.acceptance import relay_once
         relay_once(service, args.acceptance_relay, args.selfcheck_report)
@@ -91,7 +97,7 @@ def main():
         startup_ready = None
         if args.update_ack:
             from nx.updater import startup_ack
-            startup_ready = lambda: startup_ack(root, Path(sys.executable), args.update_ack, args.update_token)
+            startup_ready = lambda: startup_ack(root, launcher_executable, args.update_ack, args.update_token)
         Desktop(service, startup_ready=startup_ready).run()
     if mutex:
         kernel.CloseHandle.argtypes = [ctypes.c_void_p]
