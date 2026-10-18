@@ -49,6 +49,35 @@ class LoginCompletionTests(unittest.TestCase):
         self.assertIn('new@example.com', self.s.accounts.all())
         self.assertEqual(self.fixture.query.calls, [('new@example.com', True, False)])
 
+    def test_new_plus_participates_in_relay_and_preheat_without_enabling_automation(self):
+        self.ready('adding', 'new@example.com')
+        atomic_bytes(self.paths.auth, test_core.auth('new@example.com', {'chatgpt_plan_type': 'plus'}))
+        self.s.state.setting(auto_relay_excluded=['b@example.com', 'new@example.com'],
+                             early_anchor_accounts=['b@example.com'])
+        self.assertTrue(self.s.add_finish()['accepted'])
+        self.wait()
+        settings = self.s.state.get('settings')
+        self.assertEqual(settings['auto_relay_excluded'], ['b@example.com'])
+        self.assertEqual(settings['early_anchor_accounts'], ['b@example.com', 'new@example.com'])
+        self.assertFalse(settings['auto_relay'])
+        self.assertFalse(settings['early_anchor'])
+
+    def test_new_non_plus_is_not_selected_for_plus_only_preheat(self):
+        self.ready('adding', 'new@example.com')
+        atomic_bytes(self.paths.auth, test_core.auth('new@example.com', {'chatgpt_plan_type': 'pro'}))
+        self.assertTrue(self.s.add_finish()['accepted'])
+        self.wait()
+        self.assertNotIn('new@example.com', self.s.state.get('settings')['early_anchor_accounts'])
+
+    def test_reauthentication_preserves_explicit_participation_choices(self):
+        self.ready('reauth', 'b@example.com')
+        atomic_bytes(self.paths.auth, test_core.auth('b@example.com', {'chatgpt_plan_type': 'plus'}))
+        self.s.state.setting(auto_relay_excluded=['b@example.com'], early_anchor_accounts=[])
+        self.assertTrue(self.s.reauth_finish()['accepted'])
+        self.wait()
+        self.assertEqual(self.s.state.get('settings')['auto_relay_excluded'], ['b@example.com'])
+        self.assertEqual(self.s.state.get('settings')['early_anchor_accounts'], [])
+
     def test_wrong_identity_does_not_query_or_overwrite_snapshot(self):
         original = self.paths.snapshot('b@example.com').read_bytes()
         t = self.ready(email='b@example.com')

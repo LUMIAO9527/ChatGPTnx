@@ -20,9 +20,8 @@ fs.mkdirSync(output, {recursive:true});
       await page.goto('about:blank');
       await page.setContent(html.replaceAll('location.search',JSON.stringify('?open=resume&scenario='+scenario+'&appearance='+appearance)));
       await page.waitForFunction(()=>window.NX_CASE_READY===true);
-      const summary=page.locator('.resume-summary').first();
-      if(await summary.getAttribute('aria-expanded')!=='true')await summary.click();
-      await page.waitForSelector('.resume-task-row');
+      await page.waitForSelector('[data-disclosure="resume-history"][open] .resume-inline-row');
+      await page.evaluate(()=>NXMotion.setEnabled(false));
     }
     async function check(name,fn){
       await fn();results.push({name,passed:true});
@@ -31,17 +30,22 @@ fs.mkdirSync(output, {recursive:true});
       const name=test=>appearance+'/'+test;
       await load('resume-subagent-history',appearance);
       await check(name('compact-progress-and-retained-task-history'),async()=>{
-        assert.equal(await page.locator('.resume-summary .resume-progress').innerText(),'2/6');
+        assert((await page.locator('[data-disclosure="resume-history"] > summary').innerText()).includes('6 条'));
         assert.equal(await page.locator('.resume-session-stats').count(),0);
-        assert.equal(await page.locator('.resume-task-row').count(),6);
+        assert.equal(await page.locator('.resume-inline-row').count(),5);
+        await page.locator('.resume-inline-tools').scrollIntoViewIfNeeded();
+        const before=await page.locator('.resume-inline-list').boundingBox();
+        await page.locator('[data-action="resume-page"][data-value="next"]').click();
+        assert.equal(await page.locator('.resume-inline-row').count(),1);
+        assert.deepEqual(await page.locator('.resume-inline-list').boundingBox(),before);
+        await page.locator('[data-action="resume-page"][data-value="prev"]').click();
       });
       await check(name('children-retain-history-and-no-retry'),async()=>{
         const children=page.locator('.is-subagent');
         assert.equal(await children.count(),4);
-        assert((await children.locator('strong').allTextContents()).every(text=>text.startsWith('后台子任务：')));
-        assert((await page.locator('.resume-subagent-note').innerText()).includes('当前版本不单独接续'));
-        assert((await children.nth(0).innerText()).includes('该回合已处理，未重复操作'));
-        assert((await children.nth(3).innerText()).includes('结果未确认；已停止自动接续，请查看原任务'));
+        assert((await children.locator('.resume-inline-title').allTextContents()).every(text=>text.startsWith('后台子任务：')));
+        assert((await children.nth(0).locator('.resume-inline-task').getAttribute('title')).includes('该回合已处理，未重复操作'));
+        assert((await children.nth(3).locator('.resume-inline-task').getAttribute('title')).includes('结果未确认；已停止自动接续，请查看原任务'));
         assert.equal(await children.locator('[data-action="retry-resume-task"]').count(),0);
       });
       await page.evaluate(()=>{
@@ -52,36 +56,38 @@ fs.mkdirSync(output, {recursive:true});
         };
       });
       await check(name('child-opens-confirmed-main-task'),async()=>{
-        const button=page.locator('.is-subagent .resume-task').first();
+        const button=page.locator('.is-subagent .resume-inline-task').first();
         assert((await button.getAttribute('aria-label')).includes('打开所属主任务：整理研究资料'));
         await button.click();
         await page.waitForFunction(()=>window.resumeNavigationCalls.length===1);
         assert.deepEqual(await page.evaluate(()=>window.resumeNavigationCalls),['67cc833f-6330-5bae-a638-9232b5ddfa21']);
       });
       await check(name('unknown-main-task-disables-navigation'),async()=>{
-        const button=page.locator('.is-subagent .resume-task').nth(2);
+        const button=page.locator('.is-subagent .resume-inline-task').nth(2);
         assert.equal(await button.isDisabled(),true);
         assert.equal(await button.getAttribute('data-action'),null);
         assert.equal(await button.getAttribute('data-value'),null);
-        assert((await button.innerText()).includes('所属主任务未确认，不能独立打开'));
+        assert((await button.getAttribute('title')).includes('所属主任务未确认，不能独立打开'));
         await button.evaluate(element=>element.click());
         assert.equal(await page.evaluate(()=>window.resumeNavigationCalls.length),1);
       });
       await check(name('ordinary-task-keeps-own-navigation'),async()=>{
-        const button=page.locator('.resume-task-row:not(.is-subagent) .resume-task').nth(1);
+        await page.locator('[data-action="resume-page"][data-value="next"]').click();
+        const button=page.locator('.resume-inline-row:not(.is-subagent) .resume-inline-task').first();
         await button.click();
         await page.waitForFunction(()=>window.resumeNavigationCalls.length===2);
         assert.equal(await page.evaluate(()=>window.resumeNavigationCalls[1]),'ea10a953-d3a4-53b9-b010-6361794c2a22');
+        await page.locator('[data-action="resume-page"][data-value="prev"]').click();
       });
       await check(name('compact-panel-contains-titles'),async()=>{
         assert.equal(await page.evaluate(()=>{
           const body=document.querySelector('.sheet-body');
-          const copy=[...document.querySelectorAll('.resume-task-copy')];
+          const copy=[...document.querySelectorAll('.resume-inline-task')];
           const rect=element=>element.getBoundingClientRect();
-          return NXPreview.info().width===372&&NXPreview.info().height===520
+          return NXPreview.info().width===327&&NXPreview.info().height===458
             &&body.scrollWidth<=body.clientWidth+1
             &&copy.every(element=>rect(element).width>0&&[...element.children].every(child=>rect(child).right<=rect(element).right+1))
-            &&[...document.querySelectorAll('.is-subagent .resume-task-copy strong')].every(element=>getComputedStyle(element).textOverflow==='ellipsis');
+            &&[...document.querySelectorAll('.is-subagent .resume-inline-title')].every(element=>getComputedStyle(element).textOverflow==='ellipsis');
         }),true);
       });
       await page.locator('.sheet-body').evaluate(element=>element.scrollTop=0);
@@ -94,7 +100,7 @@ fs.mkdirSync(output, {recursive:true});
           await NXPreview.refresh();
         });
         assert.equal(await page.locator('.is-subagent [data-action="retry-resume-task"]').count(),0);
-        assert((await page.locator('.is-subagent').first().innerText()).includes('桌面桥接不可用，未发送消息'));
+        assert((await page.locator('.is-subagent .resume-inline-task').first().getAttribute('title')).includes('桌面桥接不可用，未发送消息'));
       });
       await check(name('newly-skipped-child-has-specific-reason'),async()=>{
         await page.evaluate(async()=>{
@@ -103,7 +109,7 @@ fs.mkdirSync(output, {recursive:true});
           NXDemo.call=(method,...args)=>method==='get_resume_details'?structuredClone(details):call(method,...args);
           await NXPreview.refresh();
         });
-        assert((await page.locator('.is-subagent').first().innerText()).includes('后台子任务，不单独接续'));
+        assert((await page.locator('.is-subagent .resume-inline-task').first().getAttribute('title')).includes('后台子任务，不单独接续'));
         assert.equal(await page.locator('.is-subagent [data-action="retry-resume-task"]').count(),0);
       });
       await load('resume-bridge-unavailable',appearance);

@@ -1,9 +1,9 @@
 /* Shared single-line editors. Persistence lives in app.js, never in a view. */
 'use strict';
 window.NXEditors = (() => {
-  const {esc,icon}=window.NXComponents;
+  const {esc,icon,actionButton}=window.NXComponents;
   function row({id,label,value='',action,email='',type='text',max=400}) {
-    return `<div class="inline-field" data-inline-field="${esc(id)}"><label class="sr-only" for="${esc(id)}">${esc(label)}</label><input class="field" id="${esc(id)}" type="${type}" value="${esc(value)}" placeholder="${esc(label)}" aria-label="${esc(label)}" aria-describedby="form-error" ${type==='text'?`maxlength="${max}" autocomplete="off"`:'min="0001-01-01" max="9999-12-31"'}><button class="tool save-check" data-action="${action}" data-email="${esc(email)}" title="保存${esc(label)}" aria-label="保存${esc(label)}">${icon('check')}</button></div>`;
+    return `<div class="inline-field" data-inline-field="${esc(id)}"><label class="sr-only" for="${esc(id)}">${esc(label)}</label><input class="field" id="${esc(id)}" type="${type}" value="${esc(value)}" placeholder="${esc(label)}" aria-label="${esc(label)}" aria-describedby="form-error" ${type==='text'?`maxlength="${max}" autocomplete="off"`:'min="0001-01-01" max="9999-12-31"'}>${actionButton({content:icon('check'),action,size:'small',iconOnly:true,className:'tool save-check',label:'保存'+label,title:'保存'+label,attrs:`data-email="${esc(email)}"`})}</div>`;
   }
   function account(c,a) {
     const key='meta:'+a.email,draft=c.ui.metaDrafts.get(a.email)||{};

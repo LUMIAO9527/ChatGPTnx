@@ -7,7 +7,7 @@
 <p>Keep a long task moving across the accounts you own. Switch accounts when quota runs out, then attempt to continue the original task.</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.3.2" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.4.0" height="20">
 <img src="docs/images/badges/license.svg" alt="Source available to inspect; rights reserved" height="20">
 </div>
 
@@ -59,11 +59,11 @@ The quota overview and usage statistics help you see which account is available 
 
 ## Download and run
 
-The current version is **v1.3.2**. Older example screenshots show v1.0.1; open `ChatGPTnx-v1.3.2.html` at the project root for all current pages and states.
+The current version is **v1.4.0**. Open `ChatGPTnx-v1.4.0.html` at the project root for all current pages and states.
 
-v1.3.2 fixes automatic restart after an in-app update. An independent Windows launcher and updater own replacement, startup confirmation, and rollback, with the core stored in a permanent directory for each version. A successful update removes older update files while retaining one previous-version backup. It also includes the desktop bridge discovery fix, Windows 10 DPI fallbacks, and startup dependency checks.
+v1.4.0 unifies buttons and selection controls, brings paginated continuation history into Settings, and adds continuous motion to appearance, quota sorting, usage ranges, and pagination. Newly added Plus accounts participate in both relay and preheat by default.
 
-Download `ChatGPTnx.exe` from the [v1.3.2 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.3.2). The release also provides `ChatGPTnx-v1.3.2-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
+Download `ChatGPTnx.exe` from the [v1.4.0 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.4.0). The release also provides `ChatGPTnx-v1.4.0-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
 
 1. Put the EXE in its own writable folder and launch it. Open the panel from the system tray.
 2. Select **Add account** and sign in to ChatGPT. The app automatically verifies and saves the account. If verification is temporarily unavailable, use **Retry verification** in the panel.
@@ -86,7 +86,7 @@ The source is available to inspect. Use and redistribution are governed by the [
 
 ## Unified offline demo and debugging
 
-Open `ChatGPTnx-v1.3.2.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space; select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
+Open `ChatGPTnx-v1.4.0.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space; select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
 
 The console can check all light/dark scenarios and record intermediate navigation frames, including interrupted returns, inline disclosures, floating notices, passive refreshes, and long release notes. A shared rule prioritizes information-card backgrounds, then main buttons or account avatars; unrelated pages use a grouped body transition.
 

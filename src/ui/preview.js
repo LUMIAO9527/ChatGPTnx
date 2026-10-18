@@ -20,11 +20,38 @@
     if(!surface)problems.push('缺少活动页面');
     const body=surface?.querySelector('.sheet-body');
     if(body&&body.scrollWidth>body.clientWidth+1)problems.push('正文横向溢出');
-    if([...app.querySelectorAll('*')].some(n=>n.__nxMotionOwned||n.__nxMotionPlaceholder||n.__nxDisclosureOwned||n.__nxMotionRetained||n.__nxPopupActive))problems.push('动画结束后样式未释放');
+    if([...app.querySelectorAll('*')].some(n=>n.__nxLocalMotionOwned||n.__nxMotionOwned||n.__nxMotionPlaceholder||n.__nxDisclosureOwned||n.__nxMotionRetained||n.__nxPopupActive))problems.push('动画结束后样式未释放');
     const notes=surface?.querySelector('#update-notes-body'),toggle=surface?.querySelector('#update-notes-toggle');
     if(notes&&!notes.hidden&&toggle){
       const gap=notes.getBoundingClientRect().top-toggle.getBoundingClientRect().bottom;
       if(gap<0||gap>8.5||notes.parentElement!==toggle.closest('.update-release'))problems.push('更新说明与版本入口脱节');
+    }
+    const controls=[];
+    for(const button of surface?.querySelectorAll('button,summary')||[]) {
+      if(button.__nxLocalMotionOwned||button.__nxMotionOwned||button.closest('[hidden],[inert],details:not([open]) .disclosure-body')||!button.getBoundingClientRect().height)continue;
+      const css=getComputedStyle(button),height=parseFloat(css.height),border=parseFloat(css.borderTopWidth);
+      const radius=parseFloat(css.borderTopLeftRadius),floor=4;
+      const label=button.getAttribute('aria-label')||button.dataset.action||button.textContent.trim();
+      const family=button.matches('.control')?'action':button.matches('.switch')?'switch':button.matches('.control--embedded')?'joined':button.matches('.support-code')?'media':button.matches('.status-bar')?'notification':'row';
+      const expected=family==='action'||family==='switch'?height*.375:family==='joined'?0:family==='media'?12:family==='notification'?15:button.matches('.section-link')?12:16;
+      if(Math.abs(radius-expected)>.1)problems.push('控件圆角比例不一致：'+label);
+      if(family==='action') {
+        const icon=button.querySelector('.icon'),contentHeight=icon?parseFloat(getComputedStyle(icon).height):parseFloat(css.lineHeight);
+        if((height-2*border-contentHeight)/2<floor-.1)problems.push('按钮内容贴近轮廓：'+label);
+        if(!button.matches('.control--icon')&&parseFloat(css.paddingLeft)<floor-.1)problems.push('按钮横向留白不足：'+label);
+      }
+      if(family==='switch') {
+        const thumb=button.querySelector('i'),a=button.getBoundingClientRect(),b=thumb.getBoundingClientRect();
+        if(Math.min(b.top-a.top,a.bottom-b.bottom,b.left-a.left,a.right-b.right)<floor-.1)problems.push('开关滑块留白不足：'+label);
+      }
+      const operation=button.dataset.action||'';
+      const content=(button.querySelector(':scope > .control-content')||button).textContent.trim();
+      const confirmation=['execute-switch','execute-remove','adopt','start-add','start-reauth','install-update'].includes(operation)||['use-reset','resume-clear'].includes(operation)&&content==='确认';
+      const expectedWeight=confirmation?550:400;
+      if(Number(css.fontWeight)!==expectedWeight)problems.push('操作按钮字重不一致：'+label);
+      if(button.matches('.relay')&&Number(getComputedStyle(button.querySelector('.relay-label')).fontWeight)!==400)problems.push('首页接力操作文字过粗');
+      if(button.scrollWidth>button.clientWidth+1)problems.push('控件内容被裁切：'+label);
+      controls.push({family,label,operation,height,radius,weight:Number(css.fontWeight),confirmation,disabled:button.disabled||false});
     }
     if(surface?.querySelector('.resume-session-stats')||[...surface?.querySelectorAll('.resume-summary > strong')||[]].some(n=>n.textContent.includes('已接续')))problems.push('接续记录保留了多余汇总文字');
     const regions={};
@@ -32,25 +59,60 @@
       const node=surface?.querySelector(selector);
       if(node&&node.getBoundingClientRect().height)regions[selector]=bounds(node);
     }
-    return {id,theme:document.documentElement.dataset.appearance,page:info.page,problems,regions};
+    return {id,theme:document.documentElement.dataset.appearance,page:info.page,problems,regions,controls};
   }
   const waitForRest=()=>new Promise(resolve=>{
     const start=performance.now();
     function frame(){
-      const active=[...document.getElementById('app').querySelectorAll('*')].some(n=>n.__nxMotionOwned||n.__nxMotionPlaceholder||n.__nxDisclosureOwned||n.__nxMotionRetained||n.__nxPopupActive);
+      const active=window.NXLocalMotion?.active()||window.NXUsageMotion?.active()||[...document.getElementById('app').querySelectorAll('*')].some(n=>n.__nxMotionOwned||n.__nxMotionPlaceholder||n.__nxDisclosureOwned||n.__nxMotionRetained||n.__nxPopupActive);
       if(!active||performance.now()-start>1800)resolve();else requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);
   });
+  function inspectLocalState(){
+    const app=document.getElementById('app'),body=app.querySelector('#sheet .sheet-body');
+    const groups=[...app.querySelectorAll('.segmented[data-segment]')].filter(node=>node.getBoundingClientRect().width).map(node=>{
+      const a=node.getBoundingClientRect(),css=getComputedStyle(node),pseudo=getComputedStyle(node,'::before');
+      const selected=node.querySelector('[aria-pressed="true"]'),b=selected.getBoundingClientRect();
+      const scale=a.width/parseFloat(css.width),inset=parseFloat(css.paddingLeft);let x=0;
+      try{x=new DOMMatrixReadOnly(pseudo.transform).m41;}catch{}
+      const w=parseFloat(pseudo.width),extent=parseFloat(css.width)-inset-parseFloat(css.paddingRight);
+      return {key:node.dataset.segment,value:selected.dataset.value,x,w,extent,
+        indicatorLeft:a.left+(inset+x)*scale,indicatorWidth:w*scale,selectedLeft:b.left,selectedWidth:b.width,
+        active:node.style.getPropertyValue('--segment-x')!=='',opacity:Number(css.opacity)};
+    });
+    const rows=[...app.querySelectorAll('[data-motion-list] > [data-email]')].map(node=>({email:node.dataset.email,...bounds(node),active:node.hasAttribute('data-local-moving')}));
+    const pages=[...app.querySelectorAll('[data-motion-pages]')].filter(node=>node.getBoundingClientRect().width).map(node=>{
+      const content=node.querySelector('.resume-page-content');let x=0;
+      try{x=new DOMMatrixReadOnly(getComputedStyle(content).transform).m41;}catch{}
+      return {key:node.dataset.motionPages,page:Number(node.dataset.page),offset:x,...bounds(node),
+        tools:bounds(node.nextElementSibling),active:node.hasAttribute('data-page-moving'),
+        ghosts:node.querySelectorAll('.resume-page-ghost').length,opacity:Number(getComputedStyle(content).opacity)};
+    });
+    return {at:performance.now(),groups,rows,pages,scroll:body?.scrollTop||0,bodyOpacity:body?Number(getComputedStyle(body).opacity):1};
+  }
   async function inspectMotion(steps){
     const app=document.getElementById('app'),results=[];
+    const rangeState=()=>{
+      const group=app.querySelector('.usage-filter');if(!group)return null;
+      const plot=app.querySelector('.trend'),layer=plot?.querySelector('.range-morph-layer'),pieces=layer?[...layer.children]:[];
+      const filterCSS=getComputedStyle(group,'::before'),control=group.querySelector('[aria-pressed="true"]');
+      const count=[...app.querySelectorAll('[data-count-value]')].map(node=>({key:node.dataset.countKey,value:node.dataset.countValue,text:node.textContent}));
+      const samples=pieces.filter((_,i)=>i===0||i===Math.floor(pieces.length/2)||i===pieces.length-1).map(bounds);
+      return {selected:control?.dataset.value,thumb:filterCSS.transform,count,pieces:pieces.length,samples,
+        opacity:Number(getComputedStyle(app.querySelector('.usage-summary')).opacity),plotOpacity:Number(getComputedStyle(plot).opacity),
+        card:bounds(app.querySelector('.current-card')),hiddenBars:[...plot.querySelectorAll(':scope > .trend-bar')].filter(node=>getComputedStyle(node).visibility==='hidden').length};
+    };
+    const originalRange=rangeState();let originalLocal=null;
     for(const step of steps){
+      if(step.shared&&!originalLocal)originalLocal=inspectLocalState();
       const before=inspectLayout(),frames=[],start=performance.now();
+      const beforeLocal=step.shared?inspectLocalState():null;
       let recording=true;
       const capture=()=>{
         const moving=[...app.querySelectorAll('*')].filter(n=>n.__nxMotionOwned&&n.style.position==='fixed');
         const body=app.querySelector('#sheet').hidden?app.querySelector('#home'):app.querySelector('#sheet .sheet-body');
-        frames.push({time:performance.now()-start,moving:moving.map(n=>({role:n.matches('.primary,.relay')?'primary':n.matches('.motion-surface')?'surface':'avatar',...bounds(n),transform:getComputedStyle(n).transform})),slots:[...app.querySelectorAll('*')].filter(n=>n.__nxMotionPlaceholder).length,bodyMotion:!!body?.getAnimations().length,popups:[...app.querySelectorAll('*')].filter(n=>n.__nxPopupActive).length,disclosures:[...app.querySelectorAll('[data-disclosure]')].filter(n=>n.__nxDisclosureIntent!==undefined).map(n=>({key:n.dataset.disclosure,...bounds(n)}))});
+        frames.push({time:performance.now()-start,moving:moving.map(n=>({role:n.matches('.primary,.relay')?'primary':n.matches('.motion-surface')?'surface':'avatar',...bounds(n),transform:getComputedStyle(n).transform})),slots:[...app.querySelectorAll('*')].filter(n=>n.__nxMotionPlaceholder).length,bodyMotion:!!body?.getAnimations().length,local:step.shared?inspectLocalState():null,range:step.range||step.rangeSelection||step.immediate?rangeState():null,popups:[...app.querySelectorAll('*')].filter(n=>n.__nxPopupActive).length,disclosures:[...app.querySelectorAll('[data-disclosure]')].filter(n=>n.__nxDisclosureIntent!==undefined).map(n=>({key:n.dataset.disclosure,...bounds(n)}))});
         if(recording)requestAnimationFrame(capture);
       };
       capture();
@@ -72,17 +134,54 @@
       if(step.disclosure&&!frames.some(f=>f.disclosures.length))problems.push('展开项没有平滑过渡');
       if(step.group&&!frames.some(f=>f.bodyMotion))problems.push('普通切页没有整体过渡');
       if(step.popup&&!frames.some(f=>f.popups))problems.push('浮动提示没有显示或收起动画');
+      if(step.shared){
+        const localFrames=frames.map(frame=>frame.local).filter(Boolean),endLocal=inspectLocalState();
+        if(localFrames.some(value=>value.bodyOpacity!==1||value.groups.some(group=>group.opacity!==1)))problems.push('分段切换淡入淡出');
+        if(localFrames.some(value=>value.groups.some(group=>group.x<-.1||group.x+group.w>group.extent+.1)))problems.push('选中块超出控件留白');
+        if(!step.interrupt){
+          if(endLocal.groups.some(group=>group.active||Math.abs(group.indicatorLeft-group.selectedLeft)>.5||Math.abs(group.indicatorWidth-group.selectedWidth)>.5))problems.push('选中块没有对齐实际选项');
+          if(endLocal.rows.some(row=>row.active))problems.push('排序结束后行位移未释放');
+          if(endLocal.rows.some((row,i,array)=>i&&row.y<array[i-1].y+array[i-1].h-.5))problems.push('排序结束后账号行重叠');
+        }
+        if(step.sharedMove&&!localFrames.some(value=>value.groups.some(group=>group.active)))problems.push('分段控件没有连续移动');
+        if(step.rowMove&&!localFrames.some(value=>value.rows.some(row=>row.active)))problems.push('额度排序没有平滑换位');
+        if(step.immediateShared&&localFrames.some(value=>value.groups.some(group=>group.active)||value.rows.some(row=>row.active)))problems.push('关闭动效后仍有位移');
+        if(step.expectSelection&&Object.entries(step.expectSelection).some(([key,value])=>endLocal.groups.find(group=>group.key===key)?.value!==value))problems.push('最后一次选择未生效');
+        if(step.localReturn){
+          const state=value=>JSON.stringify({groups:value.groups.map(group=>[group.key,group.value]),rows:value.rows.map(row=>row.email)});
+          if(state(endLocal)!==state(originalLocal))problems.push('连续切换后状态未恢复');
+        }
+        if(step.pagination){
+          const before=beforeLocal.pages[0],end=endLocal.pages[0];
+          if(!end||end.page!==step.pagination)problems.push('换页没有保留最后一次选择');
+          if(localFrames.some(value=>value.pages.some(page=>page.opacity!==1)))problems.push('换页出现淡入淡出');
+          if(localFrames.some(value=>value.scroll!==beforeLocal.scroll||value.pages.some(page=>['x','y','w','h'].some(key=>Math.abs(page[key]-before[key])>.5)||['x','y','w','h'].some(key=>Math.abs(page.tools[key]-before.tools[key])>.5))))problems.push('换页改变了外框、按钮或滚动位置');
+          if(step.pageMove&&!localFrames.some(value=>value.pages.some(page=>page.active&&Math.abs(page.offset)>.5)))problems.push('换页没有平滑移动');
+          if(!step.interrupt&&end&&(end.active||end.ghosts||Math.abs(end.offset)>.01))problems.push('换页结束后临时内容未释放');
+        }
+      }
+      if(step.range||step.rangeSelection||step.immediate){
+        const rangeFrames=frames.map(frame=>frame.range).filter(Boolean),endRange=rangeState();
+        if(rangeFrames.some(value=>value.opacity!==1||value.plotOpacity!==1))problems.push('时间范围切换出现淡入淡出');
+        if(rangeFrames.some(value=>Object.keys(originalRange.card).some(key=>Math.abs(value.card[key]-originalRange.card[key])>.5)))problems.push('时间范围切换移动了账号卡片');
+        if(!step.interrupt&&endRange&&(endRange.pieces||endRange.hiddenBars))problems.push('图表动画没有恢复真实柱形');
+        if(step.range&&!rangeFrames.some(value=>value.pieces))problems.push('图表没有连续形变');
+        if(step.range&&new Set(rangeFrames.filter(value=>value.pieces).map(value=>JSON.stringify(value.samples))).size<2)problems.push('柱形停留在同一动画帧');
+        if(step.immediate&&rangeFrames.some(value=>value.pieces))problems.push('关闭动效后仍播放图表动画');
+        if(step.rangeReturn&&JSON.stringify(endRange?.count)!==JSON.stringify(originalRange?.count))problems.push('来回切换后数值没有恢复');
+      }
       if(step.scroll&&step.top==='bottom'){
         const region=document.querySelector(step.scroll);
         if(region.scrollTop+region.clientHeight<region.scrollHeight-1)problems.push('长内容末尾不可到达');
       }
-      results.push({step:step.click||step.simulate||step.scroll,frames,after,problems});
+      results.push({step:step.click||step.simulate||step.scroll||(typeof step.motion==='boolean'?'motion:'+step.motion:''),frames,after,range:rangeState(),local:step.shared?inspectLocalState():null,problems});
     }
     return results;
   }
   addEventListener('error',event=>report('error',{message:event.message||'页面脚本异常'}));
   addEventListener('unhandledrejection',event=>report('error',{message:String(event.reason?.message||event.reason||'异步操作异常')}));
   async function applyStep(step) {
+    if(typeof step.motion==='boolean'){window.NXMotion.setEnabled(step.motion);await wait(step.wait??40);return;}
     if(step.simulate){window.NXDemo.simulate(step.simulate);await window.NXPreview.refresh();await wait(step.wait??80);return;}
     const target=step.click||step.fill||step.hover||step.scroll;
     let node;

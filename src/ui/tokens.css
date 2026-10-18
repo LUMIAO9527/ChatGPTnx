@@ -1,7 +1,7 @@
 /*
   Product design scale
-  - radius: 16px surfaces, 12px controls, 8px small controls; pills stay rounded
-  - height: compact 24/28, standard 36, primary 44, list 48+
+  - radius: 16px row surfaces; controls use height * 3/8; only passive badges stay round
+  - height: actions 28/32/44, expanded rows 42; 4px minimum focus clearance
   - type: micro 8, caption 9, small 10, body 11, control 12, title 13, heading 16
   - shadow: selected < hover < primary < floating
   Component-specific values below are limited to layout or optical exceptions.

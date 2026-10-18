@@ -32,7 +32,7 @@ window.NXFeedback = (() => {
         restore(node);
         const entry=entries.get(controlKey(node));if(!entry)continue;
         originals.set(node,Object.fromEntries(['aria-busy','aria-label','disabled'].map(k=>[k,node.getAttribute(k)])));
-        const iconOnly=node.classList.contains('tool')||node.classList.contains('switch');
+        const iconOnly=node.matches('.tool,.switch,.control--small,.control--icon');
         node.classList.add('has-feedback');node.classList.toggle('feedback-icon-only',iconOnly);
         node.dataset.feedbackTone=entry.tone;
         node.setAttribute('aria-busy',String(entry.tone==='progress'));

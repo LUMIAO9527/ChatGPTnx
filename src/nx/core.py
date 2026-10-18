@@ -512,6 +512,19 @@ class Service:
                     raise RuntimeError('保存后的账号身份不一致，请保留登录流程并重试')
             if kind == 'adding':
                 self.accounts.activate(expected[0])
+                # Participation is selected on first verified addition; the
+                # global automation switches keep the user's existing values.
+                def participate(settings):
+                    email = expected[0]
+                    settings['auto_relay_excluded'] = [
+                        value for value in settings.get('auto_relay_excluded', []) if value != email]
+                    auth = claims(self.paths.snapshot(email)).get('https://api.openai.com/auth') or {}
+                    selected = list(settings.get('early_anchor_accounts') or [])
+                    if auth.get('chatgpt_plan_type') == 'plus' and email not in selected:
+                        selected.append(email)
+                    settings['early_anchor_accounts'] = selected
+                    return settings
+                self.state.change('settings', participate)
             self.state.update(**{key: None})
         if checked.get('ok'):
             checked.update(email=expected[0], **credential_metadata(self.paths.auth))

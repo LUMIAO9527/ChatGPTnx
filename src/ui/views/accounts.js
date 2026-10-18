@@ -18,7 +18,7 @@ window.NXViews.accounts = context => {
       return `<button class="quota-overview-row" data-action="detail" data-email="${esc(a.email)}">${window.NXComponents.avatar(a)}<span class="quota-overview-main"><span class="identity-title"><strong title="${esc(name(a))}">${esc(name(a))}</strong><span class="badge">${esc(plan(a.plan))}</span>${a.email===data.current?'<span class="current-chip">当前</span>':''}</span><span class="quota-overview-windows">${windows||'<span class="muted small">额度暂不可用</span>'}</span></span>${icon('chevron')}</button>`;
     }).join('');
     const metrics=[['quota','额度'],['time','时间']],scopes=[['relay','接力'],['five','5h'],['week','周']];
-    return `<div class="quota-overview-toolbar">${segmented({label:'排序依据',action:'quota-metric',options:metrics,value:ui.quotaMetric,className:'quota-metric'})}${segmented({label:'额度窗口',action:'quota-scope',options:scopes,value:ui.quotaScope,className:'quota-scope'})}</div><div class="quota-overview-list">${rows||'<div class="empty"><h3>暂无账号</h3></div>'}</div>`;
+    return `<div class="quota-overview-toolbar">${segmented({label:'排序依据',action:'quota-metric',options:metrics,value:ui.quotaMetric,className:'quota-metric'})}${segmented({label:'额度窗口',action:'quota-scope',options:scopes,value:ui.quotaScope,className:'quota-scope'})}</div><div class="quota-overview-list" data-motion-list="quota">${rows||'<div class="empty"><h3>暂无账号</h3></div>'}</div>`;
   }
   return quotaOverviewContent();
 };

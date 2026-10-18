@@ -7,7 +7,7 @@
 <p>用 n 个 Plus 账号，接力推进一个长任务。自动切号，继续原任务。</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.3.2" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.4.0" height="20">
 <img src="docs/images/badges/license.svg" alt="源码可查看 · 保留权利" height="20">
 </div>
 
@@ -57,11 +57,11 @@ ChatGPTnx 的核心，是让多个 Plus 账号接力推进同一个长任务。�
 
 ## 下载与运行
 
-当前版本为 **v1.3.2**。早期页面示意图来自 v1.0.1；最新全部页面与状态可用根目录的 `ChatGPTnx-v1.3.2.html` 离线查看。
+当前版本为 **v1.4.0**。完整页面与状态可用根目录的 `ChatGPTnx-v1.4.0.html` 离线查看。
 
-v1.3.2 修复内置更新后自动重启失败：独立 Windows 启动器和更新器负责退出、替换、启动确认及失败恢复，核心程序按版本保存在固定目录。新版启动成功后自动清理更早的更新文件，保留最近一版备份。继续包含新版桌面桥接通道发现、旧版 Windows 10 缩放回退和启动依赖提示。
+v1.4.0 统一按钮与选择控件，接续记录直接在设置内分页、重试和确认清理；外观、额度排序、用量范围及分页采用连续移动过渡，快速来回切换也能顺畅衔接。新添加的 Plus 账号默认同时参与接力与预热。
 
-公开发布版可从 [v1.3.2 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.3.2) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.3.2-source.zip`，完整演示可下载 `ChatGPTnx-v1.3.2.html`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用、Microsoft .NET Framework 4.6.2 或更高版本，以及 Microsoft Edge WebView2 Runtime。
+公开发布版可从 [v1.4.0 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.4.0) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.4.0-source.zip`，完整演示可下载 `ChatGPTnx-v1.4.0.html`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用、Microsoft .NET Framework 4.6.2 或更高版本，以及 Microsoft Edge WebView2 Runtime。
 
 1. 将 EXE 放入独立、可写的目录后启动，从托盘打开面板。
 2. 点击“添加账号”，在 ChatGPT 完成登录；程序自动验证并保存。验证暂未完成时，可在面板点击“重试验证”。
@@ -72,7 +72,7 @@ v1.3.2 修复内置更新后自动重启失败：独立 Windows 启动器和更�
 
 ## 演示与调试
 
-双击根目录的 [ChatGPTnx-v1.3.2.html](ChatGPTnx-v1.3.2.html)，或运行 `preview.cmd`。一个文件覆盖全部页面和关键状态，支持搜索、浅深色、模拟登录、更新状态以及调试报告导出。演示默认按可用空间放大并居中，也可切换到 100% 真实尺寸检查。所有数据均为合成数据，不访问本机账号，也不执行真实切号、下载或安装。
+双击根目录的 [ChatGPTnx-v1.4.0.html](ChatGPTnx-v1.4.0.html)，或运行 `preview.cmd`。一个文件覆盖全部页面和关键状态，支持搜索、浅深色、模拟登录、更新状态以及调试报告导出。演示默认按可用空间放大并居中，也可切换到 100% 真实尺寸检查。所有数据均为合成数据，不访问本机账号，也不执行真实切号、下载或安装。
 
 演示台提供全部界面检查与转场中间帧检查，方便复查布局变化、快速返回、原地展开、浮动提示、数据刷新和长更新说明。正式面板以统一规则衔接信息卡片、主按钮或头像；没有公共内容时采用正文整体过渡。
 

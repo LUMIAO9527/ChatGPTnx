@@ -38,6 +38,7 @@ window.NXRuntime = (() => {
     const data = node.dataset || {};
     return node.id ? 'id:' + node.id : data.motionIdentity ? 'identity:' + data.motionIdentity :
       data.email ? 'account:' + data.email + ':' + (data.action || '') :
+      data.segment ? 'segment:' + data.segment :
       data.disclosure ? 'disclosure:' + data.disclosure :
       data.action ? 'action:' + data.action + ':' + (data.key || data.value || '') : '';
   };
@@ -83,6 +84,7 @@ window.NXRuntime = (() => {
     for (const node of unused) node.remove();
   }
   function patchHTML(root, html, {preserveFields = true} = {}) {
+    const localPose=window.NXLocalMotion?.beforePatch(root);
     const template = root.ownerDocument.createElement('template');
     template.innerHTML = html;
     // The action's surface and its content have separate motion roles. Normalize
@@ -97,6 +99,7 @@ window.NXRuntime = (() => {
     }
     patchChildren(root, template.content, preserveFields);
     window.NXDisclosure?.afterPatch(root);
+    window.NXLocalMotion?.afterPatch(root,localPose);
   }
   return {readEpoch, coalescedRefresh, focusKey, restoreFocus, captureScroll, restoreScroll, patchHTML};
 })();

@@ -38,7 +38,7 @@ window.NXDemo = (() => {
       update:{status:'idle',current:window.NX_CONFIG.version,installable:true,message:'检查是否有新版本',progress:0},
       hotkeys:accounts.map((a,i)=>({email:a.email,shortcut:`ctrl+alt+${i+1}`,registered:true})),
       settings:{appearance:'system',autostart:false,auto_relay:false,auto_relay_excluded:[],
-        early_anchor:false,early_anchor_accounts:[],
+        early_anchor:false,early_anchor_accounts:accounts.filter(a=>a.plan==='plus').map(a=>a.email),
         task_continuation:true,resume_message:'继续',notify_credential:true,
         notify_low:false,notify_reset_expiry:true,relay_pick:null}};
     usages={};const totals=[18420680,26480300,60241200,9421800,5483200];
@@ -140,9 +140,9 @@ window.NXDemo = (() => {
           const a={email:who,alias:'',identity_key:who.split('@')[0],plan:'plus',ok:true,bucket:'codex',
             windows:[{label:'5h',used:0,resets_at:sec()+18000,duration_mins:300},{label:'周',used:0,resets_at:sec()+604800,duration_mins:10080}],
             fetched_at:sec(),membership:{status:'not_provided',date:null,verified:false}};
-          state.accounts.push(a);state.current=who;});}
+          state.accounts.push(a);state.settings.early_anchor_accounts.push(a.email);state.current=who;});}
       case 'add_cancel':return operation('add_cancel',null,()=>{state.current=previous;state.adding=false;state.add_state=null;state.add_login_status=null;});
-      case 'add_finish':if(state.add_login_status!=='ready')return {ok:false,error:'请先完成新账号登录'};return operation('add_finish',null,()=>{const id=state.accounts.length+1;const a={email:`new-${id}@example.com`,alias:`新账号 ${id}`,identity_key:`new-${id}`,plan:'plus',ok:true,bucket:'codex',windows:[{label:'5h',used:0,resets_at:sec()+18000,duration_mins:300},{label:'周',used:0,resets_at:sec()+604800,duration_mins:10080}],fetched_at:sec(),membership:{status:'not_provided',date:null,verified:false}};state.accounts.push(a);state.current=a.email;state.adding=false;state.add_state=null;state.add_login_status=null;loginSaved();});
+      case 'add_finish':if(state.add_login_status!=='ready')return {ok:false,error:'请先完成新账号登录'};return operation('add_finish',null,()=>{const id=state.accounts.length+1;const a={email:`new-${id}@example.com`,alias:`新账号 ${id}`,identity_key:`new-${id}`,plan:'plus',ok:true,bucket:'codex',windows:[{label:'5h',used:0,resets_at:sec()+18000,duration_mins:300},{label:'周',used:0,resets_at:sec()+604800,duration_mins:10080}],fetched_at:sec(),membership:{status:'not_provided',date:null,verified:false}};state.accounts.push(a);state.settings.early_anchor_accounts.push(a.email);state.current=a.email;state.adding=false;state.add_state=null;state.add_login_status=null;loginSaved();});
       case 'reauth_start':return operation('reauth_start',email,()=>{previous=state.current;state.current=null;state.reauth={email,previous,phase:'login'};});
       case 'reauth_cancel':return operation('reauth_cancel',null,()=>{state.current=state.reauth?.previous||previous;state.reauth=null;});
       case 'reauth_finish':return operation('reauth_finish',state.reauth?.email,()=>{state.current=state.reauth.email;const a=state.accounts.find(a=>a.email===state.current);if(a){a.ok=true;a.err=null;a.error_code=null;a.fetched_at=sec();}state.reauth=null;loginSaved();});
@@ -273,16 +273,25 @@ window.NXDemo = (() => {
         {thread_id:'ea10a953-d3a4-53b9-b010-6361794c2a22',title:'等待账号的任务 B',state:'waiting',reason:''}
       ]}];
     }
-    if(which==='resume-history'){
+    if(which==='resume-history'||which==='resume-history-many'){
       const item=(thread_id,title,state,reason)=>({thread_id,title,state,reason});
       resumeDetails=[
         {id:'history-today',target:state.accounts[1].email,phase:'done',updated_at:sec(),items:[
-          item('67cc833f-6330-5bae-a638-9232b5ddfa21','今天的任务','done','new_turn_observed')]},
+          item('67cc833f-6330-5bae-a638-9232b5ddfa21','今天的任务','done','new_turn_observed'),
+          item('10000000-0000-4000-8000-000000000001','继续整理资料','done','new_turn_observed')]},
         {id:'history-old',target:state.accounts[2].email,phase:'failed',updated_at:sec()-2*86400,items:[
-          item('ea10a953-d3a4-53b9-b010-6361794c2a22','较早的任务','failed','switch_not_completed')]},
+          item('ea10a953-d3a4-53b9-b010-6361794c2a22','较早的任务','failed','switch_not_completed'),
+          item('10000000-0000-4000-8000-000000000002','补充实验记录','done','new_turn_observed')]},
         {id:'history-draft',target:state.accounts[1].email,phase:'failed',updated_at:sec()-86400,items:[
-          item('c6145efd-1ac7-5980-869c-909481558def','桥接不可用的任务','failed','desktop_bridge_unavailable')]}
+          item('c6145efd-1ac7-5980-869c-909481558def','桥接不可用的任务','failed','desktop_bridge_unavailable'),
+          item('10000000-0000-4000-8000-000000000003','检查未完成部分','done','new_turn_observed'),
+          item('10000000-0000-4000-8000-000000000004','归纳当前结果','done','new_turn_observed')]}
       ];
+      if(which==='resume-history-many')resumeDetails=Array.from({length:57},(_,index)=>{
+        const failed=index%8===2;
+        return {id:`history-many-${index}`,target:state.accounts[1].email,phase:failed?'failed':'done',updated_at:sec()-index*1800,
+          items:[item(`20000000-0000-4000-8000-${String(index+1).padStart(12,'0')}`,index%5===0?`核对实验数据并整理本周所有任务的接续结果 ${index+1}`:`任务记录 ${index+1}`,failed?'failed':'done',failed?'desktop_bridge_unavailable':'new_turn_observed')]};
+      });
     }
     if(which==='stale')state.accounts.forEach(a=>a.fetched_at=sec()-3600);
     if(which==='expired')state.accounts[0].windows[1].resets_at=sec()-1;

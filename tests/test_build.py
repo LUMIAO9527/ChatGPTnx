@@ -18,7 +18,7 @@ class BuildTests(unittest.TestCase):
         resource = windows_version()
         self.assertIn(f"StringStruct('FileVersion', '{APP_VERSION}')", resource)
         self.assertIn(f"StringStruct('ProductVersion', '{APP_VERSION}')", resource)
-        self.assertIn('filevers=(1, 3, 2, 0)', resource)
+        self.assertIn('filevers=(1, 4, 0, 0)', resource)
 
     def test_production_has_no_demo_data_or_external_resources(self):
         html = panel()
@@ -32,7 +32,7 @@ class BuildTests(unittest.TestCase):
         for demo in (False, True):
             with self.subTest(demo=demo):
                 html = panel(demo=demo)
-                for marker in ('window.NXMotion =', 'window.NXFeedback =', 'window.NXMath =', 'window.NXComponents =', 'window.NXRuntime =',
+                for marker in ('window.NXMotion =', 'window.NXUsageMotion =', 'window.NXLocalMotion=', 'window.NXFeedback =', 'window.NXMath =', 'window.NXComponents =', 'window.NXRuntime =',
                                'window.NXViews.accounts =', 'window.NXViews.resume =',
                                'window.NXViews.usage =', 'window.NXViews.settings ='):
                     self.assertEqual(html.count(marker), 1)

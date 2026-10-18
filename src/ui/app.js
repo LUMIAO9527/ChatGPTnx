@@ -10,10 +10,10 @@
     const c=current()||(data.adding?data.accounts.find(a=>a.email===data.add_state?.previous):null);
     const accounts=data.accounts.filter(a=>a.email!==c?.email);
     const main=c?accountCard(c,false,data.adding?'添加前账号':'正在使用'):'';
-    return header()+statusRegion(notice())+main+(data.adding?'':relayButton())+`<section class="roster"><button class="section-head section-link" data-action="quota-overview" aria-label="查看全部账号额度"><span>其他账号</span><span>${accounts.length} 个 · 查看全部 ${icon('chevron')}</span></button><div class="account-list">${accounts.map(accountRow).join('')||'<div class="roster-empty" role="status"><span>没有其他账号</span></div>'}</div></section>`+footer();
+    return header()+statusRegion(notice())+main+(data.adding?'':relayButton())+`<section class="roster"><button class="section-head control section-link" data-action="quota-overview" aria-label="查看全部账号额度"><span>其他账号</span><span>${accounts.length} 个 · 查看全部 ${icon('chevron')}</span></button><div class="account-list">${accounts.map(accountRow).join('')||'<div class="roster-empty" role="status"><span>没有其他账号</span></div>'}</div></section>`+footer();
   }
   const $ = (q, root = document) => root.querySelector(q);
-  const {esc, icon, tool, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
+  const {esc, icon, tool, actionButton, selectionButton, switchButton, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
          notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, readableQuota, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity} = window.NXComponents;
   const defaults = {appearance:'system', autostart:false,
     auto_relay:false, auto_relay_excluded:[], early_anchor:false, early_anchor_accounts:[], task_continuation:true, resume_message:'继续',
@@ -21,11 +21,33 @@
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[]};
   let workflowResume = false;
   let lastLoginResult = '';
-  const ui = {page:null, email:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), disclosures:new Set(), fullCollections:new Set(), inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
+  const ui = {page:null, email:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), disclosures:new Set(), fullCollections:new Set(), inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
   let connected = false, bridgeError = '', acting = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
   const app = $('#app');
   app.innerHTML = '<main id="home"></main><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden></section><div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>';
   const home = $('#home'), sheet = $('#sheet');
+  // Keep a collapsed settings header in place even when the natural scroll
+  // range shrinks. The floor retreats with upward scrolling and survives polls.
+  function holdSettingsScroll(body,top=body?.scrollTop||0) {
+    const content=body?.querySelector(':scope > .settings-content');
+    if(!content)return;
+    const css=getComputedStyle(body),inset=parseFloat(css.paddingTop)+parseFloat(css.paddingBottom);
+    ui.settingsScrollFloor=Math.ceil(top+body.clientHeight-inset+1);
+    content.style.minHeight=ui.settingsScrollFloor+'px';
+    body.scrollTop=top;
+  }
+  app.addEventListener('scroll',event=>{
+    const body=event.target;
+    if(!ui.settingsScrollFloor||!body.matches?.('.settings-body'))return;
+    const content=body.querySelector(':scope > .settings-content');
+    if(!content||[...content.querySelectorAll('[data-disclosure]')].some(n=>n.__nxDisclosureIntent!==undefined))return;
+    const css=getComputedStyle(body),inset=parseFloat(css.paddingTop)+parseFloat(css.paddingBottom);
+    const intrinsic=(content.lastElementChild?.getBoundingClientRect().bottom||0)-content.getBoundingClientRect().top;
+    const floor=Math.ceil(body.scrollTop+body.clientHeight-inset+1);
+    const next=floor>intrinsic+1?floor:0;
+    if(next!==ui.settingsScrollFloor){ui.settingsScrollFloor=next;content.style.minHeight=next+'px';}
+  },true);
+
   const {status:statusBar} = window.NXFeedback;
   const feedback = window.NXFeedback.create({root:app,announce:message=>{$('#announcer').textContent=message;}});
   let controlOperation=null;
@@ -64,7 +86,7 @@
     return `<template class="status-source" data-default="${esc(fallback)}"></template>`;
   }
   function wrapStatus(html,action='dismiss-status') {
-    return `<div class="status-notification">${html}<button class="status-dismiss" data-action="${action}" aria-label="收起状态提示" title="收起提示，记录仍保留">${icon('close')}</button></div>`;
+    return `<div class="status-notification">${html}${actionButton({content:icon('close'),action,size:'small',iconOnly:true,className:'status-dismiss',label:'收起状态提示',title:'收起提示，记录仍保留'})}</div>`;
   }
   function notificationMarkup() {
     if(!notification)return '';
@@ -73,7 +95,7 @@
   function paintNotifications() {
     const surface=ui.page&&!sheet.hidden?sheet:home;
     const contextual=[...surface.querySelectorAll('template.status-source')].map(n=>n.dataset.default).find(Boolean);
-    const fallback=controlOperation?statusBar({text:controlOperation.text,tone:'progress'}):bridgeError?notice():contextual||(['error','resume','resume-clear'].includes(ui.page)?'':notice());
+    const fallback=controlOperation?statusBar({text:controlOperation.text,tone:'progress'}):bridgeError?notice():contextual||(['error','resume'].includes(ui.page)?'':notice());
     activeStatusKey=fallback+'|'+(data.last_error?.id||'')+'|'+(data.resume?.id||'');
     const html=notificationMarkup()||(fallback&&dismissedStatus!==activeStatusKey?wrapStatus(fallback):'');
     statusDock.paint(surface,html);
@@ -88,7 +110,7 @@
   const plan = planLabel;
   const current = () => data.accounts.find(a=>a.email===data.current);
   const hotkey = raw => data.hotkeys?.find(item=>item.email===raw) || {};
-  const hotkeyLabel = value => value ? value.split('+').map(part=>part==='ctrl'?'Ctrl':part[0].toUpperCase()+part.slice(1)).join(' ') : '未设置';
+  const hotkeyLabel = value => value ? value.split('+').map(part=>part==='ctrl'?'Ctrl':part[0].toUpperCase()+part.slice(1)).join(' + ') : '设置快捷键';
   const busy = () => acting || !!data.operation || !!data.switching;
   const disabled = () => busy() ? 'disabled' : '';
   const valid = a => displayWindows(a).length>0 && Number.isFinite(a.fetched_at) && a.fetched_at>=0 && a.fetched_at<=now()+60 && displayWindows(a).every(w=>w.resets_at>now());
@@ -125,7 +147,7 @@
   function bars(a,retry=false) {
     if (!displayWindows(a).length) {
       const state=failure(a);
-      return `<div class="quota-failure quota-slot" role="group" aria-label="${esc(state.title)}">${icon('info')}<span class="quota-failure-copy"><strong>${esc(state.title)}</strong><small title="${esc(state.detail)}">${esc(state.detail)}</small></span>${retry&&state.action?`<button class="btn secondary" data-action="${state.action}" data-email="${esc(a.email)}" ${disabled()}>${esc(state.label)}</button>`:''}</div>`;
+      return `<div class="quota-failure quota-slot" role="group" aria-label="${esc(state.title)}">${icon('info')}<span class="quota-failure-copy"><strong>${esc(state.title)}</strong><small title="${esc(state.detail)}">${esc(state.detail)}</small></span>${retry&&state.action?`<button class="control control--large secondary" data-action="${state.action}" data-email="${esc(a.email)}" ${disabled()}>${esc(state.label)}</button>`:''}</div>`;
     }
     const duo=displayWindows(a).length>1;
     return `<div class="quota-bars quota-slot ${duo?'duo':''}">${displayWindows(a).slice(0,2).map(w=>`<div class="${100-w.used<=10?'low':''}"><div class="quota-bar-head"><span class="quota-label">${esc(w.label)}剩余 <span class="reset mono" data-reset="${w.resets_at}">${reset(w.resets_at)}</span></span><b class="mono">${remaining(w)}%</b></div><div class="track"><span style="width:${remaining(w)}%"></span></div></div>`).join('')}</div>`;
@@ -153,7 +175,7 @@
   }
   function footer() {
     const refreshing=data.operation?.kind==='refresh';
-    return `<footer class="footer slim"><button class="refresh-status" data-action="refresh" aria-label="刷新全部额度" ${disabled()}>${icon('refresh',refreshing?'spinner':'')}<span>${refreshing?esc(data.operation.phase):age(data.updated)}</span></button><button class="btn compact add" data-action="add" ${disabled()}>${icon('plus')}添加账号</button></footer>`;
+    return `<footer class="footer slim">${actionButton({content:icon('refresh',refreshing?'spinner':'')+`<span>${refreshing?esc(data.operation.phase):age(data.updated)}</span>`,action:'refresh',label:'刷新全部额度',className:'refresh-status',attrs:disabled()})}${actionButton({content:icon('plus')+'添加账号',action:'add',className:'add',attrs:disabled()})}</footer>`;
   }
   const quotaValue=(a,minutes)=>remainingFor(a,minutes) ?? -1;
   const resetValue=(a,minutes)=>displayWindows(a).find(w=>duration(w)===minutes)?.resets_at ?? Number.MAX_SAFE_INTEGER;
@@ -232,8 +254,8 @@
   }
   function show(page, target=null, push=true, saved=null) {
     window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','edit','confirm','remove','reauth'].includes(page)?target:null);
-    resetConfirmation=null;
-    const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message'};
+    resetConfirmation=null;ui.resumeClearConfirm=false;
+    const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message','resume-clear':'resume-history'};
     const initial=page;
     if(Object.hasOwn(aliases,page))page='settings';
     if(page==='edit')page='detail';
@@ -258,7 +280,7 @@
   function closeSheet(animate=true) {
     if(ui.page&&animate)window.NXMotion?.begin(sheet, -1);
     else window.NXMotion?.stop();
-    resetConfirmation=null;
+    resetConfirmation=null;ui.resumeClearConfirm=false;
     feedback.clear();clearNotification();navigation.invalidate();ui.recording=null;
     ui.page=null;ui.email=null;ui.history=[];sheet.hidden=true;home.inert=false;
     setSize('home');renderHome();
@@ -288,17 +310,17 @@
         const pending=a.reset_attempt?.credit_id===item.id;
         const available=item.id&&(item.status==='available'||pending);
         const confirming=resetConfirmation?.email===a.email&&resetConfirmation?.creditId===item.id;
-        const button=available?`<button class="btn primary small-action reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(item.id)}" ${disabled()}>${confirming?'确认':pending?'重试':'使用'}</button>`:'';
+        const button=available?`<button class="control ${confirming?'primary control--confirmation':'secondary'} small-action control--small reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(item.id)}" ${disabled()}>${confirming?'确认':pending?'重试':'使用'}</button>`:'';
         return `<div class="reset-credit"><span class="reset-credit-copy"><span>第 ${index+1} 次${status}</span><strong>${esc(expiry)}${item.expires_known&&item.expires_at!==null?' 到期':''}</strong></span>${button}</div>`;
       }).join('');
       if(count>items.length) content+=`<p>另有 ${count-items.length} 次未提供逐项详情。</p>`;
     }
     if(a.reset_attempt&&!items.some(item=>item.id===a.reset_attempt.credit_id)){
       const confirming=resetConfirmation?.email===a.email&&resetConfirmation?.creditId===a.reset_attempt.credit_id;
-      content+=`<div class="reset-credit"><span>上次重置待确认</span><button class="btn primary small-action reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(a.reset_attempt.credit_id)}" ${disabled()}>${confirming?'确认':'重试'}</button></div>`;
+      content+=`<div class="reset-credit"><span>上次重置待确认</span><button class="control ${confirming?'primary control--confirmation':'secondary'} small-action control--small reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(a.reset_attempt.credit_id)}" ${disabled()}>${confirming?'确认':'重试'}</button></div>`;
     }
-    if(a.query_warning?.scope==='reset_credits'&&a.query_warning.paused) content+=`<p>重置详情查询已暂停，主额度查询正常。</p><button class="btn secondary" data-action="retry-query" data-email="${esc(a.email)}">恢复详情查询</button>`;
-    return `<div class="detail-reset" data-disclosure="reset:${esc(a.email)}"><button class="detail-line detail-action reset-summary" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div class="reset-credit-details">${content}</div>`:''}</div>`;
+    if(a.query_warning?.scope==='reset_credits'&&a.query_warning.paused) content+=`<p>重置详情查询已暂停，主额度查询正常。</p><button class="control secondary control--small" data-action="retry-query" data-email="${esc(a.email)}">恢复详情查询</button>`;
+    return `<div class="detail-reset control-container" data-disclosure="reset:${esc(a.email)}"><button class="detail-line detail-action reset-summary control-header" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div class="reset-credit-details">${content}</div>`:''}</div>`;
   }
   function scopeUsage() {
     if (!ui.usage) return null;
@@ -306,22 +328,31 @@
     const r=ui.usage.rows.find(r=>r.email===ui.scope), a=data.accounts.find(a=>a.email===ui.scope)||r;
     return a?math.aggregate([a],{[a.email]:r?.usage},ui.days):null;
   }
-  function metric(label,value) { return `<div class="metric"><small>${esc(label)}</small><strong class="mono">${esc(value)}</strong></div>`; }
-  const metricsRow=items=>`<div class="metrics-row">${items.map(([l,v])=>metric(l,v)).join('')}</div>`;
+  function countMarkup(value,format='tokens') {
+    const count=math.count(value),formatted=format==='days'?{main:count===null?'—':String(count),unit:count===null?'':'天'}:math.compact(count);
+    return `<span class="count-number">${esc(formatted.main)}</span><span class="count-unit">${esc(formatted.unit)}</span>`;
+  }
+  function metric(label,value,counter=null) {
+    const attrs=counter?` data-count-key="${esc(label)}" data-count-value="${math.count(counter.value)??''}" data-count-format="${esc(counter.format)}"`:'';
+    return `<div class="metric"><small>${esc(label)}</small><strong class="mono"${attrs}>${counter?countMarkup(counter.value,counter.format):esc(value)}</strong></div>`;
+  }
+  const metricsRow=items=>`<div class="metrics-row">${items.map(item=>metric(...item)).join('')}</div>`;
   const durText=s=>{if(s==null)return '—';const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d}天${h}小时`:h?`${h}小时${m}分`:`${m}分钟`;};
   const short=math.compactText;
   const statuses={ready:'已计入',pending:'尚未读取',unavailable:'查询失败',missing_total:'未提供累计',duplicate:'重复身份 · 未重复计入',identity_changed:'身份已变 · 请重查'};
   const usageContent=()=>window.NXViews.usage(viewContext());
   function viewContext(){
     return {data,ui,config,esc,icon,tool,name,plan,now,duration,reset,quotaValue,resetValue,
-      remaining,segmented,disabled,scopeUsage,math,metricsRow,short,durText,statuses,
+      remaining,segmented,actionButton,selectionButton,switchButton,disabled,scopeUsage,math,metricsRow,countMarkup,short,durText,statuses,
       link,settingsGroup,systemSettings,autoRelaySetting,taskContinuationSetting,
       notificationSettings,quotaSummary,accountChoice,statusBar,statusRegion,hotkeyLabel,dt,resumeContent,
       accountCard,accountRow,header,footer,notice,relayButton,current,relay,age,creditValue,brandMark,avatar,accountIdentity};
   }
   let composingField=null, deferredSheet=false;
-  function renderSheet(preserve=true) {
+  function renderSheet(preserve=true,usageTransition=false) {
     if(preserve&&composingField?.isConnected&&sheet.contains(composingField)){deferredSheet=true;return;}
+    if(usageTransition)window.NXMotion?.settlePage();
+    const rangePose=preserve&&ui.page==='usage'?window.NXUsageMotion?.beforePatch(sheet,usageTransition):null;
     const position=preserve?captureScroll(sheet):null;
     const key=preserve?focusKey(document.activeElement):null;
     const a=data.accounts.find(a=>a.email===ui.email), attr=`data-email="${esc(a?.email||'')}"`;
@@ -341,15 +372,15 @@
         const pickLabel=waiting?'取消等待':picked?'取消下一棒':exhausted?'恢复后接力':'设为下一棒';
         const pickIcon=waiting||picked?'close':exhausted?'clock':'baton';
         const actionArea=isCurrent?
-          `<div class="detail-actions is-current"><button class="btn primary current-status" data-action="home" aria-label="当前使用，返回首页">${icon('check')}当前使用</button></div>`:
-          `<div class="detail-actions"><button class="btn primary" data-action="pick" ${attr} ${!waiting&&!picked&&(busy()||data.adding||data.reauth)?'disabled':''} aria-pressed="${waiting||picked}" title="${exhausted&&!waiting?'额度恢复并核验后自动接力':pickLabel}">${icon(pickIcon)}${pickLabel}</button><button class="btn secondary" data-action="switch" ${attr} ${busy()||data.adding?'disabled':''}>切换到此账号 ${icon('arrow')}</button></div>`;
+          `<div class="detail-actions is-current"><button class="control control--large primary current-status" data-action="home" aria-label="当前使用，返回首页">${icon('check')}当前使用</button></div>`:
+          `<div class="detail-actions"><button class="control control--large primary" data-action="pick" ${attr} ${!waiting&&!picked&&(busy()||data.adding||data.reauth)?'disabled':''} aria-pressed="${waiting||picked}" title="${exhausted&&!waiting?'额度恢复并核验后自动接力':pickLabel}">${icon(pickIcon)}${pickLabel}</button><button class="control control--large secondary" data-action="switch" ${attr} ${busy()||data.adding?'disabled':''}>切换到此账号 ${icon('arrow')}</button></div>`;
         const archive=isCurrent?`<button class="danger-row unavailable" disabled title="切换到其他账号后可归档">${icon('archive')}归档账号</button>`:`<button class="danger-row" data-action="remove" ${attr}>${icon('archive')}归档账号</button>`;
         body=`${accountCard(a,true,isCurrent?'正在使用':'')}${actionArea}${link('chart','个人用量','usage-account',attr)}<div class="detail-compact">${window.NXEditors.account(viewContext(),a)}${resetCredits(a)}${detail('Credits',creditValue(a))}</div>`;
         cls=`detail-body ${isCurrent?'is-current':''} has-credits`;foot=`<div class="detail-bottom">${archive}<div class="detail-expiry-note">${esc(expiryNote)}</div></div>`;footClass='detail-footer';break;}
       case 'confirm': {
         const quota=quotaSummary(a);
         title=ui.switchKind==='relay'?'账号接力':'切换账号';body=`<div class="confirm-mark">${icon('baton')}</div><h3 class="confirm-title">${ui.switchKind==='relay'?'下一棒，交给':'切换到'}<br>${esc(name(a))}</h3><p class="note">将重启 ChatGPT 桌面端。</p><button class="confirm-account" data-action="detail" ${attr} aria-label="查看 ${esc(name(a))} 的账号详情">${avatar(a)}<span class="confirm-account-copy"><span class="identity-title"><strong title="${esc(name(a))}">${esc(name(a))}</strong><span class="badge">${esc(plan(a?.plan))}</span></span><span class="confirm-account-quota">${quota}</span></span><span class="confirm-account-more">详情 ${icon('chevron')}</span></button>${data.operation?statusRegion(statusBar({text:data.operation.phase,tone:'progress',className:'operation-notice'})):''}`;
-        foot=`<button class="btn secondary" data-action="back" ${data.switching?'disabled':''}>返回</button><button class="btn primary" data-action="execute-switch" ${attr} ${disabled()}>${ui.switchKind==='relay'?'开始接力':'确认切换'} ${icon('arrow')}</button>`;break;
+        foot=`<button class="control control--large secondary" data-action="back" ${data.switching?'disabled':''}>返回</button><button class="control control--large primary control--confirmation" data-action="execute-switch" ${attr} ${disabled()}>${ui.switchKind==='relay'?'开始接力':'确认切换'} ${icon('arrow')}</button>`;break;
       }
       case 'settings':
         ({title,body,cls}=window.NXViews.settings(viewContext()));break;
@@ -358,11 +389,9 @@
       case 'support-qr':({title,body,cls}=window.NXViews.supportQr(viewContext()));break;
       case 'update':({title,body,cls,foot,footClass}=window.NXViews.update(viewContext()));break;
       case 'resume':
-        title='任务接续';body=resumeContent();cls='resume-body';headActions=tool('archive','resume-clear','清理已结束记录',ui.resumeDetails.some(s=>!['switching','resuming','waiting_account'].includes(s.phase))?'':'disabled');break;
-      case 'resume-clear':
-        title='清理记录';body='<h3 class="confirm-title">清理已结束的接续记录？</h3><p class="note">保留进行中的接续；不会删除桌面端任务。</p>';foot='<button class="btn secondary" data-action="back">取消</button><button class="btn primary" data-action="execute-resume-clear">清理记录</button>';break;
+        title='任务接续';body=resumeContent();cls='resume-body';headActions=`<span class="resume-inline-clear-slot">${window.NXSettingsContent.resumeClearControl(viewContext())}</span>`;break;
       case 'remove':
-        title='归档账号';body=`<div class="confirm-mark">${icon('archive')}</div><h3 class="confirm-title">收起 ${esc(name(a))}？</h3><p class="note">凭据归档保留，可以恢复；该账号的快捷键分配也会保留。</p>`;foot=`<button class="btn secondary" data-action="back">保留</button><button class="btn primary" data-action="execute-remove" ${attr} ${disabled()}>确认归档</button>`;break;
+        title='归档账号';body=`<div class="confirm-mark">${icon('archive')}</div><h3 class="confirm-title">收起 ${esc(name(a))}？</h3><p class="note">凭据归档保留，可以恢复；该账号的快捷键分配也会保留。</p>`;foot=`<button class="control control--large secondary" data-action="back">保留</button><button class="control control--large primary control--confirmation" data-action="execute-remove" ${attr} ${disabled()}>确认归档</button>`;break;
       case 'add':
         title='添加账号';{
           const status=data.add_login_status,ready=status==='ready';
@@ -371,15 +400,15 @@
           const state=data.operation?data.operation.phase:data.login_progress?.message|| (ready?'已检测到登录，准备自动验证':status==='unchanged'?'仍是添加前的账号，请登录新账号':status==='existing'?'这个账号已经在清单里':status==='waiting'?'等待登录新账号':'等待打开登录窗口');
           const steps=`<ol class="add-progress"><li class="${ready?'done':'current'}">在 ChatGPT 桌面端登录新账号</li><li class="${ready?'current':''}">自动验证并保存</li></ol>`;
           body=`<div class="confirm-mark">${icon(ready?'check':'plus')}</div><h3 class="confirm-title">${heading}</h3><p class="note">${copy}</p>${steps}${statusRegion(statusBar({text:state,tone:data.operation?'progress':ready?'success':'neutral',symbol:ready?'check':'clock',className:'flow-status'}))}`;
-          foot=data.adding?`<button class="btn secondary" data-action="cancel-add">取消并恢复</button><button class="btn primary" data-action="finish-add" ${disabled()||!ready?'disabled':''}>重试验证</button>`:`<button class="btn secondary" data-action="back">返回</button><button class="btn primary" data-action="start-add" ${disabled()}>打开登录窗口</button>`;break;
+          foot=data.adding?`<button class="control control--large secondary" data-action="cancel-add">取消并恢复</button><button class="control control--large primary" data-action="finish-add" ${disabled()||!ready?'disabled':''}>重试验证</button>`:`<button class="control control--large secondary" data-action="back">返回</button><button class="control control--large primary control--confirmation" data-action="start-add" ${disabled()}>打开登录窗口</button>`;break;
         }
       case 'reauth': {
         if(!a){closeSheet();return;}
         title='重新登录';const pending=data.reauth?.email===a.email,started=pending&&data.reauth.phase!=='ready';
         body=`<div class="confirm-mark">${icon('user')}</div><h3 class="confirm-title">重新登录<br>${esc(name(a))}。</h3><p class="note">${started?'请在 ChatGPT 中完成“继续登录”或网页登录，完成后自动验证并保存。':'会重启桌面端，暂时退出当前账号。'}</p>${statusRegion(statusBar({text:data.operation?data.operation.phase:data.login_progress?.message|| (started?'等待完成登录 · 此面板保持在台前':'取消可恢复原账号。'),tone:data.operation?'progress':'neutral',className:'flow-status'}))}`;
-        foot=started?`<button class="btn secondary" data-action="cancel-reauth">取消并恢复</button><button class="btn primary" data-action="finish-reauth" ${disabled()}>重试验证</button>`:`<button class="btn secondary" data-action="${pending?'cancel-reauth':'back'}">返回</button><button class="btn primary" data-action="start-reauth" ${attr} ${disabled()}>打开登录窗口</button>`;break;}
+        foot=started?`<button class="control control--large secondary" data-action="cancel-reauth">取消并恢复</button><button class="control control--large primary" data-action="finish-reauth" ${disabled()}>重试验证</button>`:`<button class="control control--large secondary" data-action="${pending?'cancel-reauth':'back'}">返回</button><button class="control control--large primary control--confirmation" data-action="start-reauth" ${attr} ${disabled()}>打开登录窗口</button>`;break;}
       case 'scenarios':
-        title='演示场景';body=`<div class="menu-list">${[['default','正常 · 含 1 个失败账号'],['detail-dense','详情含双额度与 Credits'],['banked-partial','重置次数有部分详情'],['banked-unknown','重置次数未提供'],['resume-progress','任务接续中'],['resume-waiting','等待可用接力账号'],['resume-failed','任务接续失败'],['reauth','账号需要重新登录'],['chatgpt-off','ChatGPT 桌面端未运行'],['complete','所有账号用量可读'],['usage-empty','所有用量均未提供'],['stale','额度缓存过期'],['expired','窗口到点待核验'],['fail-switch','下一次接力失败'],['many','14 个账号'],['empty','空账号清单'],['member-none','会员日期未提供']].map(([key,label])=>`<button class="btn secondary" data-action="scenario" data-value="${key}">${label}</button>`).join('')}</div>`;break;
+        title='演示场景';body=`<div class="menu-list">${[['default','正常 · 含 1 个失败账号'],['detail-dense','详情含双额度与 Credits'],['banked-partial','重置次数有部分详情'],['banked-unknown','重置次数未提供'],['resume-progress','任务接续中'],['resume-waiting','等待可用接力账号'],['resume-failed','任务接续失败'],['reauth','账号需要重新登录'],['chatgpt-off','ChatGPT 桌面端未运行'],['complete','所有账号用量可读'],['usage-empty','所有用量均未提供'],['stale','额度缓存过期'],['expired','窗口到点待核验'],['fail-switch','下一次接力失败'],['many','14 个账号'],['empty','空账号清单'],['member-none','会员日期未提供']].map(([key,label])=>`<button class="control control--large secondary" data-action="scenario" data-value="${key}">${label}</button>`).join('')}</div>`;break;
       case 'error':
         closeSheet();return;
       default:closeSheet();return;
@@ -396,6 +425,7 @@
     if(oldError&&sheet.querySelector('#form-error'))sheet.querySelector('#form-error').textContent=oldError;
     paintNotifications();restoreScroll(sheet,position);restoreFocus(sheet,key);feedback.paint();
     if(preserve)window.NXMotion?.paint(sheet);
+    window.NXUsageMotion?.afterPatch(sheet,rangePose);
   }
   const inlineWrites=new Map();
   async function saveInline(source,{id,key,method,args,value,commit,clear}) {
@@ -488,9 +518,9 @@
         const archives=await api('get_archives');
         if(navigation.current(ticket)&&(ui.page==='settings'&&ui.disclosures.has('archives')&&ui.inlineLoading.archives==='ready')){extraChanged=JSON.stringify(archives)!==JSON.stringify(ui.archives);ui.archives=archives;}
       }
-      if(ui.page==='resume') {
+      if(ui.page==='resume'||ui.page==='settings'&&ui.disclosures.has('resume-history')) {
         const details=await api('get_resume_details');
-        if(navigation.current(ticket)&&(ui.page==='resume')){
+        if(navigation.current(ticket)&&(ui.page==='resume'||ui.page==='settings'&&ui.disclosures.has('resume-history'))){
         extraChanged=JSON.stringify(details)!==JSON.stringify(ui.resumeDetails)||extraChanged;
         ui.resumeDetails=details;
         const ids=new Set(details.map(s=>s.id));
@@ -518,11 +548,11 @@
     }catch(e){bridgeError=e.message;renderHome();}
     finally{schedulePoll();}
   }
-  async function loadUsage() {
+  async function loadUsage(animate=false) {
     const ticket=navigation.ticket(),period=ui.days;
     try {
       const result=await api('read_usage_all',period);
-      if(navigation.current(ticket)&&ui.page==='usage'&&period===ui.days){ui.usage=result;ui.usageRevision=Number(data.usage_revision||0);renderSheet();}
+      if(navigation.current(ticket)&&ui.page==='usage'&&period===ui.days){ui.usage=result;ui.usageRevision=Number(data.usage_revision||0);renderSheet(true,animate);}
     } catch(error){if(navigation.current(ticket))notify(error.message||'用量读取失败');}
   }
   async function openUsage(scope='all',force=false) {
@@ -540,18 +570,21 @@
     else {try{await api(scope==='all'?'get_usage_all':'get_usage',...(scope==='all'?[false]:[scope,false]));}catch(error){if(navigation.current(ticket))notify(error.message);}}
   }
   async function openResumeDetails() {
-    show('resume');const ticket=navigation.ticket();
+    let ticket=navigation.ticket();
     try {
       const details=await api('get_resume_details');
       if(!navigation.current(ticket))return;
-      ui.resumeDetails=details;
-      renderSheet();
+      ui.resumeDetails=details;ui.resumePage=1;
+      show('settings');selectSettingDisclosure('resume-history');ui.inlineLoading['resume-history']='ready';renderSheet();
+      ticket=navigation.ticket();
+      const body=sheet.querySelector('.sheet-body'),history=body.querySelector('[data-disclosure="resume-history"]');
+      body.scrollTop+=history.getBoundingClientRect().top-body.getBoundingClientRect().top-4;
       if(data.resume?.id) await api('mark_resume_seen',data.resume.id);
       await poll(true);
     }catch(error){if(navigation.current(ticket))notify(error.message||'接续记录读取失败');}
   }
   async function loadInline(key,force=false) {
-    const spec={archives:['get_archives','archives']}[key];
+    const spec={archives:['get_archives','archives'],'resume-history':['get_resume_details','resumeDetails']}[key];
     const ticket=navigation.ticket(),previous=ui.inlineRequests[key];
     if(!spec||!force&&ui.inlineLoading[key]==='ready'||!force&&ui.inlineLoading[key]==='loading'&&previous?.ticket===ticket)return;
     const request={ticket};ui.inlineRequests[key]=request;ui.inlineLoading[key]='loading';renderSheet();
@@ -566,7 +599,7 @@
       if(navigation.current(ticket))renderSheet();
     }
   }
-  const settingDisclosureKeys=new Set(['appearance','notifications','relay','early-anchor','message','hotkeys','archives']);
+  const settingDisclosureKeys=new Set(['appearance','notifications','relay','early-anchor','message','hotkeys','archives','resume-history']);
   const disclose=change=>window.NXDisclosure?window.NXDisclosure.transact(sheet,change):change();
   function selectSettingDisclosure(key) {
     for(const k of settingDisclosureKeys)if(k!==key)ui.disclosures.delete(k);
@@ -603,15 +636,35 @@
     if(r?.already_current){closeSheet();return;}
     if(r?.operation_id){ui.submitted=r.operation_id;await poll();}
   }
+  function paintResumeClearControl() {
+    for(const slot of sheet.querySelectorAll('.resume-inline-clear-slot'))
+      patchHTML(slot,window.NXSettingsContent.resumeClearControl(viewContext()));
+    feedback.paint();
+  }
+  function cancelResumeClear() {
+    if(!ui.resumeClearConfirm)return false;
+    ui.resumeClearConfirm=false;paintResumeClearControl();return true;
+  }
+  app.addEventListener('pointerdown',event=>{
+    if(ui.resumeClearConfirm&&!event.target.closest('[data-action="resume-clear"]'))cancelResumeClear();
+  },true);
+  app.addEventListener('focusout',event=>{
+    if(ui.resumeClearConfirm&&event.target.closest('[data-action="resume-clear"]')&&!event.relatedTarget?.closest?.('[data-action="resume-clear"]'))cancelResumeClear();
+  });
+
   app.addEventListener('click',async e=>{
+    if(ui.resumeClearConfirm&&!e.target.closest('[data-action="resume-clear"]'))cancelResumeClear();
     const summary=e.target.closest('details[data-disclosure] > summary');
     if(summary){
-      e.preventDefault();const d=summary.parentElement,opening=!(window.NXDisclosure?.isOpen(d)??d.open);
+      e.preventDefault();const d=summary.parentElement,opening=!(window.NXDisclosure?.isOpen(d)??d.open),body=d.closest('.sheet-body'),preservedScroll=body?.scrollTop||0;
       summary.focus({preventScroll:true});
+      if(!opening)holdSettingsScroll(body,preservedScroll);
       disclose(()=>{if(opening&&ui.page==='settings')selectSettingDisclosure(d.dataset.disclosure);d.open=opening;summary.setAttribute('aria-expanded',String(opening));syncDisclosure(d);});
-      // Collapsing a preceding section may move the new heading above the
-      // viewport. Reveal the heading only; never reset the whole page scroll.
-      if(opening&&d.isConnected){const body=d.closest('.sheet-body'),r=summary.getBoundingClientRect(),v=body?.getBoundingClientRect();if(v&&r.top<v.top)body.scrollTop-=v.top-r.top;}
+      // Opening may need the heading revealed. While closing, keep the old
+      // scrollTop until the animated height has settled; this prevents a jump
+      // to the next settings section when the content shrinks.
+      if(opening&&d.isConnected){const r=summary.getBoundingClientRect(),v=body?.getBoundingClientRect();if(v&&r.top<v.top)body.scrollTop-=v.top-r.top;}
+      if(!opening&&body){const started=performance.now();const keep=()=>{if(!body.isConnected)return;const max=Math.max(0,body.scrollHeight-body.clientHeight);body.scrollTop=Math.min(preservedScroll,max);if(performance.now()-started<300)requestAnimationFrame(keep);};requestAnimationFrame(keep);}
       return;
     }
     const b=e.target.closest('[data-action]');if(!b||b.disabled)return;
@@ -659,8 +712,27 @@
       }
       case 'automation':show('automation');break;
       case 'notifications':show('notifications');break;
-      case 'resume-clear':show('resume-clear');break;
-      case 'execute-resume-clear':if(await run('clear_resume_history')&&navigation.current(ticket)){const details=await api('get_resume_details');if(navigation.current(ticket)){ui.resumeDetails=details;back();}}break;
+      case 'resume-clear':{
+        if(acting||ui.resumeClearPending)break;
+        if(!ui.resumeClearConfirm){
+          ui.resumeClearConfirm=true;paintResumeClearControl();
+          $('#announcer').textContent='再次点击确认，清理已结束的接续记录。';break;
+        }
+        holdSettingsScroll(sheet.querySelector('.sheet-body'));
+        ui.resumeClearConfirm=false;ui.resumeClearPending=true;
+        try {
+          if(await run('clear_resume_history')&&navigation.current(ticket)){
+            ui.resumePage=1;
+            renderSheet();
+            (sheet.querySelector('[data-disclosure="resume-history"] > summary')||$('#sheet-title'))?.focus({preventScroll:true});
+            $('#announcer').textContent='已清理已结束的接续记录，进行中的接续已保留。';
+          }
+        } finally {
+          ui.resumeClearPending=false;
+          if(navigation.current(ticket))renderSheet();
+        }
+        break;
+      }
       case 'relay-accounts':show('relay-accounts');break;
       case 'resume-details':await openResumeDetails();break;
       case 'resume-message':show('resume-message');break;
@@ -701,15 +773,27 @@
       case 'toggle':preferences.set(b.dataset.key,!data.settings[b.dataset.key]);break;
       case 'auto-relay-account':preferences.set('account:'+target,b.getAttribute('aria-checked')!=='true');break;
       case 'early-anchor-account':preferences.set('anchor:'+target,b.getAttribute('aria-checked')!=='true');break;
-      case 'pref':preferences.set(b.dataset.key,val);break;
-      case 'collection-more':disclose(()=>{ui.fullCollections.has(val)?ui.fullCollections.delete(val):ui.fullCollections.add(val);renderSheet();});break;
+      case 'pref':window.NXMotion?.settlePage();preferences.set(b.dataset.key,val);break;
+      case 'collection-more':if(ui.fullCollections.has(val))holdSettingsScroll(b.closest('.sheet-body'));disclose(()=>{ui.fullCollections.has(val)?ui.fullCollections.delete(val):ui.fullCollections.add(val);renderSheet();});break;
+      case 'resume-page':{
+        const body=sheet.querySelector('[data-disclosure="resume-history"] .disclosure-body');
+        if(!body)break;
+        const position=captureScroll(sheet),key=focusKey(document.activeElement);
+        ui.resumePage=Math.max(1,(Number(ui.resumePage)||1)+(val==='next'?1:-1));
+        patchHTML(body,window.NXSettingsContent.resumeHistory(viewContext()));
+        if(key?.action==='resume-page'){
+          const control=body.querySelector(`[data-action="resume-page"][data-value="${key.value}"]`);
+          (control&&!control.disabled?control:body.querySelector('.resume-inline-pager'))?.focus({preventScroll:true});
+        }
+        restoreScroll(sheet,position);
+        break;}
       case 'inline-reload':await loadInline(val,true);break;
       case 'hotkeys':show('hotkeys');break;
       case 'record-hotkey':ui.recording=target;renderSheet();break;
       case 'pick':{const clearing=data.settings.relay_pick===target||data.relay_wait?.email===target;await run(clearing?'cancel_relay_pick':'set_relay_pick',target);break;}
       case 'quota-overview':show('quota-overview');break;
-      case 'quota-metric':ui.quotaMetric=val;if(val==='time'&&ui.quotaScope==='relay')ui.quotaScope='five';renderSheet();break;
-      case 'quota-scope':ui.quotaScope=val;if(val==='relay')ui.quotaMetric='quota';renderSheet();break;
+      case 'quota-metric':window.NXMotion?.settlePage();ui.quotaMetric=val;if(val==='time'&&ui.quotaScope==='relay')ui.quotaScope='five';renderSheet();break;
+      case 'quota-scope':window.NXMotion?.settlePage();ui.quotaScope=val;if(val==='relay')ui.quotaMetric='quota';renderSheet();break;
       case 'usage-all':{
         const previous=ui.history.at(-1);
         if(ui.page==='usage'&&ui.scope!=='all'&&previous?.page==='usage'&&previous.scope==='all')back();
@@ -719,9 +803,9 @@
       case 'usage-account':await openUsage(target);break;
       case 'usage-refresh':await openUsage(ui.scope,true);break;
       case 'usage-period':{
-        ui.days=val==='all'?'all':Number(val);navigation.invalidate();
-        const periodTicket=navigation.ticket();await loadUsage();
-        if(navigation.current(periodTicket)&&ui.page==='usage')window.NXMotion?.reveal(sheet.querySelector('.usage-summary'));
+        const days=val==='all'?'all':Number(val);if(days===ui.days)break;
+        ui.days=days;navigation.invalidate();window.NXUsageMotion?.select(sheet,days);
+        await loadUsage(true);
         break;
       }
       case 'edit':{if(ui.page!=='detail'||ui.email!==target)show('detail',target);ui.disclosures.add('meta:'+target);renderSheet();$('#alias')?.focus({preventScroll:true});break;}
@@ -776,6 +860,7 @@
   app.addEventListener('mousemove',e=>{const el=e.target.closest('[data-float-tip]');if(el)floatTip(el);});
   for(const event of ['mouseout','focusout'])app.addEventListener(event,e=>{if(e.target.closest('[data-float-tip]')){const tip=$('#float-tip');if(tip){if(window.NXDisclosure)window.NXDisclosure.popup(tip,'');else tip.hidden=true;}}});
   document.addEventListener('keydown',async e=>{
+    if(e.key==='Escape'&&ui.resumeClearConfirm){e.preventDefault();cancelResumeClear();return;}
     if(ui.recording){
       e.preventDefault();e.stopPropagation();
       if(e.key==='Escape'){ui.recording=null;renderSheet();return;}
@@ -796,14 +881,15 @@
   function applyAppearance(value){
     const appearance=['light','dark'].includes(value)?value:systemAppearance.matches?'dark':'light';
     const changed=document.documentElement.dataset.appearance!==appearance;
-    if(changed)window.NXMotion?.stop();
+    // A palette change does not cancel local movement or an open disclosure.
+    if(changed)window.NXMotion?.settlePage();
     document.documentElement.dataset.appearance=appearance;
     if(changed&&!config.demo&&window.pywebview?.api?.native_appearance)
       window.pywebview.api.native_appearance(appearance).catch(()=>{});
   }
   systemAppearance.addEventListener('change',()=>applyAppearance(data.settings.appearance));
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
-  window.nxHidden=()=>{window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;clearTimeout(pollTimer);pollTimer=null;};
+  window.nxHidden=()=>{window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
   window.addEventListener('pywebviewready',poll);
   window.addEventListener('resize',()=>{window.NXMotion?.stop();if(config.demo)setSize(ui.page?'workspace':'home');});
   setInterval(()=>{
@@ -834,6 +920,7 @@
         if(page==='confirm')ui.switchKind=params.get('kind')==='relay'?'relay':'manual';
         show(page,target?.email||null);
         if(page==='detail'&&params.get('expand')==='reset'&&target){ui.resetExpanded.add(target.email);renderSheet();}
+        if(page==='settings'&&params.get('expand')==='resume-history'){ui.disclosures.add('resume-history');await loadInline('resume-history');}
         if(page==='archives')await loadInline('archives');
       },
       home:()=>closeSheet(),

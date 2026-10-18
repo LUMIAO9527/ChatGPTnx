@@ -77,7 +77,17 @@ check('unrelated navigation moves the body as one group without per-section stag
   assert.equal(next.content.animateCalls.length,0);assert.equal(second.animateCalls.length,0);assert.equal(offscreen.animateCalls.length,0);assert.equal(foot.animateCalls[0].options.delay,0);
   e.tick(245);assert.equal(e.test.page,null);assert.equal(animations.size,0);assert.equal(rafs.size,0);clean(e);
 });
-check('time range feedback animates one chart and keeps totals fixed',()=>{const e=setup(),old=e.surface('usage','b');e.mount(old.node);const summary=e.el('section','usage-summary',14,220,299,110),total=e.el('div','usage-total',28,224,120,28),chart=e.el('div','trend',28,268,272,48);summary.append(total,chart);old.body.append(summary);e.motion.reveal(summary);assert.equal(summary.animateCalls.length,0);assert.equal(total.animateCalls.length,0);assert.equal(chart.animateCalls.length,1);assert.equal(chart.animateCalls[0].frames[0].opacity,.65);assert.equal(chart.animateCalls[0].options.duration,150);e.tick(200);assert.equal(animations.size,0);e.motion.begin(old.node,1,'b');const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);e.motion.reveal(summary);assert.equal(chart.animateCalls.length,1);e.motion.stop();e.motion.setEnabled(false);e.motion.reveal(summary);assert.equal(chart.animateCalls.length,1)});
+check('retargeted local curves preserve position velocity and acceleration',()=>{
+  const e=setup(),curve=e.motion.curve;
+  for(const [from,speed,acceleration,to] of [[0,0,0,180],[92,220,-1000,0],[1.4,-2,6,3]]){
+    assert(curve(from,speed,acceleration,to,0,.3).every((value,i)=>Math.abs(value-[from,speed,acceleration][i])<1e-8));
+    assert.deepEqual(Array.from(curve(from,speed,acceleration,to,.3,.3)),[to,0,0]);
+    const at=curve(from,speed,acceleration,to,.08,.3),next=curve(...at,from,0,.3);
+    assert(next.every((value,i)=>Math.abs(value-at[i])<1e-8));
+    const dt=.00001,before=curve(...at,from,dt,.3);
+    assert(Math.abs((before[0]-at[0])/dt-at[1])<.3);
+  }
+});
 check('unrelated return uses one smaller body offset and resumes after data rebuild',()=>{
   const e=setup(),old=e.surface('detail','c');e.mount(old.node);e.motion.begin(old.node,-1,'b');
   const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);assert.equal(next.body.animateCalls.at(-1).frames[0].transform,'translateY(-3px)');e.tick(30);
@@ -138,11 +148,6 @@ check('disabled content finishes at its real opacity instead of flashing',()=>{
   const next=e.surface('detail','b');next.content._css.opacity='.46';e.mount(next.node);e.motion.paint(next.node);
   assert.equal(next.content.animateCalls.at(-1).frames.at(-1).opacity,.46);
   e.tick(400);assert.equal(Number(computed(next.content).opacity),.46);assert.equal(animations.size,0);
-});
-check('repeated chart feedback cancels the prior fade and returns to base opacity',()=>{
-  const e=setup(),summary=e.el('section','usage-summary',14,220,299,110),chart=e.el('div','trend',28,268,272,48);summary.append(chart);
-  e.motion.reveal(summary);const first=chart.animateCalls[0];e.tick(50);e.motion.reveal(summary);
-  assert(first.cancelled);assert.equal(chart.animateCalls[1].frames.at(-1).opacity,1);e.tick(200);assert.equal(animations.size,0);
 });
 check('navigation never clones an avatar or switches its opacity',()=>{
   const clone=Element.prototype.cloneNode;Element.prototype.cloneNode=()=>{throw Error('No avatar copies allowed')};
@@ -428,7 +433,9 @@ const accountSection=appSource.slice(appSource.indexOf('  function failure(a)'),
 Object.assign(viewCtx,{esc:C.esc,icon:C.icon,tool:C.tool,accountIdentity:C.accountIdentity,displayWindows:C.displayWindows,remaining:C.remaining,disabled:()=>'',now:()=>1900000000,dateTime:()=>'',reset:()=>'',});
 vm.runInContext(accountSection+'\nwindow.testAccountCard=accountCard;',viewCtx);
 const live={email:'fixture@example.test',alias:'测试账号',plan:'plus',ok:true,windows:[{label:'5h',duration_mins:300,used:17,resets_at:1900003600},{label:'周',duration_mins:10080,used:29,resets_at:1900300000}]};
-const base={...C,math:M,esc:C.esc,name:C.accountName,plan:C.planLabel,tool:C.tool,disabled:()=>'',short:M.compactText,accountCard:viewCtx.window.testAccountCard,metricsRow:items=>'<div class="metrics-row">'+items.map(([k,v])=>`<div class="metric"><small>${k}</small><strong class="mono">${v}</strong></div>`).join('')+'</div>',scopeUsage:()=>null,data:{accounts:[live],current:live.email},ui:{scope:live.email,days:30,history:[]},duration:w=>w.duration_mins,reset:()=>'',quotaValue:()=>0,resetValue:()=>0};
+Object.assign(viewCtx,{math:M});
+vm.runInContext(appSource.slice(appSource.indexOf('  function countMarkup('),appSource.indexOf('  function metric('))+'\nwindow.testCountMarkup=countMarkup;',viewCtx);
+const base={...C,countMarkup:viewCtx.window.testCountMarkup,math:M,esc:C.esc,name:C.accountName,plan:C.planLabel,tool:C.tool,disabled:()=>'',short:M.compactText,accountCard:viewCtx.window.testAccountCard,metricsRow:items=>'<div class="metrics-row">'+items.map(([k,v])=>`<div class="metric"><small>${k}</small><strong class="mono">${v}</strong></div>`).join('')+'</div>',scopeUsage:()=>null,data:{accounts:[live],current:live.email},ui:{scope:live.email,days:30,history:[]},duration:w=>w.duration_mins,reset:()=>'',quotaValue:()=>0,resetValue:()=>0};
 check('compact formatting retains exact totals and one decimal',()=>{assert.equal(M.compactText('25149299'),'2514.9万');assert.equal(M.compactText('5341840'),'534.2万');assert.equal(M.compactText('100005000'),'1.0亿');assert.equal(M.compactText('9999'),'9999');assert.equal(M.compactText(null),'—');assert.equal(M.exact('25149299'),'25,149,299');assert.equal(M.compactText('10000000000000000000000000000000'),'100000000000000000000000.0亿')});
 check('personal usage reuses the real account card and refresh action',()=>{const text=viewCtx.window.NXViews.usage(base),card=viewCtx.window.testAccountCard(live,true,'正在使用');assert(text.startsWith(card.replace('data-action="refresh-one"','data-action="usage-refresh"').replace('aria-label="刷新此账号额度"','aria-label="刷新个人用量"')));assert(text.includes('data-email="fixture@example.test"'));assert(!text.includes('data-action="refresh-one"'));assert(text.includes('data-motion-identity="fixture@example.test"'));assert(text.includes('usage-filter'));assert(text.includes('usage-account-details'))});
 check('overview uses the shared brand and a single scrolling account list',()=>{const text=viewCtx.window.NXViews.usage({...base,ui:{...base.ui,scope:'all'}});assert(text.includes(C.brandMark('usage-brand')));assert(text.includes('data-motion-identity="all"'));assert(text.includes('分账号用量'));assert(!text.includes('已计入'));assert.equal((text.match(/usage-filter/g)||[]).length,1);assert(!text.includes('usage-account-details'));const css=fs.readFileSync(path.join(root,'src/ui/common.css'),'utf8');assert(/\.all-usage \.account-usage-list\s*\{[^}]*overflow: visible;/.test(css));assert(/\.sheet-body\.all-usage\s*\{[^}]*overflow-y: auto;/.test(css))});
@@ -436,5 +443,4 @@ check('usage return respects the overview history and other entry routes',()=>{c
 check('missing account data renders a safe identity instead of throwing',()=>{const text=viewCtx.window.NXViews.usage({...base,data:{accounts:[],current:null}});assert(text.includes('current-card'));assert(text.includes('未选择账号'));assert(!text.includes('data-action="usage-refresh"'))});
 check('archived usage never offers a live refresh control',()=>{for(const ok of[true,false]){const archived={...live,archived:true,ok,windows:ok?live.windows:[]};const text=viewCtx.window.NXViews.usage({...base,data:{accounts:[],current:null},ui:{...base.ui,usage:{rows:[archived]}}});assert(text.includes('已归档'));assert(!text.includes('data-action="usage-refresh"'));assert(!text.includes('data-action="refresh-one"'));assert(!text.includes('data-action="reauth"'))}});
 check('quota overview keeps known windows in explicit columns',()=>{const text=viewCtx.window.NXViews.accounts({...base,ui:{quotaScope:'relay',quotaMetric:'quota'}});assert(text.includes('data-window-minutes="300"'));assert(text.includes('data-window-minutes="10080"'));assert(text.includes('data-action="detail"'));const weekly={...live,windows:[live.windows[1]]};const single=viewCtx.window.NXViews.accounts({...base,data:{accounts:[weekly]},ui:{quotaScope:'week',quotaMetric:'quota'}});assert(single.includes('data-window-minutes="10080"'));assert(!single.includes('data-window-minutes="300"'))});
-check('compact personal usage fits the product geometry on paper',()=>{const width=327,height=458,header=50,top=3,bottom=6,card=112,pills=32,summary=148,stats=52,back=30,gaps=4*6;assert(width>=2*14+299);assert(card+pills+summary+stats+back+gaps+top+bottom<=height-header);const css=fs.readFileSync(path.join(root,'src/ui/common.css'),'utf8'),tokens=fs.readFileSync(path.join(root,'src/ui/tokens.css'),'utf8');assert(tokens.includes('--sheet-header-height: 50px; --content-top: 3px;'));assert(!css.includes('data-preview-'));assert(css.includes('width:max-content;max-width:100%;padding:0 10px'));assert(/\.sheet-body\.personal-usage\s*\{[^}]*display: grid;/.test(css))});
 console.log(checks+' UI/motion checks passed');

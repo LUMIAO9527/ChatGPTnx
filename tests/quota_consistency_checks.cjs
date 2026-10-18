@@ -48,7 +48,7 @@ fs.mkdirSync(output,{recursive:true});
           const details=await page.locator('.detail-compact').innerText();
           if(fixture.soft){
             assert(details.includes('12.50'));assert(details.includes('2 次'));
-            const pick=page.locator('.detail-actions .btn.primary');
+            const pick=page.locator('.detail-actions .control.primary');
             assert.equal(await pick.innerText(),used===100?'恢复后接力':'设为下一棒');
             if(used===100){
               await page.evaluate(async()=>{__quotaFixture.relay_wait={id:'fixture',email:__quotaFixture.accounts[1].email,origin:__quotaFixture.current};await NXPreview.refresh();});

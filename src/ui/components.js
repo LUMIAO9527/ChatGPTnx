@@ -35,7 +35,19 @@ window.NXComponents = (() => {
   const icon = (n, c='') => n==='github'
     ? `<svg class="icon ${c}" viewBox="0 0 16 16" aria-hidden="true" style="fill:currentColor;stroke:none"><path d="${githubMark}"></path></svg>`
     : `<svg class="icon ${c}" viewBox="0 0 18 18" aria-hidden="true"><path d="${paths[n] || paths.info}"></path></svg>`;
-  const tool = (i, action, label, attrs='', iconClass='') => `<button class="tool" data-action="${action}" aria-label="${esc(label)}" ${attrs}>${icon(i,iconClass)}</button>`;
+  function actionButton({content='',action='',label='',title='',size='regular',tone='neutral',confirmation=false,iconOnly=false,className='',attrs=''}) {
+    const classes=['control',size==='regular'?'':`control--${size}`,tone==='primary'?'primary':tone==='danger'?'control--danger':'',confirmation?'control--confirmation':'',iconOnly?'control--icon':'',className].filter(Boolean).join(' ');
+    return `<button type="button" class="${classes}" data-action="${esc(action)}"${label?` aria-label="${esc(label)}"`:''}${title?` title="${esc(title)}"`:''} ${attrs}>${content}</button>`;
+  }
+  const tool=(i,action,label,attrs='',iconClass='')=>actionButton({content:icon(i,iconClass),action,label,attrs,iconOnly:true,size:['refresh-one','usage-refresh'].includes(action)?'small':'regular',className:'tool'});
+
+  function selectionButton({label,checked,action,email}) {
+    return actionButton({content:icon('check'),action,label,iconOnly:true,className:'control--check account-select',
+      attrs:`role="checkbox" aria-checked="${!!checked}" data-email="${esc(email)}"`});
+  }
+  function switchButton({label,checked,key}) {
+    return `<button type="button" class="switch" role="switch" aria-label="${esc(label)}" aria-checked="${!!checked}" data-action="toggle" data-key="${esc(key)}"><i aria-hidden="true"></i></button>`;
+  }
 
   const system = [
     {key:'autostart', label:'开机自启'},
@@ -50,8 +62,10 @@ window.NXComponents = (() => {
     {key:'notify_reset_expiry', label:'重置次数到期提醒'},
   ];
   function segmented({label, action, options, value, key, className=''}) {
-    const buttons = options.map(([id, text]) => `<button data-action="${esc(action)}" data-value="${esc(id)}" ${key ? `data-key="${esc(key)}"` : ''} aria-pressed="${String(value)===String(id)}" class="${String(value)===String(id)?'active':''}">${esc(text)}</button>`).join('');
-    return `<div class="segmented ${className}" role="group" aria-label="${esc(label)}">${buttons}</div>`;
+    const buttons=options.map(([id,text])=>actionButton({content:esc(text),action,className:String(value)===String(id)?'active':'',
+      attrs:`data-value="${esc(id)}" ${key?`data-key="${esc(key)}"`:''} aria-pressed="${String(value)===String(id)}"`})).join('');
+    const index=Math.max(0,options.findIndex(([id])=>String(id)===String(value)));
+    return `<div class="segmented ${className}" data-segment="${esc(key?'pref:'+key:action)}" role="group" aria-label="${esc(label)}" style="--segment-index:${index};--segment-count:${options.length}">${buttons}</div>`;
   }
   function settingRow(item, settings) {
     const {key, label, options} = item;
@@ -60,7 +74,7 @@ window.NXComponents = (() => {
       const className = `setting-choice ${key==='appearance'?'appearance-choice':''}`;
       return `<div class="${className}">${copy}${segmented({label, action:'pref', key, options, value:settings[key]??options[0][0], className:'compact'})}</div>`;
     }
-    return `<div class="toggle-line">${copy}<button class="switch" role="switch" aria-label="${esc(label)}" aria-checked="${!!settings[key]}" data-action="toggle" data-key="${esc(key)}"><i></i></button></div>`;
+    return `<div class="toggle-line">${copy}${switchButton({label,checked:settings[key],key})}</div>`;
   }
   const systemSettings = settings => system.map(item=>settingRow(item,settings)).join('');
   const autoRelaySetting = settings => settingRow(automation[0],settings);
@@ -112,6 +126,6 @@ window.NXComponents = (() => {
     }).join('');
     return `<span class="roster-quotas" style="--quota-count:${Math.max(1,windows.length)}" aria-label="${esc(windows.length?'剩余额度':'额度暂不可用')}" title="${esc(windows.length?'剩余额度':'额度暂不可用')}">${cells||'<span class="unavailable">额度暂不可用</span>'}</span>`;
   }
-  return {esc, icon, tool, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
+  return {esc, icon, tool, actionButton, selectionButton, switchButton, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
           notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, readableQuota, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity};
 })();

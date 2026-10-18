@@ -41,7 +41,7 @@
     for (const model of models.values()) release(model);
     restore(); models.clear(); page = null; scene = null;
   };
-  const stop = () => {finish();window.NXDisclosure?.stop();};
+  const stop = () => {finish();window.NXUsageMotion?.stop();window.NXLocalMotion?.stop();window.NXDisclosure?.stop();};
   const run = (node, frames, length = duration, elapsed = 0, delay = 0) => {
     if (!node || !allowed() || elapsed >= length + delay) return;
     // Background state refreshes patch the same DOM. They must not cancel and
@@ -297,7 +297,7 @@
     frameId = requestAnimationFrame(frame);
   };
   const begin = (surface,direction=1,preferredIdentity=null) => {
-    window.NXDisclosure?.stop();
+    window.NXUsageMotion?.stop();window.NXDisclosure?.stop();
     if (!allowed() || !surface || !ensureScene()) { stop(); return; }
     try {
       const now = performance.now(); advance(now); renderModels();
@@ -305,6 +305,7 @@
       const anchor = findAnchor(surface,preferredIdentity) || findAnchor(surface,identity);
       const source = {identity:anchor?.identity||null,avatar:anchor?.avatar?capturePart(anchor.avatar,surface):null,control:primaryControl(surface),surface:contextSurface(surface),card:!!anchor?.root.matches('.current-card'),box:anchor?rect(anchor.root):null};
       const filterNode = surface.querySelector('.usage-filter'), filter = visible(filterNode,surface) ? rect(filterNode) : null;
+      window.NXLocalMotion?.stop();
       cancelAnimations();
       for (const model of models.values()) release(model);
       restore();
@@ -354,13 +355,8 @@
     if(footer){if(page.sharedPath.has(footer))entrance(footer,surface.getBoundingClientRect());else run(footer,fade,duration,elapsed,page.endElapsed-duration);}
     if (!frameId) frameId = requestAnimationFrame(frame);
   };
-  const reveal = node => {
-    if (page && performance.now()-page.start<page.endElapsed) return;
-    if (node?.matches('.usage-summary')) run(node.querySelector('.trend'),[{opacity:.65},{opacity:1}],150);
-    else run(node,[{opacity:.55,transform:'translateY(-2px)'},{opacity:1,transform:'translateY(0)'}],160);
-  };
   window.NXMotion = {
-    begin,paint,reveal,stop,curve:trajectory,enabled:()=>enabled && !preference.matches,
+    begin,paint,stop,settlePage:finish,curve:trajectory,enabled:()=>enabled && !preference.matches,
     setEnabled(value) { enabled=!!value; stop(); paintPreference(); }
   };
   preference.addEventListener('change',()=>{ stop(); paintPreference(); });
