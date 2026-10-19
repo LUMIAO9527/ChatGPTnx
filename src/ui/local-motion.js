@@ -162,9 +162,9 @@ window.NXLocalMotion=(()=>{
     for(const job of jobs)retarget(job.key,job.kind,job.node,snapshot.get(job.key)?.pose,job.goal,job.extent,now,job.pages);
     if(models.size&&!frame)frame=requestAnimationFrame(tick);
   }
-  function select(group,value){
+  function select(group,value,{retainNavigation=false}={}){
     if(!group)return;
-    window.NXMotion?.settlePage();const prior=beforePatch(group);
+    if(!retainNavigation)window.NXMotion?.settlePage();const prior=beforePatch(group);
     const buttons=[...group.querySelectorAll('[data-action]')],index=buttons.findIndex(node=>node.dataset.value===String(value));
     if(index<0)return;
     buttons.forEach((node,i)=>{node.classList.toggle('active',i===index);node.setAttribute('aria-pressed',String(i===index));});

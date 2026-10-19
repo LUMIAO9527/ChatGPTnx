@@ -356,6 +356,22 @@ check('a passive primary paint never mistakes the live radius for a new goal',()
   for(let i=0;i<20;i++){e.tick(10);e.motion.paint(next.node);assert.equal(model.goal.r,12);assert.equal(model.start,0);}
   e.tick(100);assert.equal(model.live.style.position,'');assert.equal(e.test.models.size,0);clean(e);
 });
+check('a floating action retains the border-box contribution beside a flexible return button',()=>{
+  const e=setup(),old=e.surface('home','a');primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1);
+  const next=e.surface('confirm','b'),to=primaryFixture(e,next,'execute-switch',[170,404,143,44],true);
+  Object.assign(to.button._css,{flex:'1 1 0%', 'box-sizing':'border-box','padding-left':'11px','padding-right':'11px','border-left-width':'1px','border-right-width':'1px','min-width':'44px','min-height':'44px'});
+  e.mount(next.node);e.motion.paint(next.node);const slot=e.test.models.get('primary-action').slot;
+  const outerBasis=node=>parseFloat(node.style.paddingLeft)+parseFloat(node.style.paddingRight)+parseFloat(node.style.borderLeftWidth)+parseFloat(node.style.borderRightWidth);
+  assert.equal(outerBasis(slot),24);assert.equal(slot.style.flex,'1 1 0%');assert.equal(slot.style.boxSizing,'border-box');assert.equal(slot.style.minWidth,'44px');
+  e.tick(400);clean(e);
+});
+check('a footer action is not dropped while passing the body scroll boundary during refresh',()=>{
+  const e=setup(),old=e.surface('confirm','b');primaryFixture(e,old,'execute-switch',[170,404,143,44],true);e.mount(old.node);e.motion.begin(old.node,-1,'b');
+  const next=e.surface('detail','b');next.body._css['overflow-y']='auto';next.body._box.height=344;const target=primaryFixture(e,next,'pick',[14,174,174,42]);e.mount(next.node);e.motion.paint(next.node);
+  const m=e.test.models.get('primary-action'),start=m.start;e.tick(40);const pose={...m.pose},velocity={...m.velocity};e.motion.paint(next.node);
+  assert(e.test.models.get('primary-action')===m,'The travelling footer action must survive a passive paint');assert.equal(m.live,target.button);assert.equal(m.start,start);assert.deepEqual({...m.pose},pose);assert.deepEqual({...m.velocity},velocity);
+  assert.equal(next.body.style.transform,'');e.tick(400);clean(e);
+});
 check('late primary controls retire an existing entrance on their ancestor path',()=>{
   const e=setup(),old=e.surface('home','a');primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1);
   const next=e.surface('detail','c'),actions=e.el('section','detail-actions',14,174,299,42);next.body.append(actions);e.mount(next.node);e.motion.paint(next.node);
@@ -385,6 +401,59 @@ check('a stationary shared card yields the one moving role to the main action',(
   const e=setup(),old=e.surface('home','a');contextFixture(old,112);primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1,'a');
   const next=e.surface('detail','a');contextFixture(next,112);primaryFixture(e,next,'current-status',[14,174,299,42]);e.mount(next.node);e.motion.paint(next.node);
   assert.equal(e.test.models.size,1);assert(e.test.models.has('primary-action'));assert(!e.test.models.has('context-surface'));e.tick(400);clean(e);
+});
+check('account entry keeps the black action and selected identity on continuous independent tracks',()=>{
+  const e=setup(),old=e.surface('home','a');contextFixture(old,112);primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);
+  e.motion.begin(old.node,1,'b',{from:'home',to:'detail'});
+  const next=e.surface('detail','b');contextFixture(next,112);next.profile.root._box.top+=25;primaryFixture(e,next,'pick',[14,174,174,42]);e.mount(next.node);e.motion.paint(next.node);
+  assert.equal(e.test.models.has('context-surface'),false);
+  assert(e.test.models.has('primary-action'));assert(e.test.models.has('b:avatar'));assert(e.test.models.has('b:label'));
+  assert.equal(next.profile.name.style.opacity,'');assert(!next.profile.name.style.transform.includes('scale'));
+  e.tick(65);const poses=new Map([...e.test.models].map(([key,m])=>[key,{model:m,pose:{...m.pose},velocity:{...m.velocity},acceleration:{...m.acceleration},start:m.start}]));
+  e.motion.paint(next.node);for(const [key,saved]of poses)assert.equal(e.test.models.get(key).start,saved.start);
+  e.motion.begin(next.node,-1,null,{from:'detail',to:'home'});const back=e.surface('home','a');contextFixture(back,112);primaryFixture(e,back,'relay',[14,173,299,62]);e.mount(back.node);e.motion.paint(back.node);
+  for(const [key,saved]of poses){const m=e.test.models.get(key);assert.equal(m,saved.model);for(const part of ['pose','velocity','acceleration'])for(const property of Object.keys(saved[part]))assert(Math.abs(m[part][property]-saved[part][property])<.00001,key+' '+part+' continuity');}
+  e.tick(1200);assert.equal(e.test.bindings.size,0);clean(e);
+});
+check('settings entry follows the action trajectory while real sections reveal without a page slide',()=>{
+  const e=setup(),nav=(surface,home)=>{const button=e.el('button','control tool',home?279:14,12,32,32);button.setAttribute('data-action',home?'settings':'back');surface.head.append(button);return button;};
+  const old=e.surface('home','a');nav(old,true);e.mount(old.node);e.motion.begin(old.node,1,null,{from:'home',to:'settings'});
+  let current=e.surface('settings','a');nav(current,false);const section=e.el('section','settings-section',14,60,299,160);current.body.append(section);e.mount(current.node);e.motion.paint(current.node);
+  assert(e.test.models.has('navigation-entry'));assert.equal(section.animateCalls.length,0);assert.equal(current.body.animateCalls.length,0);assert.equal(section.style.opacity,'');assert(section.style.clipPath.startsWith('inset('));
+  for(let i=0;i<20;i++){
+    e.tick(12);const m=e.test.models.get('navigation-entry'),saved={pose:{...m.pose},velocity:{...m.velocity},acceleration:{...m.acceleration}};
+    const from=i%2?'home':'settings',to=i%2?'settings':'home';e.motion.begin(current.node,i%2?1:-1,null,{from,to});
+    current=e.surface(to,'a');nav(current,to==='home');if(to==='settings')current.body.append(e.el('section','settings-section',14,60,299,160));e.mount(current.node);e.motion.paint(current.node);
+    assert.equal(e.test.models.get('navigation-entry'),m);assert.deepEqual({...m.pose},saved.pose);assert.deepEqual({...m.velocity},saved.velocity);assert.deepEqual({...m.acceleration},saved.acceleration);
+    assert.equal(current.body.animateCalls.length,0);
+  }
+  e.motion.setEnabled(false);assert.equal(e.test.bindings.size,0);assert.equal(e.test.models.size,0);assert.equal(e.app.querySelectorAll('*').filter(n=>n.__nxMotionRole).length,0);clean(e);
+});
+check('list-to-detail identity includes its real text even when no black source action exists',()=>{
+  const e=setup(),old=e.surface('quota-overview','a',true);old.profile.root.remove();old.row.root.className='quota-overview-row';e.mount(old.node);
+  e.motion.begin(old.node,1,'b',{from:'quota-overview',to:'detail'});const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);
+  assert(e.test.models.has('b:avatar'));assert(e.test.models.has('b:label'));assert(!e.test.models.has('primary-action'));
+  assert.equal(next.profile.name.style.fontSize,'');assert.equal(next.profile.name.style.opacity,'');e.tick(400);clean(e);
+});
+check('a media zoom reverses the actual image without creating a second copy',()=>{
+  const e=setup(),old=e.surface('purchase','a'),button=e.el('button','support-code',210,325,86,86),small=e.el('img','',218,333,70,70);button.append(small);old.body.append(button);e.mount(old.node);
+  e.motion.begin(old.node,1,null,{from:'purchase',to:'support-qr'});const next=e.surface('support-qr','a'),large=e.el('img','support-full-code',46,105,235,235);next.body.append(large);e.mount(next.node);e.motion.paint(next.node);e.tick(75);
+  const m=e.test.models.get('support-media'),pose={...m.pose},velocity={...m.velocity};assert.equal(m.live,large);
+  e.motion.begin(next.node,-1,null,{from:'support-qr',to:'purchase'});const back=e.surface('purchase','a'),target=e.el('button','support-code',210,325,86,86),image=e.el('img','',218,333,70,70);target.append(image);back.body.append(target);e.mount(back.node);e.motion.paint(back.node);
+  assert.equal(e.test.models.get('support-media'),m);assert.equal(m.live,image);assert.deepEqual({...m.pose},pose);assert.deepEqual({...m.velocity},velocity);e.tick(400);clean(e);
+});
+check('usage scope changes translate the shared report without fading or scaling it',()=>{
+  const e=setup(),old=e.surface('usage','all',true);old.node.dataset.page='usage';contextFixture(old,72);
+  const original=e.el('section','usage-summary',14,180,299,148);old.body.append(original);e.mount(old.node);e.motion.begin(old.node,1,'b');
+  const next=e.surface('usage','b');next.node.dataset.page='usage';contextFixture(next,112);
+  const summary=e.el('section','usage-summary',14,222,299,148);next.body.append(summary);e.mount(next.node);e.motion.paint(next.node);
+  const model=e.test.models.get('report:.usage-summary');assert(model);assert.equal(model.pose.y,254);assert.equal(model.goal.y,296);
+  assert.equal(next.body.animateCalls.length,0);assert.equal(summary.animateCalls.length,0);assert(!summary.style.transform.includes('scale'));
+  e.tick(90);const pose={...model.pose},velocity={...model.velocity},acceleration={...model.acceleration};
+  e.motion.begin(next.node,-1,'all');const back=e.surface('usage','all',true);back.node.dataset.page='usage';contextFixture(back,72);
+  const returned=e.el('section','usage-summary',14,180,299,148);back.body.append(returned);e.mount(back.node);e.motion.paint(back.node);
+  assert.equal(e.test.models.get('report:.usage-summary'),model);assert.deepEqual({...model.pose},pose);assert.deepEqual({...model.velocity},velocity);assert.deepEqual({...model.acceleration},acceleration);
+  e.tick(320);assert.equal(returned.style.transform,'');assert.equal(back.filter.style.transform,'');assert.equal(e.test.models.size,0);assert.equal(rafs.size,0);
 });
 function disclosureFixture(kind='details'){
   const e=setup(),surface=e.surface('detail','b');e.mount(surface.node);

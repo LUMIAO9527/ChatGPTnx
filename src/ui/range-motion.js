@@ -1,11 +1,15 @@
-/* Local range motion: split the old and new chart at shared normalized
-   boundaries. Pieces reshape without fading, and remain continuous when a
-   later selection interrupts them. The actual chart retains its semantics. */
+/* One data transition for period, account scope and refreshed usage. Capture
+   the visible plot and counters before patching; unchanged refreshes keep the
+   original deadline. The real chart always retains its semantics. */
 'use strict';
 window.NXUsageMotion = (() => {
   const duration=300, easing='cubic-bezier(.2,0,.2,1)';
   let current=null, frame=0;
   const enabled=()=>window.NXMotion?.enabled()&&typeof Element.prototype.animate==='function';
+  const signature=surface=>JSON.stringify([
+    [...surface.querySelectorAll('[data-count-value]')].map(node=>[node.dataset.countKey,node.dataset.countValue,node.dataset.countFormat]),
+    [...surface.querySelectorAll('.trend > .trend-bar')].map(node=>[node.className,node.style.height])
+  ]);
   const box=(node,plot)=>{
     const r=node.getBoundingClientRect(),p=plot.getBoundingClientRect();
     const sx=p.width/plot.offsetWidth||1,sy=p.height/plot.offsetHeight||1;
@@ -29,7 +33,7 @@ window.NXUsageMotion = (() => {
     prior.layer?.remove();
   }
   function select(surface,value){
-    window.NXLocalMotion?.select(surface.querySelector('.usage-filter'),value);
+    window.NXLocalMotion?.select(surface.querySelector('.usage-filter'),value,{retainNavigation:true});
   }
   function beforePatch(surface,requested=false){
     if(!requested&&current?.surface!==surface)return null;
@@ -44,11 +48,21 @@ window.NXUsageMotion = (() => {
     const counts=new Map([...surface.querySelectorAll('[data-count-value]')].map(node=>[
       node.dataset.countKey,{value:node.__nxCountValue??window.NXMath.count(node.dataset.countValue),format:node.dataset.countFormat}
     ]));
-    stop();return {segments,counts};
+    const clock=current?.surface===surface?{end:current.start+current.length,target:current.target}:null;
+    const target=signature(surface);
+    stop();return {segments,counts,clock,target};
+  }
+  function beforeNavigation(surface){
+    if(surface?.dataset.page==='usage')return beforePatch(surface,true);
+    stop();return null;
   }
   function afterPatch(surface,previous){
     if(!previous||!enabled()||surface.hidden||surface.dataset.page!=='usage')return;
-    const state={surface,layer:null,hidden:[],animations:[],counters:[],start:performance.now()};
+    const target=signature(surface),start=performance.now();
+    if(target===previous.target&&!previous.clock)return;
+    const length=previous.clock?.target===target?Math.min(duration,previous.clock.end-start):duration;
+    if(length<=0)return;
+    const state={surface,layer:null,hidden:[],animations:[],counters:[],start,length,target};
     const plot=surface.querySelector('.trend'),bars=plot?[...plot.querySelectorAll(':scope > .trend-bar')]:[];
     if(plot&&bars.length&&previous.segments.length){
       const targets=bars.map(node=>box(node,plot));
@@ -67,7 +81,7 @@ window.NXUsageMotion = (() => {
         Object.assign(piece.style,{left:toX+'px',top:(to.bottom-toH)+'px',width:toW+'px'});
         piece.style.setProperty('height',toH+'px','important');layer.append(piece);
         const fromTransform=`translate(${fromX-toX}px,${from.bottom-to.bottom}px) scale(${fromW/toW},${from.h/toH})`;
-        state.animations.push(piece.animate([{transform:fromTransform},{transform:'none'}],{duration,easing,fill:'both'}));
+        state.animations.push(piece.animate([{transform:fromTransform},{transform:'none'}],{duration:length,easing,fill:'both'}));
       }
       for(const bar of bars){state.hidden.push([bar,bar.style.getPropertyValue('visibility'),bar.style.getPropertyPriority('visibility')]);bar.style.visibility='hidden';}
       plot.append(layer);state.layer=layer;
@@ -82,7 +96,7 @@ window.NXUsageMotion = (() => {
     const tick=now=>{
       if(current!==state)return;
       if(!enabled()||!surface.isConnected||surface.hidden||surface.dataset.page!=='usage'){stop();return;}
-      const progress=Math.max(0,Math.min(1,(now-state.start)/duration));
+      const progress=Math.max(0,Math.min(1,(now-state.start)/state.length));
       const eased=1-Math.pow(1-progress,3),fraction=BigInt(Math.round(eased*10000));
       for(const counter of state.counters)paintNumber(counter.node,counter.from+(counter.goal-counter.from)*fraction/10000n);
       if(progress===1){stop();return;}
@@ -90,5 +104,5 @@ window.NXUsageMotion = (() => {
     };
     frame=requestAnimationFrame(tick);
   }
-  return {select,beforePatch,afterPatch,stop,active:()=>!!current};
+  return {select,beforePatch,beforeNavigation,afterPatch,stop,active:()=>!!current};
 })();

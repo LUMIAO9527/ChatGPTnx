@@ -99,20 +99,25 @@
       const filterCSS=getComputedStyle(group,'::before'),control=group.querySelector('[aria-pressed="true"]');
       const count=[...app.querySelectorAll('[data-count-value]')].map(node=>({key:node.dataset.countKey,value:node.dataset.countValue,text:node.textContent}));
       const samples=pieces.filter((_,i)=>i===0||i===Math.floor(pieces.length/2)||i===pieces.length-1).map(bounds);
+      const summary=app.querySelector('.usage-summary'),body=summary.closest('.sheet-body');
       return {selected:control?.dataset.value,thumb:filterCSS.transform,count,pieces:pieces.length,samples,
-        opacity:Number(getComputedStyle(app.querySelector('.usage-summary')).opacity),plotOpacity:Number(getComputedStyle(plot).opacity),
+        summary:bounds(summary),filter:bounds(group),transform:getComputedStyle(summary).transform,
+        opacity:Number(getComputedStyle(summary).opacity)*Number(getComputedStyle(body).opacity),plotOpacity:Number(getComputedStyle(plot).opacity),
         card:bounds(app.querySelector('.current-card')),hiddenBars:[...plot.querySelectorAll(':scope > .trend-bar')].filter(node=>getComputedStyle(node).visibility==='hidden').length};
     };
     const originalRange=rangeState();let originalLocal=null;
     for(const step of steps){
       if(step.shared&&!originalLocal)originalLocal=inspectLocalState();
       const before=inspectLayout(),frames=[],start=performance.now();
+      const beforeRange=rangeState();
       const beforeLocal=step.shared?inspectLocalState():null;
       let recording=true;
       const capture=()=>{
-        const moving=[...app.querySelectorAll('*')].filter(n=>n.__nxMotionOwned&&n.style.position==='fixed');
+        if(!recording)return;
+        const moving=[...app.querySelectorAll('*')].filter(n=>n.__nxMotionOwned&&n.style.position==='fixed'&&!n.__nxMotionDecoration);
         const body=app.querySelector('#sheet').hidden?app.querySelector('#home'):app.querySelector('#sheet .sheet-body');
-        frames.push({time:performance.now()-start,moving:moving.map(n=>({role:n.matches('.primary,.relay')?'primary':n.matches('.motion-surface')?'surface':'avatar',...bounds(n),transform:getComputedStyle(n).transform})),slots:[...app.querySelectorAll('*')].filter(n=>n.__nxMotionPlaceholder).length,bodyMotion:!!body?.getAnimations().length,local:step.shared?inspectLocalState():null,range:step.range||step.rangeSelection||step.immediate?rangeState():null,popups:[...app.querySelectorAll('*')].filter(n=>n.__nxPopupActive).length,disclosures:[...app.querySelectorAll('[data-disclosure]')].filter(n=>n.__nxDisclosureIntent!==undefined).map(n=>({key:n.dataset.disclosure,...bounds(n)}))});
+        const secondary=[...app.querySelectorAll('#sheet .sheet-foot > .secondary')].filter(n=>n.getBoundingClientRect().height>0&&!n.closest('[hidden]')).map(n=>{const range=document.createRange();range.selectNodeContents(n);const text=range.getBoundingClientRect(),base=app.getBoundingClientRect();return {text:n.textContent,box:bounds(n),textBox:{x:text.x-base.x,y:text.y-base.y,w:text.width,h:text.height},flex:getComputedStyle(n).flex,opacity:Number(getComputedStyle(n).opacity)};});
+        frames.push({time:performance.now()-start,secondary,moving:moving.map(n=>({role:n.__nxMotionRole||(n.matches('.primary,.relay')?'primary':n.matches('.motion-surface')?'surface':'avatar'),...bounds(n),transform:getComputedStyle(n).transform})),slots:[...app.querySelectorAll('*')].filter(n=>n.__nxMotionPlaceholder).length,reveals:[...app.querySelectorAll('*')].filter(n=>n.__nxMotionRole==='reveal').map(n=>({opacity:Number(getComputedStyle(n).opacity),clip:getComputedStyle(n).clipPath,transform:getComputedStyle(n).transform})),bodyMotion:!!body?.getAnimations().length,local:step.shared?inspectLocalState():null,range:step.report||step.range||step.rangeSelection||step.immediate?rangeState():null,popups:[...app.querySelectorAll('*')].filter(n=>n.__nxPopupActive).length,disclosures:[...app.querySelectorAll('[data-disclosure]')].filter(n=>n.__nxDisclosureIntent!==undefined).map(n=>({key:n.dataset.disclosure,...bounds(n)}))});
         if(recording)requestAnimationFrame(capture);
       };
       capture();
@@ -120,7 +125,7 @@
       if(!step.interrupt)await waitForRest();
       recording=false;
       const after=inspectLayout(),problems=after.problems.filter(p=>!(step.interrupt&&p==='动画结束后样式未释放'));
-      if(frames.some(f=>f.moving.length>1||f.slots>1))problems.push('一个转场出现多个移动元素');
+      if(frames.some(f=>f.moving.length>3||f.slots>3||new Set(f.moving.map(n=>n.role)).size!==f.moving.length||f.moving.some(n=>n.role==='primary')&&f.moving.some(n=>n.role==='surface')))problems.push('转场重复移动同一角色或抢占主按钮');
       if(frames.some(f=>f.moving.some(n=>n.x<-.75||n.y<-.75||n.x+n.w>327.75||n.y+n.h>458.75)))problems.push('移动元素超出面板');
       if(frames.some(f=>f.moving.some(n=>n.role==='primary'&&n.transform!=='none'&&!/^matrix\(1, 0, 0, 1,/.test(n.transform))))problems.push('主按钮文字发生缩放');
       if(step.stable){
@@ -131,6 +136,22 @@
         }
       }
       if(step.hero&&!frames.some(f=>f.moving.some(n=>n.role===step.hero)))problems.push('主要元素没有衔接动画');
+      if(step.footer&&!step.interrupt){
+        const values=frames.filter(f=>f.secondary.length).map(f=>f.secondary[0]);
+        const end=values.at(-1);
+        if(end&&values.some(n=>Math.abs(n.box.w-end.box.w)>.5||Math.abs(n.textBox.x-end.textBox.x)>.5||Math.abs(n.textBox.y-end.textBox.y)>.5))problems.push('返回或取消文字随占位释放跳变');
+      }
+      if(step.accountLink&&!frames.some(f=>f.moving.some(n=>n.role==='primary')&&f.moving.some(n=>n.role==='avatar')))problems.push('账号身份没有伴随主按钮衔接');
+      if(step.entry){
+        if(!frames.some(f=>f.moving.some(n=>n.role==='entry')&&f.reveals.length))problems.push('设置入口和内容没有衔接');
+        if(frames.some(f=>f.bodyMotion||f.reveals.some(n=>n.opacity!==1)))problems.push('设置过渡退化成整页移动或淡入淡出');
+      }
+      if(step.contained){
+        if(!frames.some(f=>f.reveals.length))problems.push('后续页面没有使用分组展开');
+        if(frames.some(f=>f.bodyMotion||f.reveals.some(n=>n.opacity!==1)))problems.push('后续页面退回整页淡入或移动');
+      }
+      if(step.media&&!frames.some(f=>f.moving.some(n=>n.role==='media')))problems.push('图片没有从原图连续放大或缩回');
+      if(step.identityLink&&!frames.some(f=>f.moving.some(n=>n.role==='avatar')))problems.push('列表身份没有接续到详情');
       if(step.disclosure&&!frames.some(f=>f.disclosures.length))problems.push('展开项没有平滑过渡');
       if(step.group&&!frames.some(f=>f.bodyMotion))problems.push('普通切页没有整体过渡');
       if(step.popup&&!frames.some(f=>f.popups))problems.push('浮动提示没有显示或收起动画');
@@ -163,12 +184,22 @@
       if(step.range||step.rangeSelection||step.immediate){
         const rangeFrames=frames.map(frame=>frame.range).filter(Boolean),endRange=rangeState();
         if(rangeFrames.some(value=>value.opacity!==1||value.plotOpacity!==1))problems.push('时间范围切换出现淡入淡出');
-        if(rangeFrames.some(value=>Object.keys(originalRange.card).some(key=>Math.abs(value.card[key]-originalRange.card[key])>.5)))problems.push('时间范围切换移动了账号卡片');
+        if(rangeFrames.some(value=>Object.keys(beforeRange.card).some(key=>Math.abs(value.card[key]-beforeRange.card[key])>.5)))problems.push('时间范围切换移动了账号卡片');
         if(!step.interrupt&&endRange&&(endRange.pieces||endRange.hiddenBars))problems.push('图表动画没有恢复真实柱形');
         if(step.range&&!rangeFrames.some(value=>value.pieces))problems.push('图表没有连续形变');
         if(step.range&&new Set(rangeFrames.filter(value=>value.pieces).map(value=>JSON.stringify(value.samples))).size<2)problems.push('柱形停留在同一动画帧');
         if(step.immediate&&rangeFrames.some(value=>value.pieces))problems.push('关闭动效后仍播放图表动画');
         if(step.rangeReturn&&JSON.stringify(endRange?.count)!==JSON.stringify(originalRange?.count))problems.push('来回切换后数值没有恢复');
+      }
+      if(step.report){
+        const values=frames.map(frame=>frame.range).filter(Boolean),end=rangeState();
+        if(values.some(value=>value.opacity!==1||value.plotOpacity!==1))problems.push('账号范围切换重新淡入用量内容');
+        if(values.some(value=>value.transform!=='none'&&!/^matrix\(1, 0, 0, 1,/.test(value.transform)))problems.push('用量报告文字发生缩放');
+        if(step.reportMove&&new Set(values.map(value=>value.summary.y.toFixed(2))).size<3)problems.push('用量报告没有连续移动');
+        if(step.reportChart&&!values.some(value=>value.pieces))problems.push('账号范围切换没有延续图表形态');
+        if(window.NXMotion.enabled()&&beforeRange&&values[1]&&Math.abs(values[1].summary.y-beforeRange.summary.y)>8)problems.push('报告移动第一帧出现跳变');
+        if(!step.interrupt&&end&&(end.pieces||end.hiddenBars))problems.push('账号范围切换后图表未释放');
+        if(step.reportReturn&&JSON.stringify(end?.count)!==JSON.stringify(originalRange?.count))problems.push('返回总览后数据没有恢复');
       }
       if(step.scroll&&step.top==='bottom'){
         const region=document.querySelector(step.scroll);

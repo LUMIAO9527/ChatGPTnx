@@ -1,4 +1,5 @@
-/* One visual anchor per navigation; stable layout and live DOM underneath. */
+/* A primary action keeps one continuous surface across routes. Account identity
+   and entry controls accompany it; supporting content never moves the page. */
 (() => {
   const preference = matchMedia('(prefers-reduced-motion: reduce)');
   const running = new Set(), animationTargets = new WeakMap();
@@ -32,12 +33,18 @@
     // Keep the original DOM parent, native font and static-position raster origin.
     // Retire positioning and its layout slot together at the exact endpoint.
     restoreNode(model.live);
+    if(model.live)delete model.live.__nxMotionRole;
     if(model.kind==='surface'){restoreNode(model.target);model.live?.remove();}
     model.slot?.remove(); model.slot = null; model.applied = null;
   };
   const cancelAnimations = () => { for (const animation of [...running]) animation.cancel(); running.clear(); };
+  const clearIdentityPlate = () => {
+    if(!page?.plate)return;
+    restoreNode(page.plate.node);page.plate.node.remove();page.plate=null;
+  };
   const finish = () => {
     cancelAnimationFrame(frameId); frameId = 0; cancelAnimations();
+    clearIdentityPlate();
     for (const model of models.values()) release(model);
     restore(); models.clear(); page = null; scene = null;
   };
@@ -75,6 +82,7 @@
       (a + 6*c3*u + 12*c4*u*u + 20*c5*u**3) / (length*length)];
   };
   const travelTime = model => {
+    if(model.kind==='reveal')return moveDuration;
     // Allow enough braking distance for incoming momentum. Forcing a reversal
     // into a tiny excursion produces an abrupt, high-acceleration turn.
     // Planning happens once, outside the frame loop.
@@ -125,9 +133,9 @@
     if (!(sx > 0 && sy > 0 && box.width > 0 && box.height > 0)) return null;
     return {x:(box.left+box.width/2-app.left)/sx, y:(box.top+box.height/2-app.top)/sy, w:box.width/sx, h:box.height/sy};
   };
-  const visible = (node, surface) => {
+  const visible = (node, surface, scrollClip=true) => {
     if (!node) return false;
-    const body=surface.querySelector('.sheet-body');
+    const body=scrollClip?surface.querySelector('.sheet-body'):null;
     const box = node.getBoundingClientRect(), viewport = (body?.contains(node)?body:surface).getBoundingClientRect();
     return box.width>0 && box.height>0 && box.bottom>viewport.top && box.top<viewport.bottom && box.right>viewport.left && box.left<viewport.right;
   };
@@ -136,7 +144,24 @@
     const card = [...surface.querySelectorAll('.current-card')].find(node => node.dataset.motionIdentity === identity);
     const root = card || [...surface.querySelectorAll('.row, .quota-overview-row, .account-usage-row, .confirm-account')].find(node => node.dataset.email === identity);
     if (!root || !visible(root, surface)) return null;
-    return {identity, root, avatar:root.querySelector('.avatar, .usage-brand')};
+    return {identity, root, avatar:root.querySelector('.avatar, .usage-brand'),label:root.querySelector('.identity-copy, .meta, .confirm-account-copy, .quota-overview-main .identity-title')};
+  };
+  const entryControl = (surface,route={}) => {
+    const homeRoute=route.from==='home'?route.to:route.from;
+    const action={settings:'settings',usage:'usage-all','quota-overview':'quota-overview',add:'add'}[homeRoute];
+    const node=surface?.querySelector(surface.id==='home'&&action?`[data-action="${action}"]`:'.sheet-head [data-action="back"]');
+    const part=node&&capturePart(node,surface);
+    return part?{node,...part,r:parseFloat(getComputedStyle(node).borderRadius)||0}:null;
+  };
+  const sharedMedia = surface => {
+    const node=surface?.querySelector('.support-code img, .support-full-code'),part=node&&capturePart(node,surface);
+    return part?{node,...part}:null;
+  };
+  const surfaceTone = node => {
+    let color=node&&getComputedStyle(node).backgroundColor;
+    if(!color||color==='transparent'||/rgba\([^)]*,\s*0\)$/.test(color))color=getComputedStyle(scene.app).backgroundColor;
+    const rgb=(color?.match(/[\d.]+/g)||[]).slice(0,3).map(Number);
+    return rgb.length===3?rgb:[255,255,255];
   };
   const primaryControl = surface => {
     if (!surface) return null;
@@ -152,22 +177,37 @@
     const existing=models.get('context-surface'),css=getComputedStyle(node);
     return {node,...value,r:existing?.target===node?existing.goal.r:parseFloat(css.borderRadius)||0,color:existing?.target===node?existing.color:css.backgroundColor};
   };
+  const reportParts = surface => {
+    const parts=new Map();
+    if(surface?.dataset.page!=='usage')return parts;
+    for(const selector of ['.usage-filter','.usage-summary']){
+      const node=surface.querySelector(selector);
+      if(visible(node,surface))parts.set(selector,{node,box:rect(node)});
+    }
+    return parts;
+  };
   const capturePart = (node,surface) => {
-    if (!visible(node,surface)) return null;
+    const floating=node?.__nxMotionOwned&&node.style.position==='fixed';
+    if (!visible(node,floating?scene.app:surface,!floating)) return null;
     const box = node.getBoundingClientRect();
     // A partially clipped control or avatar uses the ordinary page entrance.
-    for (let parent=node.parentNode; parent && parent!==surface; parent=parent.parentNode) {
+    // A live fixed anchor already escapes that clip; measuring its travelling
+    // pose must not discard it when a poll arrives between footer and body.
+    for (let parent=floating?surface:node.parentNode; parent && parent!==surface; parent=parent.parentNode) {
       const css=getComputedStyle(parent), clip=parent.getBoundingClientRect();
       if (['hidden','auto','scroll','clip'].includes(css.overflowY) && (box.top<clip.top-.5 || box.bottom>clip.bottom+.5)) return null;
       if (['hidden','auto','scroll','clip'].includes(css.overflowX) && (box.left<clip.left-.5 || box.right>clip.right+.5)) return null;
     }
-    if (node.scrollWidth>node.clientWidth+1) return null;
+    if (!floating&&node.scrollWidth>node.clientWidth+1) return null;
     return {box:rect(node),text:node.textContent,font:parseFloat(getComputedStyle(node).fontSize)||0};
   };
   const prepareFixed = model => {
     const node = model.live, css=getComputedStyle(node), slot = document.createElement('span');
     slot.__nxMotionPlaceholder = true; slot.setAttribute('aria-hidden','true'); slot.inert = true;
     Object.assign(slot.style, {display:css.display==='block'?'block':'inline-block', flex:css.flex||'0 0 auto', alignSelf:css.alignSelf, width:`${model.goal.w}px`, height:`${model.goal.h}px`, visibility:'hidden', pointerEvents:'none',
+      boxSizing:css.boxSizing,minWidth:css.minWidth,minHeight:css.minHeight,maxWidth:css.maxWidth,maxHeight:css.maxHeight,
+      paddingTop:css.paddingTop,paddingRight:css.paddingRight,paddingBottom:css.paddingBottom,paddingLeft:css.paddingLeft,
+      borderStyle:'solid',borderColor:'transparent',borderTopWidth:css.borderTopWidth,borderRightWidth:css.borderRightWidth,borderBottomWidth:css.borderBottomWidth,borderLeftWidth:css.borderLeftWidth,
       marginTop:css.marginTop,marginRight:css.marginRight,marginBottom:css.marginBottom,marginLeft:css.marginLeft,verticalAlign:css.verticalAlign});
     node.parentNode.insertBefore(slot, node); model.slot = slot;
     // Fixed positioning escapes the list's scroll clip without reparenting the
@@ -189,10 +229,11 @@
     // changes the glyph raster phase at fractional Windows display scales,
     // even when the final bounding rectangles agree to a fraction of a pixel.
     for (const [property,value] of Object.entries({transition:'none', position:'fixed', left:'auto', top:'auto', right:'auto', bottom:'auto', margin:'0', width:`${model.goal.w}px`, height:`${model.goal.h}px`, 'z-index':'6', 'pointer-events':'none', 'transform-origin':'0 0', transform:'none', 'will-change':'transform'})) style(node, property, value);
-    if(model.kind==='control') {
+    if(model.kind==='control'||model.kind==='label') {
       // A button changes its physical surface, rather than scaling its text.
       // Fixed positioning isolates these size writes from the document layout.
-      for(const [property,value] of Object.entries({'min-width':'0','min-height':'0','max-width':'none','max-height':'none',left:`${model.goal.x-model.goal.w/2}px`,top:`${model.goal.y-model.goal.h/2}px`}))style(node,property,value);
+      for(const [property,value] of Object.entries({'min-width':'0','min-height':'0','max-width':'none','max-height':'none'}))style(node,property,value);
+      if(model.kind==='control'){style(node,'left',`${model.goal.x-model.goal.w/2}px`);style(node,'top',`${model.goal.y-model.goal.h/2}px`);}
     }
     model.base = rect(node); model.cssWidth = model.goal.w; model.cssHeight = model.goal.h;
     if (!model.base) throw new Error('Shared element bounds unavailable');
@@ -209,13 +250,14 @@
     const changed = model.navigation !== page || Object.keys(goal).some(property => Math.abs(model.goal[property]-goal[property]) > .01);
     if (model.live !== live || model.navigation !== page) {
       release(model); model.live = live; model.base = goal;
+      live.__nxMotionRole=kind==='reveal'?'reveal':key==='navigation-entry'?'entry':key==='primary-action'?'primary':key==='support-media'?'media':kind==='surface'?'surface':['region','label'].includes(kind)?'identity':'avatar';
       if(kind==='surface'){
         model.target=extra.target;model.color=extra.color;
         live.__nxMotionPlaceholder=true;live.setAttribute('aria-hidden','true');live.inert=true;live.className='motion-surface';
         model.target.insertBefore(live,model.target.firstChild);style(model.target,'background-color','transparent');
         for(const [property,value] of Object.entries({position:'fixed',left:`${goal.x-goal.w/2}px`,top:`${goal.y-goal.h/2}px`,width:`${goal.w}px`,height:`${goal.h}px`,'z-index':'-1','background-color':extra.color,'pointer-events':'none',transition:'none','transform-origin':'0 0'}))style(live,property,value);
       }
-      else if (kind === 'fixed' || kind === 'control') { model.goal = goal; prepareFixed(model); }
+      else if (kind === 'fixed' || kind === 'control'||kind==='label') { model.goal = goal; prepareFixed(model); }
       else { style(live,'transition','none'); style(live,'transform-origin','0 0'); style(live,'will-change','transform'); }
     }
     model.goal = goal;
@@ -232,7 +274,9 @@
     page.stationaryCard=source?.card && target?.root.matches('.current-card') && targetBox && Object.keys(targetBox).every(key=>Math.abs(targetBox[key]-source.box[key])<.25);
     const control=primaryControl(surface),filter=surface.querySelector('.usage-filter'),context=contextSurface(surface);
     const sharedSurface=source?.surface&&context&&['x','y','w','h'].some(key=>Math.abs(source.surface.box[key]-context.box[key])>.25);
-    const chosen=sharedSurface?'surface':source?.control&&control?'control':page.filter&&visible(filter,surface)?'filter':source?.avatar&&target?.avatar?'avatar':null;
+    const report=surface.dataset.page==='usage'&&page.report.size>0;
+    // A neutral account card must never take the black action's moving role.
+    const chosen=source?.control&&control?'control':sharedSurface?'surface':!report&&page.filter&&visible(filter,surface)?'filter':source?.avatar&&target?.avatar?'avatar':null;
     const key=chosen==='surface'?'context-surface':chosen==='control'?'primary-action':chosen==='avatar'?source.identity+':avatar':'usage-filter';
     const live=chosen==='surface'?context.node:chosen==='control'?control.node:chosen==='avatar'?target.avatar:filter;
     const existing=models.get(key);
@@ -251,7 +295,8 @@
       box={...box,r:existing?.live===live&&existing.slot?existing.goal.r:control.r};
       upsert(key,'control',{...source.control.box,r:source.control.r},box,live);
       for(let node=live;node&&node!==surface;node=node.parentNode)page.sharedPath.add(node);
-      if(source.control.text!==control.text)run(live.querySelector('.control-content'),fade,180,performance.now()-page.start,40);
+      const crossing=page.accountLink&&source?.avatar&&target?.avatar&&!page.stationaryCard;
+      if(source.control.text!==control.text)run(live.querySelector('.control-content'),fade,crossing?80:180,performance.now()-page.start,crossing?220:40);
     } else if(chosen==='avatar'&&box&&(existing||capturePart(live,surface))) {
       if(existing?.live===live&&existing.applied) {
         const liveBox=rect(live),p=existing.applied;
@@ -263,13 +308,90 @@
       if(existing?.live===live&&existing.applied){const p=existing.applied,w=box.w/p.sx,h=box.h/p.sy;box={x:box.x-p.x-(box.w-w)/2,y:box.y-p.y-(box.h-h)/2,w,h};}
       upsert(key,'live',page.filter,box,live);page.sharedPath.add(live);
     }
+    // The selected account travels alongside the action, never in its place.
+    // Name, membership and subtitle form one unscaled block, so a travelling
+    // name never collides with a subtitle already at its destination.
+    page.linkedIdentity=!!(page.accountLink&&['control','avatar'].includes(chosen)&&source?.avatar&&target?.avatar&&!page.stationaryCard);
+    if(page.linkedIdentity){
+      const live=target.avatar,key=source.identity+':avatar',prior=models.get(key);
+      let goal=rect(prior?.live===live&&prior.slot?prior.slot:live);
+      if(goal&&(prior||capturePart(live,surface)))upsert(key,'fixed',source.avatar.box,goal,live);
+      if(source.label&&target.label){
+        const key=source.identity+':label',prior=models.get(key),goal=rect(prior?.live===target.label&&prior.slot?prior.slot:target.label);
+        if(goal)upsert(key,'label',source.label.box,goal,target.label);
+      }
+      if(chosen==='control'&&models.has(source.identity+':label')){
+        if(page.plate?.root!==target.root){
+          clearIdentityPlate();const node=document.createElement('span');node.className='motion-identity-plate';node.__nxMotionRetained=true;node.__nxMotionDecoration=true;node.setAttribute('aria-hidden','true');node.inert=true;
+          target.root.insertBefore(node,target.root.firstChild);page.plate={node,root:target.root,from:source.tone,to:surfaceTone(target.root),color:source.tone,avatar:rect(target.avatar),label:rect(target.label)};
+          for(const [property,value]of Object.entries({position:'fixed','z-index':'-1','pointer-events':'none',transition:'none','border-radius':'16px'}))style(node,property,value);
+        }
+        page.plate.avatar=models.get(source.identity+':avatar')?.goal||rect(target.avatar);page.plate.label=models.get(source.identity+':label')?.goal||rect(target.label);
+        // Account information is one foreground surface while crossing an
+        // action. Its native text never disappears behind the black button.
+        for(let node=target.root;node&&node!==surface;node=node.parentNode){
+          if(node===target.root||getComputedStyle(node).willChange?.includes('opacity')){
+            if(getComputedStyle(node).position==='static')style(node,'position','relative');
+            style(node,'z-index','8');
+          }
+        }
+      }
+    }
+    if(!page.linkedIdentity||chosen!=='control')clearIdentityPlate();
+    const media=page.media&&sharedMedia(surface);
+    page.linkedMedia=!!media;
+    if(media){
+      const prior=models.get('support-media'),goal=rect(prior?.live===media.node&&prior.slot?prior.slot:media.node);
+      if(goal)upsert('support-media','fixed',page.media.box,goal,media.node);
+    }
+    const anchored=['primary-action','context-surface',source?.identity+':avatar'].some(key=>page.active.has(key));
+    page.entryActive=!!(page.entry&&!anchored&&!report&&!media);
+    if(page.entryActive){
+      const target=entryControl(surface,page.route),prior=models.get('navigation-entry');
+      const goal=target&&rect(prior?.live===target.node&&prior.slot?prior.slot:target.node);
+      page.entryMoving=!!(goal&&(prior||['x','y','w','h'].some(key=>Math.abs(page.entry.box[key]-goal[key])>.25)));
+      if(goal){
+        upsert('navigation-entry','control',{...page.entry.box,r:page.entry.r},{...goal,r:prior?.live===target.node&&prior.slot?prior.goal.r:target.r},target.node);
+        style(target.node,'pointer-events','auto');
+      }
+      // Reveal real sections in place. One clock survives interrupted return
+      // and passive rendering; there is no outgoing page copy or lateral slide.
+      const body=surface.id==='home'?surface:surface.querySelector('.sheet-body');
+      const sections=[...(body?.querySelectorAll('.settings-section')||[])];
+      const groups=surface.id==='home'?[...surface.children].filter(node=>!node.matches('.header, .status-region, .status-stack')):sections.length?sections:[...(body?.children||[])];
+      let index=0;
+      for(const node of groups){
+        if(!visible(node,surface)||node.__nxMotionPlaceholder||node===page.sharedCard&&page.stationaryCard)continue;
+        const model=upsert('entry-content:'+index++,'reveal',{open:0},{open:1},node);
+        if(model){page.reportNodes.add(node);for(let parent=node;parent&&parent!==surface;parent=parent.parentNode)page.sharedPath.add(parent);}
+      }
+    }
+    if(report)for(const [selector,from] of page.report){
+      const node=surface.querySelector(selector);if(!visible(node,surface))continue;
+      const key='report:'+selector,prior=models.get(key),goal=rect(node);
+      if(prior?.live===node&&prior.applied){goal.x-=prior.applied.x;goal.y-=prior.applied.y;}
+      upsert(key,'region',from.box,goal,node);
+      page.reportNodes.add(node);
+      for(let parent=node;parent&&parent!==surface;parent=parent.parentNode)page.sharedPath.add(parent);
+    }
     for (const [key,model] of models) if (!page.active.has(key)) { release(model); models.delete(key); }
     for (const model of models.values()) for (let node=model.live; node && node!==surface; node=node.parentNode) page.sharedPath.add(node);
   };
   const renderModels = () => {
     // No layout/style reads, element allocation or DOM replacement in this loop.
     for (const model of models.values()) {
-      const p = model.pose, base = model.kind === 'fixed' ? model.base : model.goal;
+      const p = model.pose, base = model.kind === 'fixed'||model.kind==='label' ? model.base : model.goal;
+      if(model.kind==='reveal'){
+        const open=Math.max(0,Math.min(1,p.open));
+        style(model.live,'transform',`translate(0px,${((1-open)*10).toFixed(5)}px)`);
+        style(model.live,'clip-path',`inset(0 0 ${((1-open)*100).toFixed(5)}% 0 round 16px)`);
+        continue;
+      }
+      if(model.kind==='region'||model.kind==='label'){
+        const x=p.x-p.w/2-(base.x-base.w/2),y=p.y-p.h/2-(base.y-base.h/2);
+        style(model.live,'transform',`translate(${x.toFixed(5)}px,${y.toFixed(5)}px)`);
+        model.applied={x:Number(x.toFixed(5)),y:Number(y.toFixed(5))};continue;
+      }
       if(model.kind==='control'||model.kind==='surface') {
         style(model.live,'left',`${model.goal.x-model.goal.w/2}px`);style(model.live,'top',`${model.goal.y-model.goal.h/2}px`);
         style(model.live,'width',`${p.w}px`);style(model.live,'height',`${p.h}px`);style(model.live,'border-radius',`${Math.max(0,p.r)}px`);
@@ -282,11 +404,21 @@
       style(model.live,'transform',`translate(${number(x*rx)}px,${number(y*ry)}px) scale(${number(sx)},${number(sy)})`);
       model.applied = {x:x*rx,y:y*ry,sx,sy};
     }
+    if(page?.plate){
+      const plate=page.plate,a=models.get(page.source.identity+':avatar')?.pose||plate.avatar,l=models.get(page.source.identity+':label')?.pose||plate.label;
+      const label=models.get(page.source.identity+':label')?.goal||plate.label;
+      const left=Math.min(a.x-a.w/2,l.x-l.w/2)-6,top=Math.min(a.y-a.h/2,l.y-l.h/2)-6;
+      const right=Math.max(a.x+a.w/2,l.x-l.w/2+label.w)+6,bottom=Math.max(a.y+a.h/2,l.y-l.h/2+label.h)+6;
+      const progress=trajectory(0,0,0,1,Math.max(0,performance.now()-page.start)/1000,moveDuration/1000)[0];
+      plate.color=plate.from.map((value,index)=>value+(plate.to[index]-value)*progress);
+      for(const [key,value]of Object.entries({left:left+'px',top:top+'px',width:(right-left)+'px',height:(bottom-top)+'px','background-color':`rgb(${plate.color.map(n=>n.toFixed(3)).join(',')})`}))style(plate.node,key,value);
+    }
   };
   const settle = now => {
     for (const [key,model] of models) if (now>=model.start+model.length) {
       release(model); models.delete(key); page.completed.add(key);
     }
+    if(page.plate&&!models.has(page.source.identity+':avatar')&&!models.has(page.source.identity+':label'))clearIdentityPlate();
   };
   const frame = now => {
     frameId = 0;
@@ -296,20 +428,24 @@
     if (elapsed>1100 || (elapsed>=page.endElapsed && !models.size)) { finish(); return; }
     frameId = requestAnimationFrame(frame);
   };
-  const begin = (surface,direction=1,preferredIdentity=null) => {
-    window.NXUsageMotion?.stop();window.NXDisclosure?.stop();
+  const begin = (surface,direction=1,preferredIdentity=null,route={}) => {
+    window.NXDisclosure?.stop();
     if (!allowed() || !surface || !ensureScene()) { stop(); return; }
     try {
       const now = performance.now(); advance(now); renderModels();
+      const usage=window.NXUsageMotion?.beforeNavigation(surface),report=reportParts(surface);
       const identity = surface.querySelector('.current-card')?.dataset.motionIdentity || null;
       const anchor = findAnchor(surface,preferredIdentity) || findAnchor(surface,identity);
-      const source = {identity:anchor?.identity||null,avatar:anchor?.avatar?capturePart(anchor.avatar,surface):null,control:primaryControl(surface),surface:contextSurface(surface),card:!!anchor?.root.matches('.current-card'),box:anchor?rect(anchor.root):null};
+      const source = {identity:anchor?.identity||null,avatar:anchor?.avatar?capturePart(anchor.avatar,surface):null,label:anchor?.label?capturePart(anchor.label,surface):null,tone:page?.plate?.color||surfaceTone(anchor?.root),control:primaryControl(surface),surface:anchor?.root.matches('.current-card')?contextSurface(surface):null,card:!!anchor?.root.matches('.current-card'),box:anchor?rect(anchor.root):null};
+      const entry=route.from&&route.to&&route.from!==route.to?entryControl(surface,route):null;
+      const media=['purchase','support-qr'].includes(route.from)&&['purchase','support-qr'].includes(route.to)&&route.from!==route.to?sharedMedia(surface):null;
       const filterNode = surface.querySelector('.usage-filter'), filter = visible(filterNode,surface) ? rect(filterNode) : null;
       window.NXLocalMotion?.stop();
       cancelAnimations();
+      clearIdentityPlate();
       for (const model of models.values()) release(model);
       restore();
-      page = {start:now,direction,identity,source,filter,contentDelay:0,endElapsed:duration,active:new Set(),completed:new Set(),animated:new WeakSet(),sharedPath:new Set(),sharedCard:null};
+      page = {start:now,direction,identity,source,filter,usage,report,entry,media,route,accountLink:route.from==='detail'||route.to==='detail'||route.from==='quota-overview'||route.to==='quota-overview',reportNodes:new Set(),contentDelay:0,endElapsed:duration,active:new Set(),completed:new Set(),animated:new WeakSet(),sharedPath:new Set(),sharedCard:null};
     } catch { stop(); }
   };
   const paint = surface => {
@@ -320,6 +456,7 @@
       advance(now); page.active.clear();
       for (const node of page.sharedPath) if (!surface.contains(node)) page.sharedPath.delete(node);
       bindShared(surface); renderModels(); settle(now);
+      if(page.usage){window.NXUsageMotion?.afterPatch(surface,page.usage);page.usage=null;}
       // Release detached nodes after a real DOM rebuild, without touching effects
       // or positioning on nodes that a background patch kept alive.
       for (const node of [...bindings.keys()]) if (!surface.contains(node)) restoreNode(node);
@@ -332,6 +469,7 @@
     let section = 0;
     const entrance = (node,clip=viewport) => {
       if (node.hidden || node.__nxMotionPlaceholder || node.matches('.header, .status-region, .status-stack')) return;
+      if(page.reportNodes.has(node))return;
       if (node===page.sharedCard && page.stationaryCard) return;
       // Never translate or fade the parent of a moving real control. Animate
       // its siblings individually; otherwise two coordinate systems compete.
@@ -343,16 +481,25 @@
       if (node.__nxMotionOwned) return;
       const bounds = node.getBoundingClientRect();
       if (bounds.bottom<=clip.top || bounds.top>=clip.bottom || bounds.right<=clip.left || bounds.left>=clip.right) return;
-      const delay = Math.min(section++*stagger,maxStagger);
-      page.endElapsed = Math.max(page.endElapsed,duration+delay);
+      // Leave the travel corridor clear. Secondary actions and quota text
+      // appear as the identity and black surface reach their resting places.
+      const waitForHero=page.linkedIdentity||page.linkedMedia||models.has('primary-action')&&node.matches('.secondary');
+      const delay = waitForHero?220:Math.min(section++*stagger,maxStagger),length=waitForHero?80:duration;
+      page.endElapsed = Math.max(page.endElapsed,length+delay);
       const fits = distance>0 ? bounds.bottom+distance<=clip.bottom : bounds.top+distance>=clip.top;
-      run(node,models.size||page.stationaryCard||node.matches('.current-card, .usage-filter') || !fits ? fade : frames,duration,elapsed,delay);
+      run(node,models.size||page.stationaryCard||node.matches('.current-card, .usage-filter') || !fits ? fade : frames,length,elapsed,delay);
     };
-    if(models.size||page.stationaryCard){for (const node of body.children) entrance(node);}
+    if(models.size||page.stationaryCard||page.reportNodes.size){for (const node of body.children) entrance(node);}
     else run(body,frames,duration,elapsed);
-    run(surface.querySelector('.sheet-head h2, .header .brand'),fade,140,elapsed);
+    // The travelling entry crosses the title's resting position. Show the
+    // title once that corridor is clear, rather than passing through its text.
+    run(surface.querySelector('.sheet-head h2, .header .brand'),fade,page.entryMoving?90:140,elapsed,page.entryMoving?210:0);
     const footer=surface.querySelector('.sheet-foot');
-    if(footer){if(page.sharedPath.has(footer))entrance(footer,surface.getBoundingClientRect());else run(footer,fade,duration,elapsed,page.endElapsed-duration);}
+    if(footer){if(page.sharedPath.has(footer))entrance(footer,surface.getBoundingClientRect());else run(footer,fade,page.linkedIdentity?80:duration,elapsed,page.linkedIdentity?220:page.endElapsed-duration);}
+    if(models.has('primary-action')){
+      const notification=surface.querySelector('.status-dock .status-notification');
+      if(notification){run(notification,fade,80,elapsed,220);style(notification,'pointer-events','none');}
+    }
     if (!frameId) frameId = requestAnimationFrame(frame);
   };
   window.NXMotion = {

@@ -20,11 +20,12 @@ window.NXViews.usage = c => {
   const bars=groups.map(g=>{
     const missing=!g.recorded,partial=g.complete<g.length,isToday=!lifetime&&g.first<=u.period.end&&g.last>=u.period.end;
     const height=missing?0:Math.max(g.tokens===0n?0:isToday?8:5,Number(g.tokens*10000n/max)/100);
-    const range=g.label||`${g.first}${g.first===g.last?'':' — '+g.last}`,tip=`${range} · ${missing?'无记录':math.compactText(g.tokens)+' Tokens'}${partial?` · 已记录 ${g.recorded}/${g.length} 天`:''}`;
+    const range=g.label||`${g.first}${g.first===g.last?'':' — '+g.last}`,tip=`${range} · ${missing?'无记录':math.compactText(g.tokens)+' Tokens'}`;
     return `<i class="trend-bar ${missing?'missing':partial?'partial':g.tokens===0n?'zero':''} ${isToday?'today':''}" style="height:${height}%" tabindex="0" role="img" aria-label="${esc(tip)}" data-float-tip="${esc(tip)}"></i>`;
   }).join('');
   const today=u?.daily?.find(d=>d.date===u.period.end);
-  const chart=`<section class="usage-trend"><div class="usage-chart-heading"><strong>${lifetime?'月度用量':'用量趋势'}</strong><span>${groupLabel}${today?' · 今日 '+math.compactText(today.tokens):''}</span></div><div class="trend" role="group" aria-label="Token 用量趋势">${bars||`<span class="usage-chart-empty">${u?'暂无用量记录':'正在读取…'}</span>`}</div><div class="trend-labels"><span>${chartStartLabel}</span><span>${chartEndLabel}</span></div></section>`;
+  const todayLabel=today?` · 今日 <span class="usage-today mono" data-count-key="usage-today" data-count-value="${math.count(today.tokens)??''}" data-count-format="tokens">${countMarkup(today.tokens)}</span>`:'';
+  const chart=`<section class="usage-trend"><div class="usage-chart-heading"><strong>${lifetime?'月度用量':'用量趋势'}</strong><span>${groupLabel}${todayLabel}</span></div><div class="trend" role="group" aria-label="Token 用量趋势">${bars||`<span class="usage-chart-empty">${u?'暂无用量记录':'正在读取…'}</span>`}</div><div class="trend-labels"><span>${chartStartLabel}</span><span>${chartEndLabel}</span></div></section>`;
   const report=header+`<section class="usage-summary" aria-label="用量统计">${hero}${chart}</section>`;
   let lower;
   if(all){

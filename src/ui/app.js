@@ -253,12 +253,12 @@
     return `<header class="sheet-head">${tool('back','back','返回')}<h2 id="sheet-title" tabindex="-1">${esc(title)}</h2>${actions}${config.demo?'<span class="demo-tag">演示</span>':''}</header>`;
   }
   function show(page, target=null, push=true, saved=null) {
-    window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','edit','confirm','remove','reauth'].includes(page)?target:null);
     resetConfirmation=null;ui.resumeClearConfirm=false;
     const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message','resume-clear':'resume-history'};
     const initial=page;
     if(Object.hasOwn(aliases,page))page='settings';
     if(page==='edit')page='detail';
+    window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','confirm','remove','reauth'].includes(page)?target:null,{from:ui.page||'home',to:page});
     const returningToSettings = page==='settings' && saved?.page==='settings';
     if(page==='settings' && !returningToSettings){ui.disclosures.clear();ui.fullCollections.clear();}
     if(page==='detail'){ui.disclosures.clear();ui.resetExpanded.clear();}
@@ -278,7 +278,7 @@
     window.NXMotion?.paint(sheet);
   }
   function closeSheet(animate=true) {
-    if(ui.page&&animate)window.NXMotion?.begin(sheet, -1);
+    if(ui.page&&animate)window.NXMotion?.begin(sheet, -1,null,{from:ui.page,to:'home'});
     else window.NXMotion?.stop();
     resetConfirmation=null;ui.resumeClearConfirm=false;
     feedback.clear();clearNotification();navigation.invalidate();ui.recording=null;
@@ -351,8 +351,7 @@
   let composingField=null, deferredSheet=false;
   function renderSheet(preserve=true,usageTransition=false) {
     if(preserve&&composingField?.isConnected&&sheet.contains(composingField)){deferredSheet=true;return;}
-    if(usageTransition)window.NXMotion?.settlePage();
-    const rangePose=preserve&&ui.page==='usage'?window.NXUsageMotion?.beforePatch(sheet,usageTransition):null;
+    const rangePose=preserve&&ui.page==='usage'?window.NXUsageMotion?.beforePatch(sheet,true):null;
     const position=preserve?captureScroll(sheet):null;
     const key=preserve?focusKey(document.activeElement):null;
     const a=data.accounts.find(a=>a.email===ui.email), attr=`data-email="${esc(a?.email||'')}"`;

@@ -224,6 +224,9 @@ h3 { font-size: var(--font-page-title); font-weight: 620; }
 .track { height: 5px; margin-top: var(--space-3); background: var(--surface-2); overflow: hidden; }
 .track > span { height: 100%; background: var(--ink); display: block; border-radius: inherit; }
 .low .track > span { background: var(--danger); }
+:root[data-motion="on"] .track > span {
+  transition:width 300ms cubic-bezier(.2,0,.2,1),background-color 180ms var(--ease);
+}
 .low b { color: var(--danger); }
 .reset { color: var(--muted); font-size: var(--font-caption); font-weight: 400; }
 .relay { width: 100%; height: 62px; min-height: 62px; flex: 0 0 62px; display: flex; align-items: center; justify-content: space-between;
@@ -775,7 +778,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .resume-inline-clear-slot { display:flex; flex:0 0 48px; width:48px; min-width:48px; align-items:center; justify-content:center; }
 .resume-inline-clear:not(.control--danger) { color:var(--muted); }
 
-/* Period changes reshape the plot in place; no parent opacity is animated. */
+/* Scope, period and refreshed data reshape the same plot in place. */
 .usage-report .trend { position:relative; }
 .range-morph-layer { position:absolute; inset:0; overflow:hidden; pointer-events:none; z-index:1; }
 .range-morph-layer > .trend-bar { position:absolute; min-width:0; margin:0; transform-origin:0 100%; will-change:transform; }

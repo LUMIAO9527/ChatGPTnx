@@ -59,7 +59,7 @@ ChatGPTnx 的核心，是让多个 Plus 账号接力推进同一个长任务。�
 
 当前版本为 **v1.4.0**。完整页面与状态可用根目录的 `ChatGPTnx-v1.4.0.html` 离线查看。
 
-v1.4.0 统一按钮与选择控件，接续记录直接在设置内分页、重试和确认清理；外观、额度排序、用量范围及分页采用连续移动过渡，快速来回切换也能顺畅衔接。新添加的 Plus 账号默认同时参与接力与预热。
+v1.4.0 统一按钮与选择控件，接续记录直接在设置内分页、重试和确认清理；外观、额度排序、用量、分页与页面往返采用连续移动过渡，快速来回切换也能顺畅衔接，并修复“返回”文字跳动和动画途中遮挡。新添加的 Plus 账号默认同时参与接力与预热。
 
 公开发布版可从 [v1.4.0 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.4.0) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.4.0-source.zip`，完整演示可下载 `ChatGPTnx-v1.4.0.html`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用、Microsoft .NET Framework 4.6.2 或更高版本，以及 Microsoft Edge WebView2 Runtime。
 

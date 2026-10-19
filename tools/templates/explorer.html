@@ -72,6 +72,65 @@ function auditLoad(item){return new Promise((resolve,reject)=>{
   load(item);
 });}
 const motionFlows=[
+  {id:'settings',key:'secondary-pages',steps:[
+    {click:'#sheet [data-action="purchase-account"]',contained:true},
+    {click:'#sheet [data-action="support-qr"]',media:true},
+    {click:'#sheet .sheet-head [data-action="back"]',media:true},
+    {click:'#sheet [data-action="support-qr"]',media:true,wait:65,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',media:true,wait:65,interrupt:true},
+    {click:'#sheet [data-action="support-qr"]',media:true},
+    {click:'#sheet .sheet-head [data-action="back"]',media:true},
+    {click:'#sheet .sheet-head [data-action="back"]',contained:true},
+    {click:'#sheet [data-action="open-update"]',contained:true},
+    {click:'#sheet .sheet-head [data-action="back"]',contained:true,wait:65,interrupt:true},
+    {click:'#sheet [data-action="open-update"]',contained:true},
+    {click:'#sheet .sheet-head [data-action="back"]',contained:true}
+  ]},
+  {id:'quota-overview',key:'account-lists',steps:[
+    {click:'#sheet .quota-overview-row[data-email="work-02@example.com"]',identityLink:true},
+    {click:'#sheet [data-action="remove"]',hero:'primary',footer:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary'},
+    {click:'#sheet .sheet-head [data-action="back"]',identityLink:true},
+    {click:'#sheet .quota-overview-row[data-email="work-02@example.com"]',identityLink:true,wait:65,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',identityLink:true,wait:65,interrupt:true},
+    {click:'#sheet .quota-overview-row[data-email="work-02@example.com"]',identityLink:true},
+    {click:'#sheet [data-action="usage-account"]'},
+    {click:'#sheet .sheet-head [data-action="back"]'},
+    {click:'#sheet .sheet-head [data-action="back"]',identityLink:true}
+  ]},
+  {id:'detail-reauth',key:'login',steps:[
+    {click:'#sheet [data-action="reauth"]',hero:'primary',footer:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary'},
+    {click:'#sheet [data-action="reauth"]',hero:'primary',footer:true,wait:65,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary'}
+  ]},
+  {id:'home',key:'footer',steps:[
+    {click:'#home [data-action="add"]',hero:'primary',footer:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary'},
+    {click:'#home [data-action="add"]',hero:'primary',footer:true,wait:80,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary'},
+    {click:'#home [data-action="relay"]',hero:'primary',footer:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary'}
+  ]},
+  {id:'usage-30',steps:[
+    {click:'#sheet [data-action="usage-account"]',report:true,reportMove:true,reportChart:true},
+    {click:'#sheet [data-action="usage-all"]',report:true,reportMove:true,reportChart:true,reportReturn:true},
+    {click:'#sheet [data-action="usage-account"]',report:true,wait:70,interrupt:true},
+    {click:'#sheet [data-action="usage-all"]',report:true,wait:65,interrupt:true},
+    {click:'#sheet [data-action="usage-account"]',report:true,wait:65,interrupt:true},
+    {simulate:'clear-status',report:true,wait:40,interrupt:true},
+    {click:'[data-action="usage-period"][data-value="7"]',report:true,reportChart:true},
+    {click:'[data-action="usage-period"][data-value="30"]',range:true},
+    {click:'#sheet .sheet-head [data-action="back"]',report:true,reportMove:true,reportChart:true,reportReturn:true},
+    {motion:false},
+    {click:'#sheet [data-action="usage-account"]',report:true},
+    {click:'#sheet [data-action="usage-all"]',report:true,reportReturn:true},
+    {motion:true}
+  ]},
+  {id:'usage-zero',steps:[
+    {click:'#sheet [data-action="usage-account"]',report:true,reportMove:true},
+    {click:'#sheet [data-action="usage-all"]',report:true,reportMove:true,reportReturn:true}
+  ]},
   {id:'resume-history-many',steps:[
     {click:'[data-action="resume-page"][data-value="next"]',shared:true,pagination:2,pageMove:true},
     {click:'[data-action="resume-page"][data-value="next"]',shared:true,pagination:3,wait:70,interrupt:true},
@@ -149,7 +208,20 @@ const motionFlows=[
     {click:'[data-action="usage-period"][data-value="all"]',stable:true,rangeSelection:true},
     {click:'[data-action="usage-period"][data-value="30"]',stable:true,rangeSelection:true,rangeReturn:true}
   ]},
-  {id:'home',steps:[{click:'#home [data-action="usage-all"]',hero:'surface'},{click:'#sheet .sheet-head [data-action="back"]',hero:'surface'},{click:'#home [data-action="settings"]',group:true},{click:'#sheet .sheet-head [data-action="back"]',group:true}]},
+  {id:'home',steps:[{click:'#home [data-action="usage-all"]',hero:'surface'},{click:'#sheet .sheet-head [data-action="back"]',hero:'surface'},{click:'#home [data-action="settings"]',entry:true},{click:'#sheet .sheet-head [data-action="back"]',entry:true}]},
+  {id:'home',steps:[
+    {click:'#home .row[data-email="work-02@example.com"]',hero:'primary',accountLink:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary',accountLink:true},
+    {click:'#home .row[data-email="work-02@example.com"]',hero:'primary',accountLink:true,wait:65,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary',accountLink:true,wait:70,interrupt:true},
+    {click:'#home .row[data-email="backup@example.com"]',hero:'primary',accountLink:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary',accountLink:true},
+    {click:'#home [data-action="settings"]',entry:true,wait:65,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',entry:true,wait:70,interrupt:true},
+    {click:'#home [data-action="settings"]',entry:true},
+    {simulate:'clear-status',stable:true},
+    {click:'#sheet .sheet-head [data-action="back"]',entry:true}
+  ]},
   {id:'home',steps:[
     {click:'#home [data-action="relay"]',hero:'primary'},
     {click:'#sheet [data-action="detail"]',hero:'primary'},
@@ -176,7 +248,8 @@ async function runAudit(kind){
   const original=selected,originalTheme=theme,locks=[...document.querySelectorAll('button,select,input')].filter(n=>!n.disabled);
   locks.forEach(n=>n.disabled=true);
   auditResult={kind,source_digest:sourceDigest,started:new Date().toISOString(),records:[],problems:[]};
-  const items=kind==='layout'?catalog:motionFlows,total=items.length*2;
+  const flowFilter=new URLSearchParams(location.search).get('auditFlow');
+  const items=kind==='layout'?catalog:flowFilter?motionFlows.filter(flow=>flow.key===flowFilter):motionFlows,total=items.length*2;
   try{
     for(const palette of ['light','dark']){
       theme=palette;
