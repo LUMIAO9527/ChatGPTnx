@@ -429,6 +429,23 @@ check('settings entry follows the action trajectory while real sections reveal w
   }
   e.motion.setEnabled(false);assert.equal(e.test.bindings.size,0);assert.equal(e.test.models.size,0);assert.equal(e.app.querySelectorAll('*').filter(n=>n.__nxMotionRole).length,0);clean(e);
 });
+check('home usage reveals real sections alongside its context card on entry and return',()=>{
+  const e=setup(),nav=(surface,home)=>{const button=e.el('button','control tool',home?252:14,12,28,28);button.setAttribute('data-action',home?'usage-all':'back');surface.head.append(button);};
+  const old=e.surface('home','a');contextFixture(old,112);nav(old,true);e.mount(old.node);e.motion.begin(old.node,1,null,{from:'home',to:'usage'});
+  const next=e.surface('usage','all');next.node.dataset.page='usage';contextFixture(next,72);nav(next,false);e.mount(next.node);e.motion.paint(next.node);
+  assert(e.test.models.has('context-surface'));assert(e.test.models.has('navigation-entry'));assert.equal(next.content.__nxMotionRole,'reveal');assert.equal(next.content.animateCalls.length,0);assert.equal(next.body.animateCalls.length,0);
+  e.tick(100);assert.equal(Number(computed(next.content).opacity),1);assert(next.content.style.clipPath.startsWith('inset('));assert.equal(next.profile.root.style.transform,'');
+  const reveal=[...e.test.models.values()].find(model=>model.live===next.content),clock=reveal.start,pose={...reveal.pose};e.motion.paint(next.node);
+  assert.equal([...e.test.models.values()].find(model=>model.live===next.content),reveal);assert.equal(reveal.start,clock);assert.deepEqual({...reveal.pose},pose);e.tick(300);
+  e.motion.begin(next.node,-1,null,{from:'usage',to:'home'});const back=e.surface('home','a');contextFixture(back,112);nav(back,true);e.mount(back.node);e.motion.paint(back.node);
+  assert(e.test.models.has('context-surface'));assert(e.test.models.has('navigation-entry'));assert.equal(back.content.__nxMotionRole,'reveal');assert.equal(back.content.animateCalls.length,0);
+  e.tick(100);assert.equal(Number(computed(back.content).opacity),1);assert(back.content.style.clipPath.startsWith('inset('));e.tick(300);clean(e);
+});
+check('returning to a body entry never gives its moving control the content reveal role',()=>{
+  const e=setup(),old=e.surface('quota-overview','a');old.profile.root.remove();const back=e.el('button','control tool',14,12,28,28);back.setAttribute('data-action','back');old.head.append(back);e.mount(old.node);
+  e.motion.begin(old.node,-1,null,{from:'quota-overview',to:'home'});const next=e.surface('home','a'),entry=e.el('button','section-link',14,240,299,38);entry.setAttribute('data-action','quota-overview');next.row.root.parentNode.insertBefore(entry,next.row.root);e.mount(next.node);e.motion.paint(next.node);
+  assert.equal(entry.__nxMotionRole,'entry');assert.equal(e.test.models.get('navigation-entry').live,entry);assert(![...e.test.models.values()].some(model=>model.kind==='reveal'&&model.live===entry));e.tick(400);clean(e);
+});
 check('list-to-detail identity includes its real text even when no black source action exists',()=>{
   const e=setup(),old=e.surface('quota-overview','a',true);old.profile.root.remove();old.row.root.className='quota-overview-row';e.mount(old.node);
   e.motion.begin(old.node,1,'b',{from:'quota-overview',to:'detail'});const next=e.surface('detail','b');e.mount(next.node);e.motion.paint(next.node);

@@ -353,6 +353,8 @@
     // Navigation controls keep their own continuity even when a card or
     // account identity is also shared. Neither motion should suppress the other.
     const homeNavigation=page.route.from==='home'||page.route.to==='home';
+    const homePage=page.route.from==='home'?page.route.to:page.route.from;
+    const commonEntry=homeNavigation&&['settings','usage'].includes(homePage);
     page.entryActive=!!(page.entry&&(homeNavigation||!anchored&&!report&&!media));
     if(page.entryActive){
       const target=entryControl(surface,page.route),prior=models.get('navigation-entry');
@@ -363,20 +365,31 @@
         style(target.node,'pointer-events','auto');
       }
     }
-    if(page.entryActive&&!anchored&&!report&&!media){
+    if(page.entryActive&&!media&&(commonEntry||!anchored&&!report)){
       // Reveal real sections in place. One clock survives interrupted return
       // and passive rendering; there is no outgoing page copy or lateral slide.
+      // Settings and usage keep this same content motion even while the usage
+      // context card follows its own shared path.
       const body=surface.id==='home'?surface:surface.querySelector('.sheet-body');
       const sections=[...(body?.querySelectorAll('.settings-section')||[])];
       const groups=surface.id==='home'?[...surface.children].filter(node=>!node.matches('.header, .status-region, .status-stack')):sections.length?sections:[...(body?.children||[])];
       let index=0;
-      for(const node of groups){
-        // A transformed ancestor changes the origin of its fixed entry control.
-        // Leave that path intact; the normal entrance handles its other children.
-        if(!visible(node,surface)||node.__nxMotionPlaceholder||page.sharedPath.has(node)||node===page.sharedCard&&page.stationaryCard)continue;
+      const revealGroup=node=>{
+        if(!visible(node,surface)||node.__nxMotionPlaceholder||node===page.sharedCard&&page.stationaryCard)return;
+        if([...models.values()].some(model=>model.kind!=='reveal'&&(model.live===node||model.target===node)))return;
+        // The usage report wraps the shared card and the remaining sections.
+        // Keep shared parts in their own coordinate system, then reveal their
+        // siblings. Previously registered groups retain their clock on refresh.
+        if(page.sharedPath.has(node)&&!page.reportNodes.has(node)){
+          if(node===page.sharedCard)return;
+          for(const child of node.children)revealGroup(child);
+          return;
+        }
         const model=upsert('entry-content:'+index++,'reveal',{open:0},{open:1},node);
-        if(model){page.reportNodes.add(node);for(let parent=node;parent&&parent!==surface;parent=parent.parentNode)page.sharedPath.add(parent);}
-      }
+        page.reportNodes.add(node);
+        if(model)for(let parent=node;parent&&parent!==surface;parent=parent.parentNode)page.sharedPath.add(parent);
+      };
+      for(const node of groups)revealGroup(node);
     }
     if(report)for(const [selector,from] of page.report){
       const node=surface.querySelector(selector);if(!visible(node,surface))continue;
