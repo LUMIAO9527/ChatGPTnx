@@ -38,7 +38,7 @@ fs.mkdirSync(output,{recursive:true});
       await load('open=relay-accounts');
       await check('compact-selection-hover-and-persistence',async()=>{
         const control=page.locator('[data-action="auto-relay-account"]').first(),email=await control.getAttribute('data-email');
-        const box=await control.boundingBox();assert(Math.abs(box.width-22)<.1&&Math.abs(box.height-22)<.1);
+        const box=await control.boundingBox();assert(Math.abs(box.width-20)<.1&&Math.abs(box.height-20)<.1);
         await hover(control);await control.click();
         await page.waitForFunction(email=>NXDemo.state().settings.auto_relay_excluded.includes(email),email);
         assert.equal(await control.getAttribute('aria-checked'),'false');

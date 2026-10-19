@@ -275,6 +275,11 @@
     const control=primaryControl(surface),filter=surface.querySelector('.usage-filter'),context=contextSurface(surface);
     const sharedSurface=source?.surface&&context&&['x','y','w','h'].some(key=>Math.abs(source.surface.box[key]-context.box[key])>.25);
     const report=surface.dataset.page==='usage'&&page.report.size>0;
+    // Home and account detail keep the same neutral top card, even when the
+    // travelling account came from another row. Its backdrop never re-enters.
+    const homeDetail=page.route.from==='home'&&page.route.to==='detail'||page.route.from==='detail'&&page.route.to==='home';
+    page.backdrop=homeDetail&&page.backdropSource&&context&&['x','y','w','h'].every(key=>Math.abs(page.backdropSource.box[key]-context.box[key])<.5)?context:null;
+    if(page.backdrop)for(let node=context.node;node&&node!==surface;node=node.parentNode)page.sharedPath.add(node);
     // A neutral account card must never take the black action's moving role.
     const chosen=source?.control&&control?'control':sharedSurface?'surface':!report&&page.filter&&visible(filter,surface)?'filter':source?.avatar&&target?.avatar?'avatar':null;
     const key=chosen==='surface'?'context-surface':chosen==='control'?'primary-action':chosen==='avatar'?source.identity+':avatar':'usage-filter';
@@ -345,7 +350,10 @@
       if(goal)upsert('support-media','fixed',page.media.box,goal,media.node);
     }
     const anchored=['primary-action','context-surface',source?.identity+':avatar'].some(key=>page.active.has(key));
-    page.entryActive=!!(page.entry&&!anchored&&!report&&!media);
+    // Navigation controls keep their own continuity even when a card or
+    // account identity is also shared. Neither motion should suppress the other.
+    const homeNavigation=page.route.from==='home'||page.route.to==='home';
+    page.entryActive=!!(page.entry&&(homeNavigation||!anchored&&!report&&!media));
     if(page.entryActive){
       const target=entryControl(surface,page.route),prior=models.get('navigation-entry');
       const goal=target&&rect(prior?.live===target.node&&prior.slot?prior.slot:target.node);
@@ -354,6 +362,8 @@
         upsert('navigation-entry','control',{...page.entry.box,r:page.entry.r},{...goal,r:prior?.live===target.node&&prior.slot?prior.goal.r:target.r},target.node);
         style(target.node,'pointer-events','auto');
       }
+    }
+    if(page.entryActive&&!anchored&&!report&&!media){
       // Reveal real sections in place. One clock survives interrupted return
       // and passive rendering; there is no outgoing page copy or lateral slide.
       const body=surface.id==='home'?surface:surface.querySelector('.sheet-body');
@@ -361,7 +371,9 @@
       const groups=surface.id==='home'?[...surface.children].filter(node=>!node.matches('.header, .status-region, .status-stack')):sections.length?sections:[...(body?.children||[])];
       let index=0;
       for(const node of groups){
-        if(!visible(node,surface)||node.__nxMotionPlaceholder||node===page.sharedCard&&page.stationaryCard)continue;
+        // A transformed ancestor changes the origin of its fixed entry control.
+        // Leave that path intact; the normal entrance handles its other children.
+        if(!visible(node,surface)||node.__nxMotionPlaceholder||page.sharedPath.has(node)||node===page.sharedCard&&page.stationaryCard)continue;
         const model=upsert('entry-content:'+index++,'reveal',{open:0},{open:1},node);
         if(model){page.reportNodes.add(node);for(let parent=node;parent&&parent!==surface;parent=parent.parentNode)page.sharedPath.add(parent);}
       }
@@ -412,6 +424,14 @@
       const progress=trajectory(0,0,0,1,Math.max(0,performance.now()-page.start)/1000,moveDuration/1000)[0];
       plate.color=plate.from.map((value,index)=>value+(plate.to[index]-value)*progress);
       for(const [key,value]of Object.entries({left:left+'px',top:top+'px',width:(right-left)+'px',height:(bottom-top)+'px','background-color':`rgb(${plate.color.map(n=>n.toFixed(3)).join(',')})`}))style(plate.node,key,value);
+      if(page.backdrop){
+        // The moving identity still needs protection while crossing the black
+        // action. Cut the persistent card out of that protection, so its shade
+        // cannot be painted over and then exposed again at animation cleanup.
+        const b=page.backdrop.box,w=right-left,h=bottom-top;
+        const cutLeft=b.x-b.w/2-left,cutTop=b.y-b.h/2-top,cutRight=cutLeft+b.w,cutBottom=cutTop+b.h;
+        style(plate.node,'clip-path',`polygon(evenodd,0px 0px,${w}px 0px,${w}px ${h}px,0px ${h}px,0px 0px,${cutLeft}px ${cutTop}px,${cutLeft}px ${cutBottom}px,${cutRight}px ${cutBottom}px,${cutRight}px ${cutTop}px,${cutLeft}px ${cutTop}px,0px 0px)`);
+      }else style(plate.node,'clip-path','none');
     }
   };
   const settle = now => {
@@ -437,6 +457,7 @@
       const identity = surface.querySelector('.current-card')?.dataset.motionIdentity || null;
       const anchor = findAnchor(surface,preferredIdentity) || findAnchor(surface,identity);
       const source = {identity:anchor?.identity||null,avatar:anchor?.avatar?capturePart(anchor.avatar,surface):null,label:anchor?.label?capturePart(anchor.label,surface):null,tone:page?.plate?.color||surfaceTone(anchor?.root),control:primaryControl(surface),surface:anchor?.root.matches('.current-card')?contextSurface(surface):null,card:!!anchor?.root.matches('.current-card'),box:anchor?rect(anchor.root):null};
+      const backdrop=contextSurface(surface);
       const entry=route.from&&route.to&&route.from!==route.to?entryControl(surface,route):null;
       const media=['purchase','support-qr'].includes(route.from)&&['purchase','support-qr'].includes(route.to)&&route.from!==route.to?sharedMedia(surface):null;
       const filterNode = surface.querySelector('.usage-filter'), filter = visible(filterNode,surface) ? rect(filterNode) : null;
@@ -445,7 +466,7 @@
       clearIdentityPlate();
       for (const model of models.values()) release(model);
       restore();
-      page = {start:now,direction,identity,source,filter,usage,report,entry,media,route,accountLink:route.from==='detail'||route.to==='detail'||route.from==='quota-overview'||route.to==='quota-overview',reportNodes:new Set(),contentDelay:0,endElapsed:duration,active:new Set(),completed:new Set(),animated:new WeakSet(),sharedPath:new Set(),sharedCard:null};
+      page = {start:now,direction,identity,source,filter,usage,report,entry,media,route,backdropSource:backdrop,accountLink:route.from==='detail'||route.to==='detail'||route.from==='quota-overview'||route.to==='quota-overview',reportNodes:new Set(),contentDelay:0,endElapsed:duration,active:new Set(),completed:new Set(),animated:new WeakSet(),sharedPath:new Set(),sharedCard:null};
     } catch { stop(); }
   };
   const paint = surface => {

@@ -35,7 +35,7 @@ body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-sh
    Action labels use regular weight; only an explicit confirmation stage is emphasized.
 */
 :root {
-  --control-size-small:28px; --control-size-regular:32px; --control-size-large:44px; --control-size-selection:22px;
+  --control-size-small:24px; --control-size-regular:28px; --control-size-large:40px; --control-size-selection:20px;
   --control-radius-ratio:.375; --control-clearance:4px; --control-border:1px;
   --control-weight-regular:400; --control-weight-confirmation:550;
   --control-hover-opacity:.08; --control-hover-surface:color-mix(in srgb,var(--ink) 8%,var(--surface));
@@ -71,7 +71,7 @@ button:disabled { cursor:not-allowed; opacity:.46; box-shadow:none; }
   --control-radius:calc(var(--control-size) * var(--control-radius-ratio));
   --control-icon-size:min(19px,calc(var(--control-size) * .59375),calc(var(--control-size) - 2 * var(--control-border) - 2 * var(--control-clearance)));
   --control-padding:max(var(--control-clearance),calc(var(--control-size) * .25));
-  --control-font-size:clamp(10px,calc(var(--control-size) * .34375),12px);
+  --control-font-size:clamp(10px,calc((var(--control-size) + 4px) * .34375),12px);
   --control-line-height:clamp(12px,calc(var(--control-size) * .5),20px);
   --control-ink:var(--ink); --control-surface:transparent; --control-edge:transparent;
   display:inline-flex; align-items:center; justify-content:center; flex-shrink:0;
@@ -100,7 +100,7 @@ button:disabled { cursor:not-allowed; opacity:.46; box-shadow:none; }
 /* All segmented choices share one moving surface. Its geometry is measured
    from the real buttons, including groups whose options or widths change. */
 .segmented {
-  --segment-size:28px; position:relative; display:flex; padding:var(--control-clearance); gap:var(--control-clearance);
+  --segment-size:24px; position:relative; display:flex; padding:var(--control-clearance); gap:var(--control-clearance);
   border-radius:calc(var(--segment-size) * var(--control-radius-ratio) + var(--control-clearance));
   background:var(--surface); align-items:center;
 }
@@ -116,7 +116,7 @@ button:disabled { cursor:not-allowed; opacity:.46; box-shadow:none; }
 .segmented .active:hover:not(:disabled) { box-shadow:var(--hover-shadow); }
 /* A switch keeps a moving thumb. Its curves and inset use the same scale. */
 .switch {
-  --switch-width:42px; --switch-height:24px; --knob:16px; --inset:var(--control-clearance);
+  --switch-width:36px; --switch-height:20px; --knob:12px; --inset:var(--control-clearance);
   width:var(--switch-width); height:var(--switch-height); min-height:var(--switch-height); flex:0 0 var(--switch-width);
   border:0; padding:0; border-radius:calc(var(--switch-height) * var(--control-radius-ratio));
   background:var(--surface-2); vertical-align:middle;
@@ -250,7 +250,7 @@ h3 { font-size: var(--font-page-title); font-weight: 620; }
 .relay-label { display: flex; align-items: center; gap: 7px; }
 .relay-label .icon { width: 16px; height: 16px; }
 .section-head { display: flex; align-items: center; justify-content: space-between; font-size: var(--font-body); color: var(--muted); }
-.section-link { --control-size:var(--roster-heading-height); width:100%; flex:0 0 var(--roster-heading-height); margin:-1px 0 2px; padding-inline:12px; text-align:left; justify-content:space-between; }
+.section-link { --control-size:var(--roster-heading-height); width:100%; flex:0 0 var(--roster-heading-height); margin:0 0 2px; padding-inline:12px; text-align:left; justify-content:space-between; }
 .section-link > span:last-child { display: inline-flex; align-items: center; gap: 3px; }
 .section-link .icon { width: 13px; height: 13px; }
 .account-list { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 8px; margin: -8px; scrollbar-gutter: stable; }
@@ -614,7 +614,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .sheet-head h2 {flex:1;min-width:0;}
 .sheet-head:has([data-action="resume-clear"]) .demo-tag {display:none;}
 .sheet-head:has([data-action="resume-clear"]) {padding-right:18px;}
-.usage-context .usage-filter { --segment-size:28px; height:36px; }
+.usage-context .usage-filter { --segment-size:24px; height:32px; }
 .usage-body:has(.usage-account-details) {display:flex;flex-direction:column;overflow-y:auto;}
 .usage-body:has(.usage-account-details) .usage-context {flex:none;}
 .usage-body .usage-summary {height:210px;min-height:210px;flex:none;display:flex;flex-direction:column;justify-content:center;padding:0 14px;}
@@ -626,7 +626,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .usage-account-details .metric strong {display:flex;align-items:baseline;justify-content:center;gap:1px;font-size:20px;line-height:24px;}
 .usage-account-details .metric-unit {font-size:11px;line-height:1;font-weight:500;}
 .usage-account-details .inline-help {margin:0;text-align:center;font-size:10px;line-height:14px;}
-.usage-bottom-back { --control-size:30px; align-self:center; width:max-content; max-width:100%; color:var(--muted); }
+.usage-bottom-back { --control-size:26px; align-self:center; width:max-content; max-width:100%; color:var(--muted); }
 .usage-bottom-back-label {display:block;line-height:14px;}
 .usage-hero {height:74px;flex:none;}
 .usage-total {white-space:nowrap;display:flex;align-items:baseline;height:49px;}
@@ -692,7 +692,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .usage-report .usage-account-details .metric small { margin-bottom: 3px; font-size: 10px; }
 .usage-report .usage-account-details .metric strong { font-size: 16px; line-height: 20px; }
 .usage-report .usage-account-details .metric-unit { font-size: 10px; }
-.usage-report .usage-bottom-back { height: 30px; min-height: 30px; margin: 0; justify-self: center; }
+.usage-report .usage-bottom-back { height: var(--control-size); min-height: var(--control-size); margin: 0; justify-self: center; }
 
 /* Shared identity positions; the overview scrolls as one continuous report. */
 .usage-report > .current-card { background: var(--surface); }

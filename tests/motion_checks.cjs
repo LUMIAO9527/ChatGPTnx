@@ -459,7 +459,7 @@ function disclosureFixture(kind='details'){
   const e=setup(),surface=e.surface('detail','b');e.mount(surface.node);
   const source=fs.readFileSync(path.join(root,'src/ui/disclosure.js'),'utf8').replace('  return {transact,afterPatch,popup,stop,isOpen:desired};','  window.__disclosureTest={models,popups};\n  return {transact,afterPatch,popup,stop,isOpen:desired};');
   vm.runInNewContext(source,{window:e.window,Element,getComputedStyle:computed,performance:{now:()=>time},requestAnimationFrame:fn=>{const id=++sequence;rafs.set(id,fn);return id},cancelAnimationFrame:id=>rafs.delete(id)});
-  const node=e.el(kind,kind==='details'?'settings-disclosure':'resume-session',14,180,299,44),head=e.el(kind==='details'?'summary':'button','',14,180,299,44),body=e.el('div',kind==='details'?'disclosure-body':'resume-tasks',14,224,299,120);
+  const node=e.el(kind,kind==='details'?'settings-disclosure':'resume-session',14,180,299,44),head=e.el(kind==='details'?'summary':'button',kind==='details'?'control-header':'',14,180,299,44),body=e.el('div',kind==='details'?'disclosure-body':'resume-tasks',14,224,299,120);
   head.setAttribute('aria-expanded','false');node.setAttribute('data-disclosure','fixture');node.open=false;node.append(head);if(kind==='details')node.append(body);surface.body.append(node);
   let contentHeight=120;
   node.getBoundingClientRect=()=>{const h=parseFloat(node.style.height)||44+((kind==='details'?node.open:body.parentNode===node)?contentHeight:0);return {...node._box,height:h,bottom:node._box.top+h};};
@@ -468,12 +468,21 @@ function disclosureFixture(kind='details'){
 }
 check('all inline disclosures smoothly reveal height and retire every owned style',()=>{
   const e=disclosureFixture();e.disclosure.transact(e.app,()=>e.set(true));const model=e.inspect.models.get(e.node);assert(model);assert.equal(model.pose.height,44);assert.equal(model.goal.height,164);
-  e.tick(110);assert(parseFloat(e.node.style.height)>44&&parseFloat(e.node.style.height)<164);assert(Number(e.body.style.opacity)>0&&Number(e.body.style.opacity)<1);
+  e.tick(110);assert(parseFloat(e.node.style.height)>44&&parseFloat(e.node.style.height)<164);assert.equal(Number(computed(e.body).opacity),1);
   e.tick(110);assert.equal(e.node.style.height,'');assert.equal(e.body.style.opacity,'');assert.equal(e.node.open,true);assert.equal(e.inspect.models.size,0);assert.equal(rafs.size,0);
 });
 check('closing retains the real body only until the collapse reaches its endpoint',()=>{
   const e=disclosureFixture('section');e.set(true);e.disclosure.transact(e.app,()=>e.set(false));assert.equal(e.body.parentNode,e.node);assert.equal(e.body.__nxMotionRetained,true);assert.equal(e.body.inert,true);
-  e.tick(100);assert(parseFloat(e.node.style.height)>44&&parseFloat(e.node.style.height)<164);e.tick(120);assert.equal(e.body.parentNode,null);assert.equal(e.body.__nxMotionRetained,undefined);assert.equal(e.inspect.models.size,0);
+  e.tick(100);assert(parseFloat(e.node.style.height)>44&&parseFloat(e.node.style.height)<164);assert.equal(Number(computed(e.body).opacity),1);e.tick(120);assert.equal(e.body.parentNode,null);assert.equal(e.body.__nxMotionRetained,undefined);assert.equal(e.inspect.models.size,0);
+});
+check('closing keeps the header joined and content opaque until the body retracts',()=>{
+  const e=disclosureFixture();e.head.style.borderBottomLeftRadius='16px';e.head.style.borderBottomRightRadius='16px';e.set(true);
+  e.disclosure.transact(e.app,()=>e.set(false));
+  for(let i=0;i<5;i++){
+    e.tick(40);assert(parseFloat(e.node.style.height)>44);assert.equal(e.node.open,true);
+    assert.equal(Number(computed(e.body).opacity),1);assert.equal(e.head.style.borderBottomLeftRadius,'0px');assert.equal(e.head.style.borderBottomRightRadius,'0px');
+  }
+  e.tick(20);assert.equal(e.node.open,false);assert.equal(e.node.style.height,'');assert.equal(e.head.style.borderBottomLeftRadius,'16px');assert.equal(e.head.style.borderBottomRightRadius,'16px');assert.equal(e.inspect.models.size,0);
 });
 check('a rapid disclosure reversal retains height velocity and acceleration',()=>{
   const e=disclosureFixture();e.disclosure.transact(e.app,()=>e.set(true));e.tick(70);const previous=e.inspect.models.get(e.node),pose={...previous.pose},velocity={...previous.velocity},acceleration={...previous.acceleration};

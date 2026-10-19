@@ -29,7 +29,9 @@ window.NXDisclosure=(()=>{
   function paint(){
     for(const model of models.values()){
       if(!model.reveal)remember(model,model.node,'height',Math.max(model.minimum,model.pose.height)+'px');
-      if(model.body){remember(model,model.body,'opacity',String(Math.max(0,Math.min(1,model.pose.alpha))));if(model.reveal)remember(model,model.body,'clip-path',`inset(0 0 ${Math.max(0,Math.min(100,model.pose.clip))}% 0)`);}
+      // Ordinary disclosures reveal and retract the same real content by
+      // height clipping. Fading it out makes closing appear to finish early.
+      if(model.body&&model.reveal){remember(model,model.body,'opacity',String(Math.max(0,Math.min(1,model.pose.alpha))));remember(model,model.body,'clip-path',`inset(0 0 ${Math.max(0,Math.min(100,model.pose.clip))}% 0)`);}
     }
   }
   function frame(now){
@@ -68,7 +70,16 @@ window.NXDisclosure=(()=>{
       if(reveal)body.hidden=false;
       if(!open){body.inert=true;body.setAttribute('aria-hidden','true');}
       remember(model,node,'transition','none');
-      if(!reveal)remember(model,node,'overflow','hidden');
+      if(!reveal){
+        remember(model,node,'overflow','hidden');
+        // aria-expanded records intent immediately. The header stays joined
+        // to its body until the rounded outer shell has fully retracted.
+        const head=headOf(node);
+        if(head?.classList.contains('control-header')){
+          remember(model,head,'border-bottom-left-radius','0px');
+          remember(model,head,'border-bottom-right-radius','0px');
+        }
+      }
     }
     paint();schedule();
   }

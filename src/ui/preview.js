@@ -105,6 +105,17 @@
         opacity:Number(getComputedStyle(summary).opacity)*Number(getComputedStyle(body).opacity),plotOpacity:Number(getComputedStyle(plot).opacity),
         card:bounds(app.querySelector('.current-card')),hiddenBars:[...plot.querySelectorAll(':scope > .trend-bar')].filter(node=>getComputedStyle(node).visibility==='hidden').length};
     };
+    const cardSurface=()=>{
+      const surface=app.querySelector('#sheet').hidden?app.querySelector('#home'):app.querySelector('#sheet');
+      const node=surface.querySelector('.current-card');if(!node)return null;
+      const color=getComputedStyle(node).backgroundColor,box=bounds(node);
+      let opacity=1;for(let e=node;e&&e!==app;e=e.parentElement)opacity*=Number(getComputedStyle(e).opacity);
+      const plates=[...surface.querySelectorAll('.motion-identity-plate')].map(plate=>{
+        const css=getComputedStyle(plate),b=bounds(plate),overlap=Math.max(0,Math.min(box.x+box.w,b.x+b.w)-Math.max(box.x,b.x))*Math.max(0,Math.min(box.y+box.h,b.y+b.h)-Math.max(box.y,b.y));
+        return {...b,color:css.backgroundColor,clip:css.clipPath,overlap};
+      });
+      return {...box,color,opacity,plates};
+    };
     const originalRange=rangeState();let originalLocal=null;
     for(const step of steps){
       if(step.shared&&!originalLocal)originalLocal=inspectLocalState();
@@ -117,7 +128,7 @@
         const moving=[...app.querySelectorAll('*')].filter(n=>n.__nxMotionOwned&&n.style.position==='fixed'&&!n.__nxMotionDecoration);
         const body=app.querySelector('#sheet').hidden?app.querySelector('#home'):app.querySelector('#sheet .sheet-body');
         const secondary=[...app.querySelectorAll('#sheet .sheet-foot > .secondary')].filter(n=>n.getBoundingClientRect().height>0&&!n.closest('[hidden]')).map(n=>{const range=document.createRange();range.selectNodeContents(n);const text=range.getBoundingClientRect(),base=app.getBoundingClientRect();return {text:n.textContent,box:bounds(n),textBox:{x:text.x-base.x,y:text.y-base.y,w:text.width,h:text.height},flex:getComputedStyle(n).flex,opacity:Number(getComputedStyle(n).opacity)};});
-        frames.push({time:performance.now()-start,secondary,moving:moving.map(n=>({role:n.__nxMotionRole||(n.matches('.primary,.relay')?'primary':n.matches('.motion-surface')?'surface':'avatar'),...bounds(n),transform:getComputedStyle(n).transform})),slots:[...app.querySelectorAll('*')].filter(n=>n.__nxMotionPlaceholder).length,reveals:[...app.querySelectorAll('*')].filter(n=>n.__nxMotionRole==='reveal').map(n=>({opacity:Number(getComputedStyle(n).opacity),clip:getComputedStyle(n).clipPath,transform:getComputedStyle(n).transform})),bodyMotion:!!body?.getAnimations().length,local:step.shared?inspectLocalState():null,range:step.report||step.range||step.rangeSelection||step.immediate?rangeState():null,popups:[...app.querySelectorAll('*')].filter(n=>n.__nxPopupActive).length,disclosures:[...app.querySelectorAll('[data-disclosure]')].filter(n=>n.__nxDisclosureIntent!==undefined).map(n=>({key:n.dataset.disclosure,...bounds(n)}))});
+        frames.push({time:performance.now()-start,card:step.cardBackdrop?cardSurface():null,secondary,moving:moving.map(n=>({role:n.__nxMotionRole||(n.matches('.primary,.relay')?'primary':n.matches('.motion-surface')?'surface':'avatar'),...bounds(n),transform:getComputedStyle(n).transform})),slots:[...app.querySelectorAll('*')].filter(n=>n.__nxMotionPlaceholder).length,reveals:[...app.querySelectorAll('*')].filter(n=>n.__nxMotionRole==='reveal').map(n=>({opacity:Number(getComputedStyle(n).opacity),clip:getComputedStyle(n).clipPath,transform:getComputedStyle(n).transform})),bodyMotion:!!body?.getAnimations().length,local:step.shared?inspectLocalState():null,range:step.report||step.range||step.rangeSelection||step.immediate?rangeState():null,popups:[...app.querySelectorAll('*')].filter(n=>n.__nxPopupActive).length,disclosures:[...app.querySelectorAll('[data-disclosure]')].filter(n=>n.__nxDisclosureIntent!==undefined).map(n=>{const head=n.querySelector('summary,[aria-expanded]'),body=n.querySelector('.disclosure-body,.reset-credit-details,.resume-tasks,#update-notes-body'),css=head&&getComputedStyle(head);return {key:n.dataset.disclosure,...bounds(n),open:n.__nxDisclosureIntent,headHeight:head?.getBoundingClientRect().height||0,leftRadius:parseFloat(css?.borderBottomLeftRadius)||0,rightRadius:parseFloat(css?.borderBottomRightRadius)||0,bodyOpacity:body?Number(getComputedStyle(body).opacity):1};})});
         if(recording)requestAnimationFrame(capture);
       };
       capture();
@@ -142,6 +153,12 @@
         if(end&&values.some(n=>Math.abs(n.box.w-end.box.w)>.5||Math.abs(n.textBox.x-end.textBox.x)>.5||Math.abs(n.textBox.y-end.textBox.y)>.5))problems.push('返回或取消文字随占位释放跳变');
       }
       if(step.accountLink&&!frames.some(f=>f.moving.some(n=>n.role==='primary')&&f.moving.some(n=>n.role==='avatar')))problems.push('账号身份没有伴随主按钮衔接');
+      if(step.navigationEntry&&window.NXMotion.enabled()){
+        const positions=frames.flatMap(f=>f.moving.filter(n=>n.role==='entry'));
+        if(!positions.length)problems.push('导航入口没有连续移动');
+        if(!step.interrupt&&new Set(positions.map(n=>n.x.toFixed(2)+','+n.y.toFixed(2))).size<3)problems.push('导航入口缺少中间帧');
+      }
+      if(step.navigationStatic&&frames.some(f=>f.moving.some(n=>n.role==='entry')))problems.push('关闭动效后导航仍在移动');
       if(step.entry){
         if(!frames.some(f=>f.moving.some(n=>n.role==='entry')&&f.reveals.length))problems.push('设置入口和内容没有衔接');
         if(frames.some(f=>f.bodyMotion||f.reveals.some(n=>n.opacity!==1)))problems.push('设置过渡退化成整页移动或淡入淡出');
@@ -153,6 +170,23 @@
       if(step.media&&!frames.some(f=>f.moving.some(n=>n.role==='media')))problems.push('图片没有从原图连续放大或缩回');
       if(step.identityLink&&!frames.some(f=>f.moving.some(n=>n.role==='avatar')))problems.push('列表身份没有接续到详情');
       if(step.disclosure&&!frames.some(f=>f.disclosures.length))problems.push('展开项没有平滑过渡');
+      if(step.cardBackdrop){
+        const cards=frames.map(f=>f.card).filter(Boolean);
+        if(cards.some(n=>Math.abs(n.opacity-1)>.001))problems.push('顶部账号底框出现透明度闪动');
+        if(cards.some(n=>n.plates.some(p=>p.overlap>1&&p.clip==='none'&&p.color!==n.color)))problems.push('移动衬底覆盖顶部灰色卡片');
+      }
+      if(step.fold&&window.NXMotion.enabled()){
+        const all=frames.flatMap(f=>f.disclosures);
+        const keys=step.fold===true?[...new Set(all.map(n=>n.key))]:Array.isArray(step.fold)?step.fold:[step.fold];
+        if(!keys.length)problems.push('折叠区域没有连续中间帧');
+        for(const key of keys){
+          const samples=all.filter(n=>n.key===key);
+          if(!samples.length||!step.interrupt&&new Set(samples.map(n=>n.h.toFixed(2))).size<3)problems.push('折叠高度没有连续变化：'+key);
+          if(samples.some(n=>n.h>n.headHeight+.75&&(n.leftRadius>.1||n.rightRadius>.1)))problems.push('内容未收完就恢复标题圆角：'+key);
+          if(samples.some(n=>Math.abs(n.bodyOpacity-1)>.001))problems.push('折叠内容提前淡出：'+key);
+        }
+      }
+      if(step.foldStatic&&frames.some(f=>f.disclosures.length))problems.push('关闭动效后仍在折叠动画');
       if(step.group&&!frames.some(f=>f.bodyMotion))problems.push('普通切页没有整体过渡');
       if(step.popup&&!frames.some(f=>f.popups))problems.push('浮动提示没有显示或收起动画');
       if(step.shared){

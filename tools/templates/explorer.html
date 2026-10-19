@@ -48,7 +48,7 @@ function fitPreview(){
   const area=$('.panel-stage'),mode=$('#scale').value;
   displayedScale=mode==='auto'?Math.floor(Math.max(.75,Math.min(2,(area.clientWidth-32)/327,(area.clientHeight-52)/458))*100)/100:Number(mode);
   document.documentElement.style.setProperty('--preview-scale',displayedScale);
-  $('#caption').textContent='真实面板 327 × 458 · '+(mode==='auto'?'自动显示 ':'显示 ')+Math.round(displayedScale*100)+'%';
+  $('#caption').textContent='真实面板 __GEOMETRY__ · '+(mode==='auto'?'自动显示 ':'显示 ')+Math.round(displayedScale*100)+'%';
   renderDebug();
 }
 $('#scale').onchange=fitPreview;
@@ -72,6 +72,64 @@ function auditLoad(item){return new Promise((resolve,reject)=>{
   load(item);
 });}
 const motionFlows=[
+  {id:'home',key:'detail-backdrop',steps:[
+    {click:'#home .row[data-email="work-02@example.com"]',hero:'primary',accountLink:true,cardBackdrop:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary',accountLink:true,cardBackdrop:true},
+    {click:'#home .current-identity',hero:'primary',cardBackdrop:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary',cardBackdrop:true},
+    {click:'#home .row[data-email="backup@example.com"]',hero:'primary',accountLink:true,cardBackdrop:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'primary',accountLink:true,cardBackdrop:true}
+  ]},
+  {id:'home',key:'detail-backdrop',steps:[
+    {click:'#home .row[data-email="work-02@example.com"]',cardBackdrop:true,wait:65,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',cardBackdrop:true,wait:65,interrupt:true},
+    {click:'#home .row[data-email="backup@example.com"]',cardBackdrop:true,wait:65,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',cardBackdrop:true},
+    {motion:false},
+    {click:'#home .row[data-email="work-02@example.com"]',cardBackdrop:true},
+    {click:'#sheet .sheet-head [data-action="back"]',cardBackdrop:true},
+    {motion:true}
+  ]},
+  {id:'settings',key:'fold-shape',steps:[
+    {click:'[data-disclosure="appearance"] > summary',fold:'appearance'},
+    {click:'[data-disclosure="appearance"] > summary',fold:'appearance'},
+    {click:'[data-disclosure="notifications"] > summary',fold:'notifications'},
+    {click:'[data-disclosure="notifications"] > summary',fold:'notifications'},
+    {click:'[data-disclosure="relay"] > summary',fold:'relay'},
+    {click:'[data-disclosure="relay"] > summary',fold:'relay'},
+    {click:'[data-disclosure="early-anchor"] > summary',fold:'early-anchor'},
+    {click:'[data-disclosure="early-anchor"] > summary',fold:'early-anchor'}
+  ]},
+  {id:'settings',key:'fold-shape',steps:[
+    {click:'[data-disclosure="message"] > summary',fold:'message'},
+    {click:'[data-disclosure="message"] > summary',fold:'message'},
+    {click:'[data-disclosure="hotkeys"] > summary',fold:'hotkeys'},
+    {click:'[data-disclosure="hotkeys"] > summary',fold:'hotkeys'},
+    {click:'[data-disclosure="archives"] > summary',fold:'archives'},
+    {click:'[data-disclosure="archives"] > summary',fold:'archives'},
+    {click:'[data-disclosure="resume-history"] > summary',fold:'resume-history'},
+    {click:'[data-disclosure="resume-history"] > summary',fold:'resume-history'}
+  ]},
+  {id:'settings',key:'fold-shape',steps:[
+    {click:'[data-disclosure="appearance"] > summary',fold:'appearance'},
+    {click:'[data-disclosure="appearance"] > summary',fold:'appearance',wait:65,interrupt:true},
+    {click:'[data-disclosure="appearance"] > summary',fold:'appearance',wait:65,interrupt:true},
+    {click:'[data-disclosure="appearance"] > summary',fold:'appearance'},
+    {click:'[data-disclosure="notifications"] > summary',fold:'notifications'},
+    {click:'[data-disclosure="relay"] > summary',fold:['notifications','relay']},
+    {click:'[data-disclosure="early-anchor"] > summary',fold:['relay','early-anchor']},
+    {click:'[data-disclosure="early-anchor"] > summary',fold:'early-anchor'},
+    {motion:false},
+    {click:'[data-disclosure="appearance"] > summary',foldStatic:true},
+    {click:'[data-disclosure="appearance"] > summary',foldStatic:true},
+    {motion:true}
+  ]},
+  {id:'detail',key:'fold-shape',steps:[
+    {click:'[data-action="toggle-reset-credits"]',fold:true},
+    {click:'[data-action="toggle-reset-credits"]',fold:true},
+    {click:'.account-editor summary',fold:true},
+    {click:'.account-editor summary',fold:true}
+  ]},
   {id:'settings',key:'secondary-pages',steps:[
     {click:'#sheet [data-action="purchase-account"]',contained:true},
     {click:'#sheet [data-action="support-qr"]',media:true},
@@ -208,7 +266,26 @@ const motionFlows=[
     {click:'[data-action="usage-period"][data-value="all"]',stable:true,rangeSelection:true},
     {click:'[data-action="usage-period"][data-value="30"]',stable:true,rangeSelection:true,rangeReturn:true}
   ]},
-  {id:'home',steps:[{click:'#home [data-action="usage-all"]',hero:'surface'},{click:'#sheet .sheet-head [data-action="back"]',hero:'surface'},{click:'#home [data-action="settings"]',entry:true},{click:'#sheet .sheet-head [data-action="back"]',entry:true}]},
+  {id:'home',key:'home-entry',steps:[
+    {click:'#home [data-action="usage-all"]',hero:'surface',navigationEntry:true},
+    {click:'#sheet .sheet-head [data-action="back"]',hero:'surface',navigationEntry:true},
+    {click:'#home [data-action="settings"]',entry:true,navigationEntry:true},
+    {click:'#sheet .sheet-head [data-action="back"]',entry:true,navigationEntry:true},
+    {click:'#home [data-action="usage-all"]',navigationEntry:true,wait:65,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',navigationEntry:true,wait:65,interrupt:true},
+    {click:'#home [data-action="settings"]',navigationEntry:true,wait:65,interrupt:true},
+    {click:'#sheet .sheet-head [data-action="back"]',navigationEntry:true},
+    {click:'#home [data-action="quota-overview"]',navigationEntry:true},
+    {click:'#sheet .sheet-head [data-action="back"]',navigationEntry:true},
+    {click:'#home [data-action="add"]',navigationEntry:true},
+    {click:'#sheet .sheet-head [data-action="back"]',navigationEntry:true},
+    {motion:false},
+    {click:'#home [data-action="usage-all"]',navigationStatic:true},
+    {click:'#sheet .sheet-head [data-action="back"]',navigationStatic:true},
+    {click:'#home [data-action="settings"]',navigationStatic:true},
+    {click:'#sheet .sheet-head [data-action="back"]',navigationStatic:true},
+    {motion:true}
+  ]},
   {id:'home',steps:[
     {click:'#home .row[data-email="work-02@example.com"]',hero:'primary',accountLink:true},
     {click:'#sheet .sheet-head [data-action="back"]',hero:'primary',accountLink:true},
