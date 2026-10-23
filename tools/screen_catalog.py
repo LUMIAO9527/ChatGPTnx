@@ -17,11 +17,12 @@ def click(action, **extra):return {'click':f'[data-action="{action}"]',**extra}
 def selector(value, **extra):return {'click':value,**extra}
 
 G='01 · 首次使用与连接'
+add(G,'first-location','首次引导 · 选择程序文件夹',scenario='first-location',note='首次启动先选程序文件夹；推荐 D:\\ChatGPTnx，点击位置卡片可更换。')
 add(G,'first-run','首次引导 · 桌面未启动',scenario='first-run',note='全屏流程；不显示空账号列表。')
 add(G,'first-waiting','首次引导 · 等待登录',scenario='first-waiting')
 add(G,'first-account','首次引导 · 检测到账号',scenario='empty')
 add(G,'first-saving','首次引导 · 保存中',scenario='first-saving')
-add(G,'first-failed','首次引导 · 保存失败',scenario='first-failed')
+add(G,'first-failed','首次引导 · 保存失败',scenario='first-failed',note='报错后不再显示“查看原因”，改为按实际错误（写盘/加密/凭据更新）给两步处理提示。')
 add(G,'connection-error','首次引导 · 连接中断',scenario='connection-error',note='连接错误合并到首次引导；没有独立错误页，也不显示重复错误卡片。')
 
 G='02 · 首页'
@@ -199,7 +200,7 @@ from urllib.parse import parse_qs
 for case in CASES:
     query=parse_qs(case['query']);scenario=query.get('scenario',[''])[0]
     expected=case['route']
-    if case['id'] in {'first-run','first-waiting','first-account','first-saving','first-failed','first-launch-pending','first-launch-failed','first-launch-done','first-recheck','brand-onboarding','connection-error'}:expected='onboarding'
+    if case['id'] in {'first-location','first-run','first-waiting','first-account','first-saving','first-failed','first-launch-pending','first-launch-failed','first-launch-done','first-recheck','brand-onboarding','connection-error'}:expected='onboarding'
     overrides={'detail-date-entry':'detail','detail-date-saved':'detail','resume-clear':'resume-clear','switch-error':'confirm','resume-message-saved':'settings','inline-resume':'resume'}
     expected={'automation':'settings','notifications':'settings','relay-accounts':'settings','hotkeys':'settings','archives':'settings','resume-message':'settings','edit':'detail'}.get(expected,expected)
     case['expected']=overrides.get(case['id'],expected)

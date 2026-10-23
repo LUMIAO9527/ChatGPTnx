@@ -8,6 +8,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
+using Microsoft.Win32.SafeHandles;
 
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2")]
 
@@ -15,6 +16,24 @@ internal static class UpdateFiles
 {
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool SetDllDirectory(string path);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileInformation
+    {
+        public uint Attributes;
+        public uint CreationTimeLow, CreationTimeHigh;
+        public uint LastAccessTimeLow, LastAccessTimeHigh;
+        public uint LastWriteTimeLow, LastWriteTimeHigh;
+        public uint VolumeSerial;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint Links;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation information);
 
     internal static void ResetDllDirectory()
     {
@@ -43,6 +62,26 @@ internal static class UpdateFiles
     internal static bool Same(string a, string b)
     {
         return String.Equals(Full(a), Full(b), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /* One identity for one file, whatever spelling reached it: an 8.3 short
+       name, a SUBST drive, a UNC alias and even a hard link all open the same
+       volume/file-index pair. Null means the file cannot be opened; callers
+       then fall back to the conservative normalized-path comparison. */
+    internal static string FileIdentity(string path)
+    {
+        try
+        {
+            using (var stream = new FileStream(Extended(path), FileMode.Open, FileAccess.Read,
+                                               FileShare.ReadWrite | FileShare.Delete))
+            {
+                FileInformation information;
+                if (!GetFileInformationByHandle(stream.SafeFileHandle, out information)) return null;
+                return information.VolumeSerial.ToString("x8") + ":"
+                    + information.FileIndexHigh.ToString("x8") + information.FileIndexLow.ToString("x8");
+            }
+        }
+        catch { return null; }
     }
 
     internal static void Plain(string path)

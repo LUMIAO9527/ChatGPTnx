@@ -9,6 +9,43 @@ import time
 from nx.storage import Paths
 from nx.core import Service
 
+SINGLE_INSTANCE_NAME = 'ChatGPTnx_SingleInstance'
+
+
+def acquire_single_instance(retry_seconds=0.0, name=SINGLE_INSTANCE_NAME):
+    """Create and own the single-instance mutex.
+
+    A restarted core can be launched while the previous core still holds the
+    mutex for the short time it takes to exit, so wait up to *retry_seconds*
+    before giving up. Returns the handle, or None when another instance still
+    owns it."""
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateMutexW.restype = ctypes.c_void_p
+    kernel.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle.restype = ctypes.c_bool
+    deadline = time.monotonic() + max(0.0, retry_seconds)
+    while True:
+        # CreateMutexW does not clear the thread's last error on success, so a
+        # previous ERROR_ALREADY_EXISTS must not be mistaken for this call.
+        ctypes.set_last_error(0)
+        mutex = kernel.CreateMutexW(None, False, name)
+        if not mutex:
+            raise OSError('无法创建单实例锁')
+        if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
+            return mutex
+        kernel.CloseHandle(mutex)
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
+
+
+def release_single_instance(mutex):
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    kernel.CloseHandle(mutex)
+
+
 def main():
     if os.name == 'nt':
         # Explicit AppUserModelID: Explorer binds tray/taskbar identity to it.
@@ -26,9 +63,15 @@ def main():
     parser.add_argument('--launcher-executable', type=Path, help=argparse.SUPPRESS)
     parser.add_argument('--launcher-pid', type=int, help=argparse.SUPPRESS)
     parser.add_argument('--runtime-check-report', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--location-setup', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--location-root', type=Path, help=argparse.SUPPRESS)
     args = parser.parse_args()
     if bool(args.update_ack) != bool(args.update_token):
         parser.error('update startup parameters must be paired')
+    if args.location_setup and (not args.location_root or not args.home
+                                or args.once or args.acceptance_relay or args.locate_task
+                                or args.runtime_check_report):
+        parser.error('location setup requires only --home and --location-root')
     if args.acceptance_relay and (not args.home or not args.selfcheck_report or args.once or args.locate_task):
         parser.error('relay acceptance requires --home and --selfcheck-report, without other actions')
     if args.locate_task:
@@ -77,14 +120,19 @@ def main():
         return
     mutex = None
     if os.name == 'nt':
-        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
-        kernel.CreateMutexW.restype = ctypes.c_void_p
-        kernel.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
-        mutex = kernel.CreateMutexW(None, False, 'ChatGPTnx_SingleInstance')
-        if not mutex:
-            raise OSError('无法创建单实例锁')
-        if ctypes.get_last_error() == 183:
-            print('ChatGPTnx 已在运行；请通过托盘打开。')
+        # A restarted core can arrive while the old core is still exiting.
+        # print() is invisible in a winexe, so the user gets a MessageBox.
+        mutex = acquire_single_instance(0.0 if args.once else 5.0)
+        if mutex is None:
+            if args.once:
+                print('ChatGPTnx 已在运行；请通过托盘打开。')
+            elif args.location_setup:
+                ctypes.windll.user32.MessageBoxW(
+                    None, 'ChatGPTnx 已在运行。请先从托盘退出正在运行的程序，再重新打开下载的文件完成首次设置。',
+                    'ChatGPTnx', 0x40)
+            else:
+                ctypes.windll.user32.MessageBoxW(
+                    None, 'ChatGPTnx 已在运行；请通过托盘打开。', 'ChatGPTnx', 0x40)
             return
     elif not args.once:
         raise SystemExit('桌面应用需要 Windows + WebView2；浏览器预览请打开 demo.html。')
@@ -109,7 +157,9 @@ def main():
                 'ChatGPTnx', 0x10)
         raise SystemExit('Credential protection failed; no service started') from None
     service = Service(paths, executable=launcher_executable,
-                      update_parent_pid=args.launcher_pid)
+                      update_parent_pid=args.launcher_pid,
+                      location_setup=args.location_setup,
+                      location_root=args.location_root)
     if args.acceptance_relay:
         from nx.acceptance import relay_once
         relay_once(service, args.acceptance_relay, args.selfcheck_report)
@@ -130,8 +180,7 @@ def main():
             startup_ready = lambda: startup_ack(root, launcher_executable, args.update_ack, args.update_token)
         Desktop(service, startup_ready=startup_ready).run()
     if mutex:
-        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
-        kernel.CloseHandle(mutex)
+        release_single_instance(mutex)
 
 if __name__ == '__main__':
     main()

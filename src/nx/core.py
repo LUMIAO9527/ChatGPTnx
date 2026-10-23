@@ -10,14 +10,20 @@ import logging
 from logging.handlers import RotatingFileHandler
 import math
 import os
+from pathlib import Path
 import re
 import subprocess
+import shutil
+import sys
+import tempfile
 import threading
 import time
 import uuid
 import unicodedata
-from .storage import Accounts, Paths, State, credential_metadata, identity, account_identity_key, activity_identity_key, claims, fingerprint
-from .credentials import read_credential_bytes, write_credential_bytes, credential_store_lock
+from .storage import (Accounts, Paths, State, atomic_bytes, credential_metadata, identity,
+                      account_identity_key, activity_identity_key, claims, fingerprint)
+from .credentials import (CredentialProtectionError, read_credential_bytes, write_credential_bytes,
+                          credential_store_lock)
 from .quota import Query
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 from .resume_flow import ResumeCoordinator
@@ -27,6 +33,82 @@ from .quota_policy import complete_windows, fresh_windows, known_windows, usable
 from .settings import valid_setting
 from .diagnostics import Diagnostics, query_summary
 from .reset_credits import ResetCredits, MESSAGES as RESET_MESSAGES
+
+
+class SaveFailure(RuntimeError):
+    """First-run save failure carrying the action class the panel should show."""
+
+    def __init__(self, message, code):
+        super().__init__(message)
+        self.code = code
+
+
+LOCATION_MARKER = '.chatgptnx-location'
+LOCATION_SCHEMA = 1
+# How long a freshly started launcher must stay alive before the restart is
+# considered handed off. The old core still owns the single-instance mutex
+# briefly, so a new core may spend that window retrying acquisition.
+LAUNCH_VERIFY_SECONDS = 1.2
+LAUNCH_VERIFY_INTERVAL = 0.1
+HOST_TEMP_ENV = 'CHATGPTNX_HOST_TEMP'
+
+
+def same_folder(first, second):
+    """Whether two paths name the same folder, including filesystem aliases.
+
+    String normalization alone only compares spelling: an 8.3 short name, a
+    junction, a SUBST drive or a UNC path can still point at one folder. File
+    identity (samefile) sees through all of them; a destination that does not
+    exist yet has no identity, so resolved paths cover the remaining spelling
+    differences."""
+    try:
+        return os.path.samefile(first, second)
+    except (OSError, ValueError):
+        pass
+    try:
+        return (os.path.normcase(str(Path(first).resolve()))
+                == os.path.normcase(str(Path(second).resolve())))
+    except (OSError, ValueError):
+        return False
+
+
+def location_marker_issue(folder):
+    """Return None when *folder* holds a valid confirmed-location marker.
+
+    Mirrors the launcher rule: a stale or unresolvable `moved_to` is NOT a
+    completed setup and must never let the app run normally in the download
+    folder. A short reason string is returned for the invalid cases; callers
+    treat any non-None value as "setup is still required" (or as a failed
+    write when read back right after writing)."""
+    marker = Path(folder) / LOCATION_MARKER
+    try:
+        raw = marker.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return 'missing'
+    except OSError:
+        return 'unreadable'
+    try:
+        document = json.loads(raw)
+    except ValueError:
+        return 'invalid'
+    if not isinstance(document, dict):
+        return 'invalid'
+    if 'moved_to' not in document:
+        return None
+    target = document.get('moved_to')
+    if not isinstance(target, str) or not target:
+        return 'invalid'
+    try:
+        target_path = Path(target)
+        if not target_path.is_absolute():
+            return 'invalid'
+        # A redirect back to the folder itself (including aliased spellings)
+        # would start the same launcher again, so it is never a location.
+        if same_folder(target_path, folder):
+            return 'self_redirect'
+        return None if (target_path / 'ChatGPTnx.exe').is_file() else 'missing_target'
+    except (OSError, ValueError):
+        return 'missing_target'
 
 
 def relay_candidates(accounts, current, excluded=()):
@@ -80,8 +162,12 @@ def relay_candidate(accounts, current, picked=None):
                 candidates[0] if candidates else None)
 
 class Service:
-    def __init__(self, paths: Paths, query=None, runner=None, executable=None, update_parent_pid=None):
+    def __init__(self, paths: Paths, query=None, runner=None, executable=None, update_parent_pid=None,
+                 location_setup=False, location_root=None):
         self.paths, self.accounts, self.state = paths, Accounts(paths), State(paths)
+        self.executable = executable
+        self.location_setup = bool(location_setup)
+        self.location_root = Path(location_root) if location_root else paths.root
         self.lock = threading.RLock()
         self.gate = threading.Lock()
         self.stop = threading.Event()
@@ -225,7 +311,9 @@ class Service:
                 self.diagnostics.operation_failed(kind, error)
                 message = str(error) if isinstance(error, (ValueError, RuntimeError)) else '操作失败；原数据未被主动删除，请重试'
                 with self.lock:
-                    self.last_error = {'id': ident, 'kind': kind, 'target': target, 'message': message[:180], 'created_at': time.time(), 'seen': False}
+                    self.last_error = {'id': ident, 'kind': kind, 'target': target, 'message': message[:180],
+                                       'code': getattr(error, 'code', None),
+                                       'created_at': time.time(), 'seen': False}
                     self.last_result = {'id': ident, 'kind': kind, 'target': target, 'ok': False,
                                         'source': source, 'previous': previous,
                                         'resume_session_id': self.operation.get('resume_session_id'),
@@ -319,7 +407,7 @@ class Service:
                 'auto_relay_email': ranked_auto[0]['email'] if ranked_auto and current_email not in excluded else None,
                 'relay_order': [a['email'] for a in ranked_all],
                 'chatgpt_running': app_running,
-                'pending': pending,
+                'pending': pending, 'location': self._location_state(),
                 'usage_revision': self.state.get('usage_revision', 0),
                 'resume': self.resumer.summary()}
 
@@ -1021,20 +1109,331 @@ class Service:
                 raise
         return self.begin('add_start', None, lambda: self._serialize_desktop(work))
 
+    def _recommended_location(self):
+        try:
+            if Path('D:/').exists():
+                return 'D:\\ChatGPTnx'
+        except OSError:
+            pass
+        return str(Path.home() / 'ChatGPTnx')
+
+    def _launcher(self):
+        value = os.environ.get('CHATGPTNX_LAUNCHER_EXE')
+        if value and Path(value).is_file():
+            return Path(value)
+        return None
+
+    def _location_state(self):
+        """The folder choice only exists in the temporary first-run bootstrap.
+
+        Normal launches never ask: the launcher either finds a location marker or
+        existing data, or runs the bootstrap with --location-setup."""
+        if not self.location_setup:
+            return None
+        return {'current': str(self.location_root),
+                'recommended': self._recommended_location(),
+                'can_relocate': self._launcher() is not None}
+
+    def location_bootstrap(self):
+        """Initial UI payload for a bootstrap launch (injected before the first poll)."""
+        return self._location_state()
+
+    def _write_location_marker(self, folder, moved_to=None):
+        """Atomically write one location marker, then prove it reads back valid.
+
+        The marker is the only record that the folder choice happened. A torn or
+        stale file would make a later launch treat the download folder as an
+        install, so it is written through the shared atomic helper (temp file +
+        fsync + os.replace) and validated before the app may restart on it."""
+        document = {'schema': LOCATION_SCHEMA}
+        if moved_to is not None:
+            document['moved_to'] = str(moved_to)
+        atomic_bytes(Path(folder) / LOCATION_MARKER,
+                     json.dumps(document, ensure_ascii=False).encode('utf-8'))
+        issue = location_marker_issue(folder)
+        if issue:
+            raise OSError(issue)
+
+    def _host_temp(self):
+        """Real host temp dir; never the private bootstrap temp."""
+        value = os.environ.get(HOST_TEMP_ENV)
+        if value:
+            try:
+                path = Path(value)
+                if path.is_dir():
+                    return str(path)
+            except OSError:
+                pass
+        return tempfile.gettempdir()
+
+    def _launch_environment(self):
+        """Environment for the installed launcher, detached from the bootstrap.
+
+        The launcher passes its real host temp through CHATGPTNX_HOST_TEMP, so
+        the process that outlives this one does not keep TEMP inside the
+        temporary setup directory the bootstrap is about to remove."""
+        environment = dict(os.environ)
+        host_temp = self._host_temp()
+        environment['TEMP'] = environment['TMP'] = host_temp
+        environment[HOST_TEMP_ENV] = host_temp
+        environment['CHATGPTNX_SHOW'] = '1'  # the normal instance opens its panel
+        # The target launcher derives its root, home, payload and private temp.
+        for name in ('CHATGPTNX_LAUNCHER_EXE', 'CHATGPTNX_LAUNCHER_PID',
+                     'CHATGPTNX_PAYLOAD_ID', 'CHATGPTNX_RUNTIME_ROOT'):
+            environment.pop(name, None)
+        return environment
+
+    def _schedule_launch(self, executable):
+        """Start the installed launcher directly and detached, from its folder.
+
+        No cmd.exe timeout relay: `timeout` exits immediately without a console,
+        so the old delay never existed and the old core kept the single-instance
+        mutex. The target process now starts at once with its own folder as cwd
+        (otherwise the bootstrap temp directory cannot be removed) and a host
+        TEMP. A launcher that dies during startup raises here instead of leaving
+        a closed panel with nothing running."""
+        executable = Path(executable)
+        flags = getattr(subprocess, 'DETACHED_PROCESS', 0) if os.name == 'nt' else 0
+        process = subprocess.Popen(
+            [str(executable)], cwd=str(executable.parent),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=flags, env=self._launch_environment())
+        deadline = time.monotonic() + LAUNCH_VERIFY_SECONDS
+        while time.monotonic() < deadline:
+            time.sleep(LAUNCH_VERIFY_INTERVAL)
+            if process.poll() is not None:
+                raise RuntimeError('启动的程序没有保持运行')
+        return process
+
+    def _finish_location(self):
+        self.stop.set()
+        time.sleep(0.3)  # let the new core see this process release its handle
+        os._exit(0)
+
+    def _copy_launcher(self, launcher, executable):
+        """Copy the launcher under a temporary name, then rename it into place.
+
+        A copy interrupted mid-write must not leave a file named
+        `ChatGPTnx.exe` in the chosen folder: a later setup run would read it as
+        an existing install without `_data` and refuse the folder. The temporary
+        file stays in the destination, so os.replace is an atomic same-volume
+        rename and the visible name appears only after a complete copy."""
+        temp = executable.with_name(f'.{executable.name}.{uuid.uuid4().hex}.tmp')
+        try:
+            shutil.copy2(launcher, temp)
+            os.replace(temp, executable)
+        except OSError:
+            try:
+                temp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+    def _rollback_install(self, executable, destination, redirect_folder=None):
+        """Remove only what a failed install transaction created, before launch.
+
+        Never called after a confirmed launch: by then the target process owns
+        its executable and the two markers *are* the installation. The caller
+        passes redirect_folder only when this transaction wrote the redirect."""
+        paths = [Path(destination) / LOCATION_MARKER, Path(executable)]
+        if redirect_folder is not None:
+            paths.append(Path(redirect_folder) / LOCATION_MARKER)
+        for path in paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _discard_location_marker(folder):
+        """Forget one marker this transaction wrote; never touches an install."""
+        try:
+            (Path(folder) / LOCATION_MARKER).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _restart_here(self, launcher, message):
+        try:
+            self._schedule_launch(launcher)
+        except (OSError, RuntimeError):
+            raise RuntimeError(message) from None
+
+    def keep_current_location(self):
+        """Confirm the current folder and restart the normal application there.
+
+        The marker is written before the restart, so a launch that fails still
+        leaves a valid confirmed location: the next manual open runs normally
+        instead of returning to setup."""
+        if not self.location_setup:
+            return {'ok': False, 'error': '当前不在首次设置流程中'}
+        launcher = self._launcher()
+        if not launcher:
+            return {'ok': False, 'error': '无法定位程序文件，请手动启动'}
+        def work():
+            self.phase('保存程序位置')
+            try:
+                self._write_location_marker(self.location_root)
+            except OSError:
+                raise RuntimeError('无法写入当前文件夹，请选择其他位置') from None
+            self._restart_here(launcher, '无法从当前位置启动程序，请手动打开后重试')
+            self._finish_location()
+        return self.begin('location', None, work)
+
+    def install_location(self, target):
+        """Copy the portable EXE to the chosen folder, mark it, and restart there.
+
+        Only the launcher is copied; the chosen folder materializes its own
+        runtime and data. The transaction is ordered copy → target marker →
+        redirect marker → launch: until the target is confirmed alive both
+        markers are provisional and a failure rolls all of it back, so a later
+        launch can never be sent to a half-written install. Once the launch is
+        confirmed nothing is undone, because removing a running executable is
+        both impossible and wrong."""
+        if not self.location_setup:
+            return {'ok': False, 'error': '当前不在首次设置流程中'}
+        if not isinstance(target, str) or not target.strip():
+            return {'ok': False, 'error': '请选择程序文件夹'}
+        launcher = self._launcher()
+        if not launcher:
+            return {'ok': False, 'error': '无法定位程序文件，请手动移动程序文件夹'}
+        current = self.location_root
+        destination = Path(os.path.abspath(os.path.expanduser(target.strip())))
+        same = same_folder(destination, current)
+        def work():
+            self.phase('准备程序文件夹')
+            if same:
+                try:
+                    self._write_location_marker(current)
+                except OSError:
+                    raise RuntimeError('无法写入当前文件夹，请选择其他位置') from None
+                self._restart_here(launcher, '无法从当前位置启动程序，请手动打开后重试')
+                self._finish_location()
+                return
+            try:
+                destination.mkdir(parents=True, exist_ok=True)
+            except OSError:
+                raise RuntimeError('无法创建所选文件夹，请选择其他位置') from None
+            executable = destination / 'ChatGPTnx.exe'
+            if executable.exists():
+                if (destination / '_data').is_dir():
+                    # A real existing install: redirect to it instead of making
+                    # a second copy. An EXE without data stays rejected.
+                    self.phase('连接到已有程序')
+                    try:
+                        self._write_location_marker(current, destination)
+                    except OSError:
+                        raise RuntimeError('无法写入当前文件夹，请选择其他位置') from None
+                    try:
+                        self._schedule_launch(executable)
+                    except (OSError, RuntimeError):
+                        # Only the redirect is ours here: the adopted folder
+                        # already had its executable and data before this run.
+                        self._discard_location_marker(current)
+                        raise RuntimeError('无法启动已有程序，请手动打开后重试') from None
+                    self._finish_location()
+                    return
+                raise RuntimeError('该文件夹已有 ChatGPTnx，请选择其他文件夹')
+            self.phase('复制程序')
+            try:
+                self._copy_launcher(launcher, executable)
+            except OSError:
+                raise RuntimeError('无法写入所选文件夹，请选择其他位置') from None
+            try:
+                self._write_location_marker(destination)
+            except OSError:
+                self._rollback_install(executable, destination)
+                raise RuntimeError('无法写入所选文件夹，请选择其他位置') from None
+            try:
+                self.phase('保存程序位置')
+                self._write_location_marker(current, destination)
+            except OSError:
+                # Both markers are still provisional: undo everything before
+                # anything starts, so the download folder never points at a
+                # target that was never confirmed running.
+                self._rollback_install(executable, destination, current)
+                raise RuntimeError('无法保存当前位置；安装已撤销，请将程序移到可写文件夹后重试') from None
+            self.phase('正在启动新位置')
+            try:
+                self._schedule_launch(executable)
+            except (OSError, RuntimeError):
+                self._rollback_install(executable, destination, current)
+                raise RuntimeError('无法从新位置启动程序；安装已撤销，请重试或选择其他位置') from None
+            self._finish_location()
+        return self.begin('location', None, work)
+
+    def _unreadable_live_credential(self):
+        """Return (code, message) when auth.json exists but cannot be read.
+
+        Kept localized to the first-run adoption path: a normal launch tolerates
+        a transiently unreadable credential and recovers on the next refresh."""
+        try:
+            if not self.paths.auth.exists():
+                return None
+        except OSError:
+            return None
+        try:
+            read_credential_bytes(self.paths.auth)
+        except CredentialProtectionError:
+            return 'protect', '当前 Windows 用户无法读取加密凭据'
+        except (OSError, ValueError):
+            return 'credential', '无法读取桌面端登录凭据；请重新登录 ChatGPT 后再保存'
+        return None
+
+    @staticmethod
+    def _failure_job(message, code):
+        """Run a precondition failure through begin() so the panel gets a code."""
+        def work():
+            raise SaveFailure(message, code)
+        return work
+
     def adopt_current(self):
         """Onboarding: save the account currently logged into the ChatGPT
         desktop app as the first (or an extra) roster entry. Unlike add_start
-        there is no previous account to park - nothing is at risk."""
+        there is no previous account to park - nothing is at risk.
+
+        The live credential is written through the same protected store used by
+        add/reauth instead of the helper script: a first install must not fail
+        because script execution is blocked, and the saved snapshot is decoded
+        back and checked before the account joins the roster."""
         email, account_id = identity(self.paths.auth)
         if not email or not account_id:
+            # identity() collapses OSError into "no login" by design; an auth
+            # file that exists but cannot be decrypted is a protection problem,
+            # not a prompt to log in, so classify it before showing that copy.
+            problem = self._unreadable_live_credential()
+            if problem:
+                code, message = problem
+                return self.begin('adopt', None, self._failure_job(message, code))
             return {'ok': False, 'error': '桌面端尚未登录；请先在 ChatGPT 桌面端完成登录'}
         if email in self.accounts.all():
             return {'ok': False, 'error': '这个账号已经在清单里'}
         def work():
             self.phase('保存当前登录的账号')
-            self.runner('-Snapshot')
-            self.accounts.activate(email)
-            self._record_current()
+            try:
+                verified = read_credential_bytes(self.paths.auth)
+            except CredentialProtectionError:
+                raise SaveFailure('当前 Windows 用户无法读取加密凭据', 'protect') from None
+            except (OSError, ValueError):
+                raise SaveFailure('无法读取桌面端登录凭据；请重新登录 ChatGPT 后再保存',
+                                  'credential') from None
+            if identity(self.paths.auth) != (email, account_id):
+                raise SaveFailure('登录凭据正在更新；请稍后重试或重新登录 ChatGPT', 'credential')
+            try:
+                with credential_store_lock(self.paths.snapshots):
+                    write_credential_bytes(self.paths.snapshot(email), verified)
+                    if identity(self.paths.snapshot(email)) != (email, account_id):
+                        raise SaveFailure('保存后的账号身份不一致；请重新登录 ChatGPT 后再保存',
+                                          'credential')
+                self.accounts.activate(email)
+                self._record_current()
+            except SaveFailure:
+                raise
+            except CredentialProtectionError:
+                raise SaveFailure('当前 Windows 用户无法加密凭据', 'protect') from None
+            except PermissionError:
+                raise SaveFailure('程序文件夹无法写入；请换到本地可写位置后重试', 'write') from None
+            except OSError:
+                raise SaveFailure('程序文件夹暂时不可写；请稍后重试', 'write') from None
         return self.begin('adopt', email, lambda: self._serialize_desktop(work),
                           refresh_after=True)
 

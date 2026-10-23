@@ -521,8 +521,22 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .flow-steps li.active { color: var(--ink); font-weight: 600; }
 .flow-steps li.active > span,.flow-steps li.done > span { background: var(--ink); color: var(--bg); border-color: transparent; }
 .flow-steps .icon { width: 13px; height: 13px; }
+/* Failure state swaps the progress row for the same two-step advice geometry. */
+.flow-steps--advice { flex-direction: column; align-items: flex-start; gap: 6px; margin: 12px 0 0; }
+.flow-steps--advice li { color: var(--ink); font-size: var(--font-body); }
+.flow-steps--advice li > span { width: 21px; height: 21px; font-size: var(--font-small); }
+/* First launch: one tappable folder row, no extra hint rows. */
+.location-row { display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 18px; padding: 12px 14px; border: 0; border-radius: var(--radius-ui); background: var(--surface); color: inherit; text-align: left; cursor: pointer; }
+.location-row:disabled { cursor: default; opacity: .7; }
+.location-mark { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 50%; background: var(--surface-2); display: flex; align-items: center; justify-content: center; }
+.location-mark .icon { width: 20px; height: 20px; }
+.location-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.location-path { font-size: var(--font-title); font-weight: 600; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.location-label { color: var(--muted); font-size: var(--font-small); }
+.location-row > .icon { width: 16px; height: 16px; color: var(--muted); flex: 0 0 16px; }
 
 .onboarding-foot { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; padding: 14px 20px 20px; flex: 0 0 auto; }
+.onboarding-foot.single { grid-template-columns: 1fr; }
 
 /* Shared two-line account choices. Membership never competes with the name. */
 .account-choice-identity { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 11px 2px; text-align: left; }

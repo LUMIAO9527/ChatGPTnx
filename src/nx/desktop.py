@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 from ctypes import wintypes as wt
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -221,6 +222,28 @@ def popup_position(icon, work, monitor, size, gap=8, margin=8):
     return x, y
 
 
+def folder_dialog_directory(recommended):
+    """Start the native folder dialog at a folder that exists on this machine.
+
+    The product suggests D:\\ChatGPTnx on any machine, but a missing path makes
+    WinForms fall back unpredictably (typically D:\\ even without a D: drive).
+    Start at the recommendation when it exists, else its nearest existing
+    ancestor (the drive root for a future D: folder, the user profile for the
+    default profile path), then the user profile and current directory. Never
+    return a string the shell cannot resolve; the caller omits the option then."""
+    for candidate in (recommended, Path.home(), Path.cwd()):
+        try:
+            path = Path(candidate) if candidate else None
+        except (TypeError, OSError, ValueError):
+            continue
+        while path is not None and not path.is_dir():
+            parent = path.parent
+            path = parent if parent != path else None
+        if path is not None:
+            return str(path)
+    return None
+
+
 def promote_tray_icon():
     """Win11 keeps per-exe tray placement under HKCU\\...NotifyIconSettings; a
     new executable defaults to the hidden overflow area. Self-promote our entry
@@ -369,6 +392,9 @@ class Bridge:
     def remove(self, email): return self._service.remove(email)
     def add_start(self): return self._service.add_start()
     def adopt_current(self): return self._service.adopt_current()
+    def choose_program_folder(self): return self._host.choose_program_folder()
+    def keep_current_location(self): return self._service.keep_current_location()
+    def install_location(self, target): return self._service.install_location(target)
     def add_cancel(self): return self._service.add_cancel()
     def add_finish(self): return self._service.add_finish()
     def reauth_start(self, email): return self._service.reauth_start(email)
@@ -531,6 +557,17 @@ class Desktop:
         result = self.service.switch(email)
         if not result.get('ok') and self.icon:
             self.icon.notify(result.get('error', '暂时无法切换'), 'ChatGPTnx')
+
+    def choose_program_folder(self):
+        try:
+            import webview
+            directory = folder_dialog_directory(self.service._recommended_location())
+            options = {'directory': directory} if directory else {}
+            result = self.window.create_file_dialog(webview.FOLDER_DIALOG, **options)
+        except Exception:
+            return {'ok': False, 'error': '无法打开文件夹选择'}
+        path = result[0] if result else None
+        return {'ok': True, 'path': str(path) if path else None}
 
     def layout(self):
         if not self.window or not self.ready.is_set() or not self.visible:
@@ -850,7 +887,87 @@ class Desktop:
         user32.GetWindowLongPtrW.restype = ctypes.c_longlong
         return bool(user32.GetWindowLongPtrW(hwnd, -20) & 0x00000008) == enabled
 
+    def _setup_active(self):
+        return bool(getattr(self.service, 'location_setup', False))
+
+    def _setup_busy(self):
+        """A location transaction is committing and the bootstrap must stay.
+
+        Closing now would stop the service between copy, markers and launch and
+        leave a folder that later reads as a broken install. `operation` covers
+        the transaction itself; the gate covers the moment begin() has taken it
+        but has not published the operation yet."""
+        if not self._setup_active():
+            return False
+        if getattr(self.service, 'operation', None):
+            return True
+        gate = getattr(self.service, 'gate', None)
+        try:
+            return bool(gate is not None and gate.locked())
+        except Exception:
+            return False
+
+    def _refuse_setup_close(self):
+        self.service.log.info('setup_close_refused reason=busy')
+        if self.icon:
+            try:
+                self.icon.notify('请等待安装完成', 'ChatGPTnx')
+            except Exception:
+                pass
+
+    def _close_setup(self, close_window=True):
+        """Bootstrap close: no tray limbo, the temporary process must end.
+
+        Normal desktops hide to the tray; a first-run bootstrap has no useful
+        hidden state, so an explicit close (Alt+F4, Escape, tray click) ends the
+        process and lets the launcher remove its temporary folder. While a
+        location transaction is committing the close is refused instead.
+        Returns False when the close was refused."""
+        if self._setup_busy():
+            self._refuse_setup_close()
+            return False
+        if self.closing:
+            return True
+        self.service.log.info('shutdown_requested source=setup_close')
+        self.closing = True
+        self.service.stop.set()
+        try:
+            self.hotkeys.close()
+        except Exception:
+            pass
+        try:
+            if self.icon:
+                self.icon.stop()
+        except Exception:
+            pass
+        if not close_window:
+            return True  # the framework is already closing this window
+
+        def close():
+            form = self._form()
+            if form is not None and not form.IsDisposed:
+                form.Close()
+                return
+            try:
+                if self.window:
+                    self.window.destroy()
+            except Exception:
+                pass
+
+        if not self._dispatch_ui(close):
+            close()
+        return True
+
     def hide(self, *args, reason='user'):
+        # The first-run bootstrap panel must outlive every automatic foreground
+        # or style change: the native folder dialog takes the foreground while
+        # the choice is made, and a shape or repair pass must never hide the only
+        # setup surface. Only an explicit user close ends the bootstrap, and
+        # even that waits until a running location transaction commits.
+        if self._setup_active():
+            if reason == 'user':
+                self._close_setup()
+            return
         if reason in ('blur', 'focus'):
             if self._login_workflow():
                 return
@@ -1061,6 +1178,8 @@ class Desktop:
         def confirm_hide(token):
             if token != self._hide_token:
                 return  # a show() happened after this confirmation was armed
+            if self._setup_active():
+                return  # the setup panel owns the foreground while it is open
             if not self.visible or not self.window:
                 return
             foreground = user32.GetForegroundWindow()
@@ -1219,6 +1338,9 @@ class Desktop:
             self.service.state.update(reset_expiry_notices=dict(list(seen.items())[-500:]))
 
     def quit(self, *args):
+        if self._setup_busy():
+            self._refuse_setup_close()
+            return
         if self.service.operation or self.service.state.get('adding') or self.service.state.get('reauth'):
             self.icon.notify('请先完成当前操作，或取消登录以恢复原账号。', 'ChatGPTnx')
             return
@@ -1249,6 +1371,11 @@ class Desktop:
     def on_closing(self):
         if self.closing:
             return True
+        if self._setup_active():
+            # Alt+F4 on the setup panel must end the bootstrap, not hide it -
+            # unless a location transaction is still committing, in which case
+            # the close is vetoed and the only setup surface stays visible.
+            return True if self._close_setup(close_window=False) else False
         self.hide()
         return False
 
@@ -1270,6 +1397,14 @@ class Desktop:
         import webview
         settings = self.service.state.get('settings')
         panel = (self.service.paths.resources / 'panel.html').read_text(encoding='utf-8')
+        setup = self.service.location_bootstrap()
+        if setup:
+            # First render must already be the folder choice; the temporary
+            # bootstrap owns all state until the location is confirmed.
+            panel = panel.replace(
+                '<script>window.NX_CONFIG=',
+                '<script>window.NX_SETUP=' + json.dumps(setup, ensure_ascii=False) + ';window.NX_CONFIG=',
+                1)
         size = self.config['sizes']['home']
         dark = settings.get('appearance', 'system') == 'dark' or (
             settings.get('appearance', 'system') == 'system' and system_prefers_dark())

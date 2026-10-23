@@ -13,8 +13,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch, Mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+import nx.core as core
 from nx.storage import Paths, State, Accounts, atomic_bytes, identity, credential_metadata, safe_email, timestamp
-from nx.core import Service, relay_candidate
+from nx.core import (Service, relay_candidate, location_marker_issue,
+                     LOCATION_MARKER)
 from nx.quota import RPCError, Query, normalize_limits, normalize_usage
 from nx.quota_http import credential_fingerprint
 from nx.desktop import Desktop, launch_chatgpt, popup_position
@@ -145,6 +147,59 @@ class Fixture(unittest.TestCase):
             email,_=identity(self.paths.auth)
             atomic_bytes(self.paths.snapshot(email),self.paths.auth.read_bytes())
     def refresh(self):self.service.refresh();self.wait()
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows DPAPI credential store')
+    def test_adopt_saves_live_credential_without_helper_script(self):
+        atomic_bytes(self.paths.auth, auth('fresh@example.com'))
+        with patch.object(self.service, 'runner',
+                          side_effect=AssertionError('helper script must not run')):
+            result = self.service.adopt_current()
+        self.assertTrue(result.get('accepted'))
+        self.wait()
+        self.assertIn('fresh@example.com', self.accounts.all())
+        saved = self.paths.snapshot('fresh@example.com')
+        self.assertEqual(identity(saved), ('fresh@example.com', 'fixture-fresh@example.com'))
+        self.assertIn(b'chatgptnx_credential', saved.read_bytes())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows DPAPI credential store')
+    def test_adopt_write_failure_is_actionable(self):
+        atomic_bytes(self.paths.auth, auth('fresh-write@example.com'))
+        with patch('nx.core.write_credential_bytes', side_effect=PermissionError('denied')):
+            self.assertTrue(self.service.adopt_current().get('accepted'))
+            self.wait()
+        self.assertEqual(self.service.last_error['code'], 'write')
+        self.assertNotIn('fresh-write@example.com', self.accounts.all())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows DPAPI credential store')
+    def test_adopt_protection_failure_is_actionable(self):
+        from nx.credentials import CredentialProtectionError
+        atomic_bytes(self.paths.auth, auth('fresh-protect@example.com'))
+        with patch('nx.core.write_credential_bytes',
+                   side_effect=CredentialProtectionError('synthetic protection failure')):
+            self.assertTrue(self.service.adopt_current().get('accepted'))
+            self.wait()
+        self.assertEqual(self.service.last_error['code'], 'protect')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows DPAPI credential store')
+    def test_adopt_credential_failure_is_actionable(self):
+        atomic_bytes(self.paths.auth, auth('fresh-credential@example.com'))
+        with patch('nx.core.read_credential_bytes', side_effect=OSError('changed')):
+            self.assertTrue(self.service.adopt_current().get('accepted'))
+            self.wait()
+        self.assertEqual(self.service.last_error['code'], 'credential')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows DPAPI credential store')
+    def test_adopt_existing_but_unreadable_auth_reports_protection(self):
+        from nx.credentials import CredentialProtectionError
+        dispatch = {'protect': CredentialProtectionError('synthetic'),
+                    'credential': OSError('synthetic')}
+        for code, failure in dispatch.items():
+            with self.subTest(code=code):
+                with patch('nx.storage._credential_record', return_value=({}, {})), \
+                        patch('nx.core.read_credential_bytes', side_effect=failure):
+                    self.assertTrue(self.service.adopt_current().get('accepted'))
+                    self.wait()
+                self.assertEqual(self.service.last_error['code'], code)
 
     def test_stale_relay_candidate_is_refreshed_and_selected(self):
         self.refresh()
@@ -1287,6 +1342,397 @@ class ProtocolTests(unittest.TestCase):
 
 
 
+
+
+class SingleInstanceTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows named mutex')
+    def test_restart_retries_until_the_previous_core_exits(self):
+        import uuid
+        from chatgptnx import acquire_single_instance, release_single_instance
+        # Never touch the production mutex: the user's app may be running.
+        name = 'ChatGPTnx_SingleInstance.Test.' + uuid.uuid4().hex
+        first = acquire_single_instance(0, name)
+        self.assertIsNotNone(first)
+        try:
+            # A deliberate second launch gives up immediately.
+            self.assertIsNone(acquire_single_instance(0, name))
+            # A restart handoff waits for the old core to release the mutex.
+            timer = threading.Timer(0.12, release_single_instance, args=(first,))
+            timer.start()
+            try:
+                second = acquire_single_instance(2.0, name)
+            finally:
+                timer.join()
+            self.assertIsNotNone(second)
+            release_single_instance(second)
+        finally:
+            release_single_instance(first)  # harmless if the timer already did
+
+
+class LocationSetupTests(unittest.TestCase):
+    """The first-run bootstrap chooses a folder before anything is written."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.download = root / 'download'
+        self.download.mkdir()
+        self.launcher = root / 'ChatGPTnx.exe'
+        self.launcher.write_bytes(b'synthetic-launcher')
+        self.paths = Paths(root / 'bootstrap', root / 'codex')
+        atomic_bytes(self.paths.auth, auth('fresh@example.com'))
+        self.environment = patch.dict(os.environ, {'CHATGPTNX_LAUNCHER_EXE': str(self.launcher)})
+        self.environment.start()
+        self.service = Service(self.paths, FakeQuery(), lambda *args: None,
+                               executable=self.launcher, location_setup=True,
+                               location_root=self.download)
+
+    def tearDown(self):
+        self.service.stop.set()
+        for handler in list(self.service.log.handlers):
+            self.service.log.removeHandler(handler)
+            handler.close()
+        self.environment.stop()
+        self.tmp.cleanup()
+
+    def test_bootstrap_payload_points_at_the_download_folder(self):
+        info = self.service.get_data()['location']
+        self.assertEqual(Path(info['current']), self.download)
+        self.assertTrue(info['recommended'].endswith('ChatGPTnx'))
+        self.assertTrue(info['can_relocate'])
+
+    def test_bootstrap_writes_nothing_beside_the_download(self):
+        self.service.get_data()
+        self.assertEqual(list(self.download.iterdir()), [])
+
+    def test_normal_launch_never_offers_the_folder_choice(self):
+        root = Path(self.tmp.name)
+        service = Service(Paths(root / 'normal', root / 'codex-normal'), FakeQuery(),
+                          lambda *args: None, executable=self.launcher)
+        try:
+            self.assertIsNone(service.get_data()['location'])
+        finally:
+            service.stop.set()
+            for handler in list(service.log.handlers):
+                service.log.removeHandler(handler)
+                handler.close()
+
+    def test_keep_current_marks_the_download_folder_and_restarts(self):
+        with patch.object(self.service, '_schedule_launch') as schedule, \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.keep_current_location()['ok'])
+            self.wait()
+        document = json.loads((self.download / '.chatgptnx-location').read_text(encoding='utf-8'))
+        self.assertNotIn('moved_to', document)
+        schedule.assert_called_once_with(self.launcher)
+        finish.assert_called_once()
+
+    def test_keep_current_failed_launch_keeps_a_recoverable_location(self):
+        # A failed restart must not undo the confirmed location: the marker is
+        # valid, so the next manual open starts the normal app instead of setup.
+        with patch.object(self.service, '_schedule_launch',
+                          side_effect=RuntimeError('synthetic start failure')), \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.keep_current_location()['ok'])
+            self.wait()
+        self.assertIsNone(location_marker_issue(self.download))
+        finish.assert_not_called()
+        self.assertIn('无法从当前位置启动程序', self.service.last_error['message'])
+
+    def test_install_copies_the_launcher_and_redirects_the_download(self):
+        target = Path(self.tmp.name) / 'target'
+        with patch.object(self.service, '_schedule_launch') as schedule, \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertEqual((target / 'ChatGPTnx.exe').read_bytes(), self.launcher.read_bytes())
+        installed = json.loads((target / '.chatgptnx-location').read_text(encoding='utf-8'))
+        self.assertNotIn('moved_to', installed)
+        redirect = json.loads((self.download / '.chatgptnx-location').read_text(encoding='utf-8'))
+        self.assertEqual(Path(redirect['moved_to']), target)
+        schedule.assert_called_once_with(target / 'ChatGPTnx.exe')
+        finish.assert_called_once()
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows path comparison')
+    def test_same_folder_selection_does_not_copy_again(self):
+        with patch.object(self.service, '_schedule_launch') as schedule, \
+                patch.object(self.service, '_finish_location'):
+            self.assertTrue(self.service.install_location(str(self.download).upper())['ok'])
+            self.wait()
+        self.assertTrue((self.download / '.chatgptnx-location').is_file())
+        schedule.assert_called_once_with(self.launcher)
+
+    def test_existing_program_is_rejected_without_copying(self):
+        target = Path(self.tmp.name) / 'occupied'
+        target.mkdir()
+        (target / 'ChatGPTnx.exe').write_bytes(b'other-program')
+        with patch.object(self.service, '_schedule_launch') as schedule, \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertEqual((target / 'ChatGPTnx.exe').read_bytes(), b'other-program')
+        self.assertIn('已有 ChatGPTnx', self.service.last_error['message'])
+        schedule.assert_not_called()
+        finish.assert_not_called()
+
+    def test_setup_without_launcher_has_no_install_action(self):
+        with patch.dict(os.environ, {'CHATGPTNX_LAUNCHER_EXE': ''}):
+            info = self.service.get_data()['location']
+            self.assertFalse(info['can_relocate'])
+            result = self.service.keep_current_location()
+        self.assertFalse(result['ok'])
+
+    def test_invalid_markers_never_count_as_a_confirmed_location(self):
+        marker = self.download / LOCATION_MARKER
+        cases = {
+            'missing': None,
+            'corrupt': 'not-json',
+            'stale target': {'schema': 1, 'moved_to': str(Path(self.tmp.name) / 'gone')},
+            'empty target': {'schema': 1, 'moved_to': ''},
+            'relative target': {'schema': 1, 'moved_to': 'installed'},
+        }
+        for name, document in cases.items():
+            with self.subTest(name=name):
+                marker.unlink(missing_ok=True)
+                if document is not None:
+                    marker.write_text(json.dumps(document), encoding='utf-8')
+                self.assertIsNotNone(location_marker_issue(self.download))
+        marker.write_text(json.dumps({'schema': 1}), encoding='utf-8')
+        self.assertIsNone(location_marker_issue(self.download))
+
+    def test_marker_writes_are_atomic_and_leave_valid_json(self):
+        with patch.object(self.service, '_schedule_launch'), \
+                patch.object(self.service, '_finish_location'):
+            self.assertTrue(self.service.keep_current_location()['ok'])
+            self.wait()
+        marker = self.download / LOCATION_MARKER
+        self.assertEqual(json.loads(marker.read_text(encoding='utf-8')), {'schema': 1})
+        self.assertEqual(list(self.download.glob('.' + LOCATION_MARKER + '.*.tmp')), [])
+        target = Path(self.tmp.name) / 'atomic-target'
+        with patch.object(self.service, '_schedule_launch'), \
+                patch.object(self.service, '_finish_location'):
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertEqual(json.loads(marker.read_text(encoding='utf-8')),
+                         {'schema': 1, 'moved_to': str(target)})
+        self.assertEqual(json.loads((target / LOCATION_MARKER).read_text(encoding='utf-8')),
+                         {'schema': 1})
+
+    def test_install_rolls_back_when_the_target_does_not_start(self):
+        target = Path(self.tmp.name) / 'failing-target'
+        with patch.object(self.service, '_schedule_launch',
+                          side_effect=RuntimeError('synthetic start failure')), \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertFalse((target / 'ChatGPTnx.exe').exists())
+        self.assertFalse((target / LOCATION_MARKER).exists())
+        self.assertFalse((self.download / LOCATION_MARKER).exists())
+        finish.assert_not_called()
+        self.assertIn('安装已撤销', self.service.last_error['message'])
+        self.assertIsNone(self.service.operation)
+
+    def test_install_writes_both_markers_before_it_launches_the_target(self):
+        target = Path(self.tmp.name) / 'marker-order-target'
+        seen = {}
+        def launch(executable):
+            seen['executable'] = Path(executable)
+            seen['target_exe'] = (target / 'ChatGPTnx.exe').is_file()
+            seen['target_marker'] = (target / LOCATION_MARKER).read_text(encoding='utf-8')
+            seen['redirect'] = (self.download / LOCATION_MARKER).read_text(encoding='utf-8')
+            raise RuntimeError('synthetic start failure')
+        with patch.object(self.service, '_schedule_launch', side_effect=launch) as schedule, \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertEqual(seen['executable'], target / 'ChatGPTnx.exe')
+        self.assertTrue(seen['target_exe'])
+        self.assertEqual(json.loads(seen['target_marker']), {'schema': 1})
+        self.assertEqual(Path(json.loads(seen['redirect'])['moved_to']), target)
+        schedule.assert_called_once_with(target / 'ChatGPTnx.exe')
+        finish.assert_not_called()
+        # Nothing survives a launch that was not confirmed.
+        self.assertFalse((target / 'ChatGPTnx.exe').exists())
+        self.assertFalse((target / LOCATION_MARKER).exists())
+        self.assertFalse((self.download / LOCATION_MARKER).exists())
+
+    def test_redirect_write_failure_happens_before_launch_and_leaves_no_files(self):
+        target = Path(self.tmp.name) / 'redirect-failure-target'
+        original = self.service._write_location_marker
+        def writer(folder, moved_to=None):
+            if Path(folder) == self.download and moved_to is not None:
+                raise OSError('synthetic redirect failure')
+            return original(folder, moved_to)
+        with patch.object(self.service, '_write_location_marker', side_effect=writer), \
+                patch.object(self.service, '_schedule_launch') as schedule, \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        schedule.assert_not_called()
+        finish.assert_not_called()
+        self.assertFalse((target / 'ChatGPTnx.exe').exists())
+        self.assertFalse((target / LOCATION_MARKER).exists())
+        self.assertEqual(list(self.download.iterdir()), [])
+        self.assertIn('安装已撤销', self.service.last_error['message'])
+        self.assertIsNone(self.service.operation)
+
+    def test_confirmed_launch_keeps_both_markers_and_never_rolls_back(self):
+        target = Path(self.tmp.name) / 'confirmed-target'
+        seen = {}
+        def launch(executable):
+            seen['executable'] = Path(executable)
+            seen['target_marker'] = (target / LOCATION_MARKER).is_file()
+            seen['redirect'] = (self.download / LOCATION_MARKER).is_file()
+            return Mock()
+        def finish():
+            seen['markers_at_finish'] = ((target / LOCATION_MARKER).is_file()
+                                         and (self.download / LOCATION_MARKER).is_file())
+        with patch.object(self.service, '_schedule_launch', side_effect=launch) as schedule, \
+                patch.object(self.service, '_finish_location', side_effect=finish) as finish_mock:
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertEqual(seen['executable'], target / 'ChatGPTnx.exe')
+        self.assertTrue(seen['target_marker'] and seen['redirect'])
+        self.assertTrue(seen['markers_at_finish'])
+        self.assertTrue((target / 'ChatGPTnx.exe').is_file())
+        self.assertTrue((target / LOCATION_MARKER).is_file())
+        self.assertTrue((self.download / LOCATION_MARKER).is_file())
+        schedule.assert_called_once_with(target / 'ChatGPTnx.exe')
+        finish_mock.assert_called_once()
+
+    def test_interrupted_copy_never_leaves_a_destination_executable(self):
+        target = Path(self.tmp.name) / 'copy-failure-target'
+        def partial_copy(source, destination, **kwargs):
+            Path(destination).write_bytes(b'partial-launcher')
+            raise OSError('synthetic copy failure')
+        with patch.object(core.shutil, 'copy2', side_effect=partial_copy), \
+                patch.object(self.service, '_schedule_launch') as schedule, \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertFalse((target / 'ChatGPTnx.exe').exists())
+        self.assertEqual(list(target.iterdir()), [])
+        schedule.assert_not_called()
+        finish.assert_not_called()
+        self.assertIn('无法写入所选文件夹', self.service.last_error['message'])
+
+    def test_launcher_copy_is_renamed_only_after_the_copy_completes(self):
+        target = Path(self.tmp.name) / 'atomic-copy-target'
+        visible = []
+        real_copy = core.shutil.copy2
+        def copy(source, destination, **kwargs):
+            visible.append((target / 'ChatGPTnx.exe').exists())
+            return real_copy(source, destination, **kwargs)
+        with patch.object(core.shutil, 'copy2', side_effect=copy), \
+                patch.object(self.service, '_schedule_launch'), \
+                patch.object(self.service, '_finish_location'):
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertEqual(visible, [False])
+        self.assertEqual((target / 'ChatGPTnx.exe').read_bytes(), self.launcher.read_bytes())
+
+    def test_self_redirect_marker_is_not_a_confirmed_location(self):
+        (self.download / 'ChatGPTnx.exe').write_bytes(self.launcher.read_bytes())
+        (self.download / LOCATION_MARKER).write_text(
+            json.dumps({'schema': 1, 'moved_to': str(self.download)}), encoding='utf-8')
+        self.assertEqual(location_marker_issue(self.download), 'self_redirect')
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows path identity')
+    def test_aliased_folder_selection_is_the_same_folder(self):
+        link = Path(self.tmp.name) / 'download-junction'
+        try:
+            import _winapi
+            _winapi.CreateJunction(str(self.download), str(link))
+        except (ImportError, AttributeError, OSError):
+            self.skipTest('junction creation is unavailable')
+        try:
+            with patch.object(self.service, '_schedule_launch') as schedule, \
+                    patch.object(self.service, '_finish_location'):
+                self.assertTrue(self.service.install_location(str(link))['ok'])
+                self.wait()
+            # The alias resolves to the download folder: no second copy and the
+            # launcher is restarted from the real location.
+            self.assertTrue((self.download / LOCATION_MARKER).is_file())
+            self.assertFalse((self.download / 'ChatGPTnx.exe').exists())
+            schedule.assert_called_once_with(self.launcher)
+        finally:
+            try:
+                os.rmdir(link)  # removes the junction, never the target
+            except OSError:
+                pass
+
+    def test_install_adopts_a_real_existing_install_folder(self):
+        target = Path(self.tmp.name) / 'existing-install'
+        target.mkdir()
+        (target / 'ChatGPTnx.exe').write_bytes(b'existing-launcher')
+        (target / '_data').mkdir()
+        with patch.object(self.service, '_schedule_launch') as schedule, \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertEqual((target / 'ChatGPTnx.exe').read_bytes(), b'existing-launcher')
+        self.assertFalse((target / LOCATION_MARKER).exists())
+        redirect = json.loads((self.download / LOCATION_MARKER).read_text(encoding='utf-8'))
+        self.assertEqual(Path(redirect['moved_to']), target)
+        schedule.assert_called_once_with(target / 'ChatGPTnx.exe')
+        finish.assert_called_once()
+
+    def test_failed_adoption_of_an_existing_install_leaves_no_redirect(self):
+        target = Path(self.tmp.name) / 'failed-adoption'
+        target.mkdir()
+        (target / 'ChatGPTnx.exe').write_bytes(b'existing-launcher')
+        (target / '_data').mkdir()
+        with patch.object(self.service, '_schedule_launch',
+                          side_effect=RuntimeError('synthetic start failure')), \
+                patch.object(self.service, '_finish_location') as finish:
+            self.assertTrue(self.service.install_location(str(target))['ok'])
+            self.wait()
+        self.assertFalse((self.download / LOCATION_MARKER).exists())
+        self.assertEqual((target / 'ChatGPTnx.exe').read_bytes(), b'existing-launcher')
+        finish.assert_not_called()
+        self.assertIn('无法启动已有程序', self.service.last_error['message'])
+
+    def test_restart_is_detached_in_the_target_folder_with_a_host_temp(self):
+        target = Path(self.tmp.name) / 'restart-target'
+        target.mkdir()
+        executable = target / 'ChatGPTnx.exe'
+        executable.write_bytes(b'launcher')
+        host = Path(self.tmp.name) / 'host-temp'
+        host.mkdir()
+        process = Mock()
+        process.poll.return_value = None
+        with patch.dict(os.environ, {'CHATGPTNX_HOST_TEMP': str(host)}), \
+                patch('nx.core.subprocess.Popen', return_value=process) as popen, \
+                patch('nx.core.LAUNCH_VERIFY_SECONDS', 0):
+            self.assertIs(self.service._schedule_launch(executable), process)
+        command, options = popen.call_args.args[0], popen.call_args.kwargs
+        self.assertEqual(command, [str(executable)])
+        self.assertEqual(options['cwd'], str(target))
+        self.assertEqual(options['env']['TEMP'], str(host))
+        self.assertEqual(options['env']['TMP'], str(host))
+        self.assertNotIn('cmd.exe', ' '.join(command))
+        if os.name == 'nt':
+            self.assertTrue(options['creationflags'] & subprocess.DETACHED_PROCESS)
+
+    def test_restart_verification_reports_a_target_that_exits_immediately(self):
+        target = Path(self.tmp.name) / 'dying-target'
+        target.mkdir()
+        executable = target / 'ChatGPTnx.exe'
+        executable.write_bytes(b'launcher')
+        process = Mock()
+        process.poll.return_value = 1
+        with patch('nx.core.subprocess.Popen', return_value=process), \
+                patch('nx.core.LAUNCH_VERIFY_SECONDS', 0.05), \
+                patch('nx.core.LAUNCH_VERIFY_INTERVAL', 0.001):
+            with self.assertRaises(RuntimeError):
+                self.service._schedule_launch(executable)
+
+    def wait(self, timeout=4):
+        deadline = time.monotonic() + timeout
+        while self.service.operation or self.service.gate.locked():
+            if time.monotonic() > deadline:
+                self.fail('operation did not finish')
+            time.sleep(.015)
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

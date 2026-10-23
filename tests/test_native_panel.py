@@ -6,7 +6,9 @@ No WebView runtime, real accounts, registry writes or interactive desktop requir
 from pathlib import Path
 import ctypes
 import inspect
+import os
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -276,6 +278,126 @@ class PanelTests(unittest.TestCase):
         self.assertTrue(self.host.visible)
         self.form.Hide.assert_not_called()
 
+    def test_setup_panel_ignores_automatic_hide_reasons(self):
+        self.host.service.location_setup = True
+        self.host.visible = True
+        for reason in ('blur', 'focus', 'outside'):
+            self.host.hide(reason=reason)
+        self.assertTrue(self.host.visible)
+        self.assertFalse(self.host.closing)
+        self.form.Hide.assert_not_called()
+
+    def test_setup_foreground_hook_respects_the_setup_panel(self):
+        # The WinEvent confirmation is a closure; verify both hide entry points
+        # consult the bootstrap exemption, and that the setup close quits.
+        self.assertIn('_setup_active()', inspect.getsource(desktop.Desktop.hide))
+        self.assertIn('_setup_active()', inspect.getsource(desktop.Desktop.watch_focus))
+        self.assertIn('_setup_active()', inspect.getsource(desktop.Desktop.on_closing))
+
+    def test_setup_user_close_ends_the_bootstrap(self):
+        self.host.service.location_setup = True
+        self.host.service.stop = Mock()
+        self.host.icon = Mock()
+        self.host.visible = True
+        self.host.hide(reason='user')
+        self.assertTrue(self.host.closing)
+        self.host.service.stop.set.assert_called_once()
+        self.form.Hide.assert_not_called()
+
+    def test_setup_alt_f4_ends_the_bootstrap_instead_of_hiding(self):
+        self.host.service.location_setup = True
+        self.host.service.stop = Mock()
+        self.host.icon = Mock()
+        self.host.visible = True
+        self.assertTrue(self.host.on_closing())
+        self.assertTrue(self.host.closing)
+        self.host.service.stop.set.assert_called_once()
+        self.form.Hide.assert_not_called()
+
+    def test_regular_alt_f4_still_hides_to_the_tray(self):
+        self.host.visible = True
+        self.assertFalse(self.host.on_closing())
+        self.assertFalse(self.host.closing)
+        self.form.Hide.assert_called_once()
+
+    def test_setup_panel_ignores_shape_and_repair_hides(self):
+        self.host.service.location_setup = True
+        self.host.visible = True
+        for reason in ('shape', 'repair', 'complete'):
+            self.host.hide(reason=reason)
+        self.assertTrue(self.host.visible)
+        self.assertFalse(self.host.closing)
+        self.form.Hide.assert_not_called()
+
+    def test_setup_close_is_refused_while_a_location_operation_is_active(self):
+        service = self.host.service
+        service.location_setup = True
+        service.operation = {'kind': 'location', 'phase': '复制程序'}
+        service.stop = Mock()
+        service.gate = Mock()
+        service.gate.locked.return_value = False
+        self.host.icon = Mock()
+        self.host.visible = True
+        # Escape and a tray click both arrive as an explicit user hide.
+        self.host.hide(reason='user')
+        self.assertFalse(self.host.closing)
+        self.assertTrue(self.host.visible)
+        service.stop.set.assert_not_called()
+        self.form.Hide.assert_not_called()
+        self.host.icon.notify.assert_called_once_with('请等待安装完成', 'ChatGPTnx')
+        # Alt+F4 is vetoed instead of ending the bootstrap.
+        self.assertFalse(self.host.on_closing())
+        self.assertFalse(self.host.closing)
+        service.stop.set.assert_not_called()
+        # Once the transaction finished, the next explicit close ends the
+        # bootstrap exactly as before.
+        service.operation = None
+        self.host.hide(reason='user')
+        self.assertTrue(self.host.closing)
+        service.stop.set.assert_called_once()
+
+    def test_setup_close_is_refused_while_the_gate_is_still_held(self):
+        service = self.host.service
+        service.location_setup = True
+        service.operation = None
+        service.stop = Mock()
+        service.gate = Mock()
+        service.gate.locked.return_value = True
+        self.host.icon = Mock()
+        self.host.visible = True
+        self.host.hide(reason='user')
+        self.assertFalse(self.host.closing)
+        self.assertTrue(self.host.visible)
+        service.stop.set.assert_not_called()
+        service.gate.locked.assert_called_once()
+
+    def test_setup_tray_quit_is_refused_while_a_location_operation_is_active(self):
+        service = self.host.service
+        service.location_setup = True
+        service.operation = {'kind': 'location'}
+        service.gate = Mock()
+        service.gate.locked.return_value = False
+        service.stop = Mock()
+        self.host.icon = Mock()
+        self.host.quit()
+        self.assertFalse(self.host.closing)
+        service.stop.set.assert_not_called()
+        self.host.icon.notify.assert_called_once_with('请等待安装完成', 'ChatGPTnx')
+
+    def test_folder_dialog_starts_at_an_existing_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(desktop.folder_dialog_directory(tmp), tmp)
+            missing = str(Path(tmp) / 'absent' / 'ChatGPTnx')
+            # A not-yet-created recommendation starts at its nearest existing
+            # parent (drive/profile), never at a hard-coded D:\ that may not exist.
+            self.assertEqual(Path(desktop.folder_dialog_directory(missing)), Path(tmp))
+        unique = Path.home() / ('ChatGPTnx-missing-' + str(os.getpid()))
+        self.assertEqual(Path(desktop.folder_dialog_directory(str(unique))), Path.home())
+        for fallback in (None, ''):
+            resolved = desktop.folder_dialog_directory(fallback)
+            self.assertIsNotNone(resolved)
+            self.assertTrue(Path(resolved).is_dir())
+
     def prepare_show(self):
         self.host._style_window = Mock(return_value=True)
         self.host._place_at_tray = Mock()
@@ -356,7 +478,7 @@ class PanelTests(unittest.TestCase):
         self.assertIn('background: var(--bg); border-radius: var(--window-r);', css)
 
     def test_product_geometry_and_release_version(self):
-        self.assertEqual(APP_VERSION, '1.4.2')
+        self.assertEqual(APP_VERSION, '1.4.3')
         self.assertEqual(PANEL_CONFIG['radius'], 16)
         self.assertEqual(PANEL_CONFIG['sizes'], {'home': [327, 458], 'workspace': [327, 458]})
 

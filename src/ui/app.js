@@ -18,11 +18,11 @@
   const defaults = {appearance:'system', autostart:false,
     auto_relay:false, auto_relay_excluded:[], early_anchor:false, early_anchor_accounts:[], task_continuation:true, resume_message:'继续',
     notify_credential:true, notify_low:false, notify_reset_expiry:true, relay_pick:null};
-  let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[]};
+  let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[], location:window.NX_SETUP||null};
   let workflowResume = false;
   let lastLoginResult = '';
-  const ui = {page:null, email:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), disclosures:new Set(), fullCollections:new Set(), inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
-  let connected = false, bridgeError = '', acting = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
+  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), disclosures:new Set(), fullCollections:new Set(), inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
+  let connected = false, bridgeError = '', acting = false, nativeDialog = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
   const app = $('#app');
   app.innerHTML = '<main id="home"></main><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden></section><div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>';
   const home = $('#home'), sheet = $('#sheet');
@@ -814,6 +814,26 @@
       case 'execute-remove':if(await run('remove',target)&&navigation.current(ticket))closeSheet();break;
       case 'add':show('add');break;
       case 'adopt':await run('adopt_current');break;
+      case 'location-browse':{
+        if(nativeDialog)break;
+        nativeDialog=true;
+        try{
+          const picked=await api('choose_program_folder');
+          if(picked?.ok&&picked.path){ui.locationTarget=picked.path;render();}
+          else if(picked&&picked.ok===false)notify(picked.error||'无法选择文件夹',{tone:'error'});
+        }finally{nativeDialog=false;}
+        break;}
+      case 'location-keep':await run('keep_current_location');break;
+      case 'location-install':{
+        const target=ui.locationTarget||data.location?.recommended;
+        const token=feedback.begin(b,'正在安装…');
+        try{
+          const result=await api('install_location',target);
+          if(result?.ok===false)throw new Error(result.error||'安装未完成');
+          if(config.demo)await poll(true);
+        }catch(error){notify(error.message||'安装未完成',{tone:'error'});}
+        finally{feedback.finish(token);}
+        break;}
       case 'start-add':await run('add_start');break;
       case 'cancel-add':if(await run('add_cancel')&&navigation.current(ticket))closeSheet();break;
       case 'finish-add':if(await run('add_finish')&&navigation.current(ticket))closeSheet();break;
@@ -874,7 +894,7 @@
     if(e.key==='Escape'){e.preventDefault();if(ui.page)back();else api('hide').catch(()=>{});}
     if(e.key==='Tab'&&ui.page&&sheet.getAttribute('aria-modal')==='true'){const items=[...sheet.querySelectorAll('button:not(:disabled),input,textarea,summary,[tabindex="0"]')].filter(n=>n.offsetParent!==null);if(!items.length)return;const first=items[0],last=items.at(-1);if(e.shiftKey&&(document.activeElement===first||document.activeElement.id==='sheet-title')){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}
   });
-  window.addEventListener('blur',()=>{if(!config.demo&&!data.adding&&!data.reauth&&!data.operation&&!document.hasFocus())api('hide','blur').catch(()=>{});});
+  window.addEventListener('blur',()=>{if(!config.demo&&!nativeDialog&&!data.adding&&!data.reauth&&!data.operation&&!document.hasFocus())api('hide','blur').catch(()=>{});});
   window.nxRequestSwitch=target=>requestSwitch(target);
   const systemAppearance=window.matchMedia('(prefers-color-scheme: dark)');
   function applyAppearance(value){

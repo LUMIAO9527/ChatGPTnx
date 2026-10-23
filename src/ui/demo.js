@@ -34,7 +34,7 @@ window.NXDemo = (() => {
       membership:{status:i===0?'cached_hint':'not_provided',date:i===0?n+12*day:null,date_kind:i===0?'entitlement_hint':null,
         source:i===0?'credential_claim':'not_available',verified:false,checked_at:null,observed_at:n-day,account_checked_online:false}}));
     state={version:window.NX_CONFIG.version,accounts,current:accounts[0].email,updated:n-60,switching:null,operation:null,adding:false,reauth:null,resume:null,
-      last_error:null,last_result:null,recent_results:[],chatgpt_running:true,pending:null,relay_wait:null,
+      last_error:null,last_result:null,recent_results:[],chatgpt_running:true,pending:null,location:null,relay_wait:null,
       update:{status:'idle',current:window.NX_CONFIG.version,installable:true,message:'检查是否有新版本',progress:0},
       hotkeys:accounts.map((a,i)=>({email:a.email,shortcut:`ctrl+alt+${i+1}`,registered:true})),
       settings:{appearance:'system',autostart:false,auto_relay:false,auto_relay_excluded:[],
@@ -141,6 +141,9 @@ window.NXDemo = (() => {
             windows:[{label:'5h',used:0,resets_at:sec()+18000,duration_mins:300},{label:'周',used:0,resets_at:sec()+604800,duration_mins:10080}],
             fetched_at:sec(),membership:{status:'not_provided',date:null,verified:false}};
           state.accounts.push(a);state.settings.early_anchor_accounts.push(a.email);state.current=who;});}
+      case 'choose_program_folder':return {ok:true,path:'D:\\Apps\\ChatGPTnx'};
+      case 'keep_current_location':state.location=null;return {ok:true};
+      case 'install_location':if(!state.location)return {ok:false,error:'程序文件夹已确认'};state.location=null;state.last_error=null;return {ok:true,accepted:true};
       case 'add_cancel':return operation('add_cancel',null,()=>{state.current=previous;state.adding=false;state.add_state=null;state.add_login_status=null;});
       case 'add_finish':if(state.add_login_status!=='ready')return {ok:false,error:'请先完成新账号登录'};return operation('add_finish',null,()=>{const id=state.accounts.length+1;const a={email:`new-${id}@example.com`,alias:`新账号 ${id}`,identity_key:`new-${id}`,plan:'plus',ok:true,bucket:'codex',windows:[{label:'5h',used:0,resets_at:sec()+18000,duration_mins:300},{label:'周',used:0,resets_at:sec()+604800,duration_mins:10080}],fetched_at:sec(),membership:{status:'not_provided',date:null,verified:false}};state.accounts.push(a);state.settings.early_anchor_accounts.push(a.email);state.current=a.email;state.adding=false;state.add_state=null;state.add_login_status=null;loginSaved();});
       case 'reauth_start':return operation('reauth_start',email,()=>{previous=state.current;state.current=null;state.reauth={email,previous,phase:'login'};});
@@ -356,9 +359,10 @@ window.NXDemo = (() => {
       const a=state.accounts[4];a.ok=true;a.err=null;
       usages[a.email]={...clone(usages[state.accounts[0].email]),identity_key:a.identity_key,summary:{lifetimeTokens:5483200,currentStreakDays:3,longestStreakDays:10,peakDailyTokens:210000},dailyUsageBuckets:usages[state.accounts[0].email].dailyUsageBuckets.map(b=>({...b,tokens:Math.round(b.tokens*.3)}))};
     }
+    if(which==='first-location'){state.accounts=[];state.current=null;state.pending=null;state.location={current:'C:\\Users\\demo\\Downloads\\ChatGPTnx',recommended:'D:\\ChatGPTnx',can_relocate:true};usages={};}
     if(which==='first-waiting'){state.accounts=[];state.current=null;state.pending=null;state.chatgpt_running=true;usages={};}
     if(which==='first-saving'){state.accounts=[];state.current=null;state.pending='first-account@example.com';state.operation={kind:'adopt',phase:'正在保存账号快照'};usages={};}
-    if(which==='first-failed'){state.accounts=[];state.current=null;state.pending='first-account@example.com';state.last_error={id:'first-save-error',message:'演示：数据目录暂不可写，请检查权限后重试。'};usages={};}
+    if(which==='first-failed'){state.accounts=[];state.current=null;state.pending='first-account@example.com';state.last_error={id:'first-save-error',message:'演示：保存失败。',code:(new URLSearchParams(window.NX_PREVIEW_QUERY??location.search).get('failure')||'write')};usages={};}
     if(which==='connection-error')state.demo_connection_error=true;
     if(which==='refreshing')state.operation={kind:'refresh',phase:'正在读取额度 2/5'};
     if(which==='switching'){state.operation={kind:'switch',target:state.accounts[1].email,phase:'正在恢复目标账号快照'};state.switching=state.accounts[1].email;}
@@ -455,5 +459,6 @@ window.NXDemo = (() => {
   const params=new URLSearchParams(window.NX_PREVIEW_QUERY??location.search),requested=params.get('scenario');
   if(requested)scenario(requested);
   if(['light','dark'].includes(params.get('appearance')))state.settings.appearance=params.get('appearance');
+  window.NX_SETUP=state.location||null;
   return {call,scenario,simulate,appearance:value=>{if(['light','dark'].includes(value))state.settings.appearance=value;},state:()=>clone(state)};
 })();

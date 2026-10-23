@@ -234,7 +234,8 @@ class State:
         existing, self.recovery_path = load_owned_document(self.path)
         original = copy.deepcopy(existing)
         allowed_state = {'settings', 'cache', 'account_meta', 'usage', 'usage_revision',
-                         'adding', 'reauth', 'subscriptions', 'hotkeys', 'reset_expiry_notices', 'relay_wait'}
+                         'adding', 'reauth', 'subscriptions', 'hotkeys', 'reset_expiry_notices',
+                         'relay_wait'}
         self.value = {key: value for key, value in existing.items() if key in allowed_state}
         saved_settings = existing.get('settings', {})
         saved_settings = saved_settings if isinstance(saved_settings, dict) else {}

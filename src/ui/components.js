@@ -8,7 +8,7 @@ window.NXComponents = (() => {
     plus:'M9 3v12M3 9h12', chart:'M3 15V9M9 15V3M15 15V6', check:'M3 9l4 4 8-8', download:'M9 2v9M5 7l4 4 4-4M3 12v3h12v-3',
     copy:'M6 6h9v9H6zM3 12V3h9',
     chevron:'M7 4l5 5-5 5', baton:'M6 11l5-6a2 2 0 0 1 3 3l-5 6a2 2 0 0 1-3-3Z',
-    archive:'M3 6h12v9H3zM2 3h14v3H2zM7 9h4', user:'M12 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 16v-2a6 6 0 0 1 12 0v2',
+    archive:'M3 6h12v9H3zM2 3h14v3H2zM7 9h4', folder:'M2.5 6a2 2 0 0 1 2-2h3.2l1.6 2h6.2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2V6Z', user:'M12 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0M3 16v-2a6 6 0 0 1 12 0v2',
     edit:'M11 3l4 4M3 15l4-1L15 6 12 3 3 12v3', info:'M9 8v5M9 5h.01M16 9A7 7 0 1 1 2 9a7 7 0 0 1 14 0',
     expand:'M3 7V3h4M11 3h4v4M15 11v4h-4M7 15H3v-4', stack:'M9 2l7 4-7 4-7-4 7-4M2 9l7 4 7-4M2 12l7 4 7-4',
     external:'M10 3h5v5M15 3L8 10M7 4H3v11h11v-4', clock:'M9 5v4l3 2M16 9A7 7 0 1 1 2 9a7 7 0 0 1 14 0',
