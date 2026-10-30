@@ -358,7 +358,12 @@ class ResumeFlowTests(unittest.TestCase):
         with patch('nx.resume_flow.attempt_continuation', return_value=('done', 'new_turn_observed')) as act:
             self.coordinator.start()
             limit = time.monotonic() + 3
-            while self.coordinator.sessions[-1]['phase'] != 'done' and time.monotonic() < limit:
+            while time.monotonic() < limit:
+                # The worker sets phase before committing the journal under its
+                # lock. Wait for that commit instead of racing the disk write.
+                with self.coordinator.lock:
+                    if self.coordinator.sessions[-1]['phase'] == 'done':
+                        break
                 time.sleep(.02)
         self.assertEqual(self.coordinator.sessions[-1]['phase'], 'done')
         self.assertEqual(act.call_count, 2)

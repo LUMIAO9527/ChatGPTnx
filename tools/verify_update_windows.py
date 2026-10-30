@@ -179,13 +179,25 @@ def run_case(work, case, old, new, environment):
                                        stdout=log, stderr=subprocess.STDOUT, creationflags=HIDDEN)
             begin = wait_json(app / '_wip/begin.json', timeout=25)
             batch = Path(begin['batch'])
-            result = wait_json(batch / 'result.json')
-            successful = case in ('success', 'legacy', 'cleanup')
+            result = wait_json(batch / 'result.json', timeout=130)
+            successful = case in ('success', 'legacy', 'cleanup', 'restart-exit', 'restart-timeout', 'restart-stale-ack')
             expected = 'complete' if successful else ('failed' if case == 'checksum' else 'rolled_back')
             assert result['status'] == expected, result
             process.wait(timeout=10)
             begin = wait_json(app / '_wip/begin.json')
             assert begin['accepted'] == (case != 'checksum'), begin['accepted']
+            if case != 'legacy':
+                expected_starts = 0 if case == 'checksum' else 2 if case in (
+                    'rollback', 'compat-rollback', 'rollback-restart', 'timeout', 'stale-ack',
+                    'restart-exit', 'restart-timeout', 'restart-stale-ack') else 1
+                assert result['start_attempts'] == expected_starts, result
+                starts = wait_json(app / '_wip/new-starts.json') if expected_starts else []
+                assert len(starts) == expected_starts, starts
+                assert len({s['temporary'] for s in starts}) == expected_starts, 'restart_reused_temporary'
+                for attempt in starts[:-1]:
+                    wait_gone(Path(attempt['temporary']))
+                if case == 'rollback-restart':
+                    assert result['recovery_start_attempts'] == 2, result
             if successful:
                 candidate = wait_json(app / '_wip/candidate.json', timeout=10)
                 assert candidate['build'] == 'new' and candidate['runtime'] != begin['old_runtime']
@@ -219,7 +231,7 @@ def run_case(work, case, old, new, environment):
             for path, content in sentinel.items():
                 assert path.read_bytes() == content, path.name
             wait_gone(Path(begin['old_runtime']) if begin['legacy'] else Path(begin['old_temporary']))
-            if case in ('rollback', 'timeout', 'stale-ack', 'compat-rollback'):
+            if case in ('rollback', 'timeout', 'stale-ack', 'compat-rollback', 'rollback-restart'):
                 wait_gone(batch / 'runtime-candidate')
             if cleanup:
                 wait_gone(cleanup['completed'])
@@ -232,6 +244,8 @@ def run_case(work, case, old, new, environment):
                 assert current_cache.is_dir() and old_cache.is_dir(), 'current_or_previous_cache_removed'
             assert 'Failed to' not in (app / '_wip/parent.log').read_text(encoding='utf-8', errors='replace')
         record = {'case': case, 'status': result['status'], 'data_preserved': True,
+                  'start_attempts': result.get('start_attempts'),
+                  'recovery_start_attempts': result.get('recovery_start_attempts'),
                   'fresh_runtime': True, 'elapsed_seconds': round(time.monotonic() - started, 2)}
         print(json.dumps(record), flush=True)
         return record
@@ -244,7 +258,8 @@ def run_case(work, case, old, new, environment):
 def main():
     if os.name != 'nt':
         raise SystemExit('Windows is required')
-    cases = ('success', 'legacy', 'rollback', 'compat-rollback', 'timeout', 'checksum', 'stale-ack', 'cleanup')
+    cases = ('success', 'legacy', 'restart-exit', 'restart-timeout', 'restart-stale-ack',
+             'rollback', 'rollback-restart', 'compat-rollback', 'timeout', 'checksum', 'stale-ack', 'cleanup')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case', choices=cases, action='append')
     parser.add_argument('--legacy-source', type=Path, help='v1.3.1 source ZIP when Git history is unavailable')

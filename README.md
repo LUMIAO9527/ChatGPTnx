@@ -59,7 +59,7 @@ ChatGPTnx 的核心，是让多个 Plus 账号接力推进同一个长任务。�
 
 当前版本为 **v1.5.2**。完整页面与状态可用根目录的 `ChatGPTnx-v1.5.2.html` 离线查看。
 
-v1.5.2 修复接续连接失效后反复等待的问题，自动重新核验可用连接，并在任务接续记录中显示等待或失败原因。
+v1.5.2 修复接续连接失效后反复等待的问题，自动重新核验可用连接，并在任务接续记录中显示等待或失败原因。更新后未正常启动时会自动重启一次，仍失败则恢复旧版。
 
 公开发布版可从 [v1.5.2 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.5.2) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.5.2-source.zip`，完整演示可下载 `ChatGPTnx-v1.5.2.html`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用、Microsoft .NET Framework 4.6.2 或更高版本，以及 Microsoft Edge WebView2 Runtime。
 

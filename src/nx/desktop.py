@@ -1398,14 +1398,20 @@ class Desktop:
         """Called only after the coordinator freezes and the helper starts."""
         self.service.log.info('shutdown_requested source=update')
         self.service.stop.set()
-        self.hotkeys.close()
-        self.icon.stop()
         self.closing = True
+        for cleanup in (self.hotkeys.close, self.icon.stop):
+            try:
+                cleanup()
+            except Exception as error:
+                self.service.log.warning('update_shutdown_cleanup_failed type=%s', type(error).__name__)
         def close_window():
             form = self._form()
             if form:
                 form.Close()
-        self._dispatch_ui(close_window)
+            elif self.window:
+                self.window.destroy()
+        if not self._dispatch_ui(close_window) and self.window:
+            self.window.destroy()
 
     def on_closing(self):
         if self.closing:

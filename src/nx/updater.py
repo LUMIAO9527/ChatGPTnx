@@ -145,12 +145,16 @@ class UpdateManager:
                 asset = release_asset(json.loads(raw), self.current)
             except (ValueError, TypeError, KeyError):
                 raise UpdateError('发布信息格式不正确') from None
+            # A release can replace its program asset without changing the tag.
+            # Only compare an installed launcher; source runs have no local EXE.
+            if self.installable and version_key(asset['version']) == version_key(self.current):
+                asset['available'] = digest_file(self.executable) != asset['sha256']
             with self.lock:
                 self.asset = asset
             self._set(status='available' if asset['available'] else 'current',
                       version=asset['version'], notes=asset['notes'], size=asset['size'],
                       available=asset['available'], checked_at=int(time.time()),
-                      message='发现新版本' if asset['available'] else '当前已是最新版本')
+                      message='发现可用更新' if asset['available'] else '当前已是最新版本')
         return self._start('checking', work)
 
     def download(self):

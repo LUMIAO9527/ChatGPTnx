@@ -11,8 +11,10 @@ internal static class UpdateHelper
 {
     private const int WaitParentMs = 45000;
     private const int WaitStartMs = 45000;
+    private const int MaxStartAttempts = 2;
     private static string root, batch, target, token, version, previousVersion, previousSha;
     private static long previousSize;
+    private static int startAttempts, recoveryStartAttempts;
     private static Dictionary<string, object> plan;
 
     private static void Result(string status, string phase, string reason, string recovery = "")
@@ -20,6 +22,7 @@ internal static class UpdateHelper
         UpdateFiles.Write(UpdateFiles.Child(batch, "result.json"), new Dictionary<string, object> {
             { "schema", 2 }, { "status", status }, { "phase", phase }, { "reason", reason },
             { "version", version ?? "" }, { "token", token ?? "" },
+            { "start_attempts", startAttempts }, { "recovery_start_attempts", recoveryStartAttempts },
             { "finished_at", DateTime.UtcNow.ToString("o") }, { "recovery_batch", recovery }
         });
     }
@@ -90,6 +93,36 @@ internal static class UpdateHelper
             CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden }))
         { if (!killer.WaitForExit(10000)) throw new IOException("stop_tree_timeout"); }
         if (!child.WaitForExit(10000)) throw new IOException("candidate_still_running");
+    }
+
+    private static Dictionary<string, object> StartConfirmed(string runtime, string ackPath,
+            string ackToken, string ackVersion, long size, string sha, ref Process child, ref int attempts)
+    {
+        for (var attempt = 0; attempt < MaxStartAttempts; attempt++)
+        {
+            if (attempt > 0)
+            {
+                // Never overlap a retry with a hung first launch or trust its ACK.
+                Stop(child);
+                if (child != null) { child.Dispose(); child = null; }
+                if (!UpdateFiles.RemoveTree(Path.GetDirectoryName(runtime), runtime))
+                    throw new IOException("restart_runtime_busy");
+                UpdateFiles.Plain(ackPath);
+                if (File.Exists(ackPath)) File.Delete(ackPath);
+                Thread.Sleep(750);
+            }
+            Verify(target, size, sha);
+            attempts++;
+            try { child = StartApp(runtime, ackPath, ackToken); }
+            catch (System.ComponentModel.Win32Exception)
+            {
+                if (attempt + 1 == MaxStartAttempts) throw;
+                continue;
+            }
+            var ack = Ack(ackPath, ackToken, ackVersion, child);
+            if (ack != null) return ack;
+        }
+        return null;
     }
 
     private static void Replace(string source, string destination, string backup)
@@ -200,8 +233,9 @@ internal static class UpdateHelper
             Verify(stage, UpdateFiles.Num(plan, "size"), UpdateFiles.Str(plan, "sha256"));
             phase = "replace"; Replace(stage, target, backup); replaced = true;
             phase = "start";
-            candidate = StartApp(UpdateFiles.Child(batch, "runtime-candidate"), UpdateFiles.Child(batch, "started.json"), token);
-            var ack = Ack(UpdateFiles.Child(batch, "started.json"), token, version, candidate);
+            var ack = StartConfirmed(UpdateFiles.Child(batch, "runtime-candidate"),
+                UpdateFiles.Child(batch, "started.json"), token, version,
+                UpdateFiles.Num(plan, "size"), UpdateFiles.Str(plan, "sha256"), ref candidate, ref startAttempts);
             if (ack == null) throw new InvalidDataException("startup_failed");
             Result("complete", phase, "");
             try { Collect(ack); } catch { /* Cleanup cannot undo a healthy update. */ }
@@ -225,8 +259,10 @@ internal static class UpdateHelper
                     { "schema", 2 }, { "role", "recovery" }, { "origin", batch }, { "root", root }, { "executable", target },
                     { "token", recoveryToken }, { "version", previousVersion }, { "sha256", previousSha }, { "size", previousSize }
                 });
-                var restored = StartApp(UpdateFiles.Child(recovery, "runtime-rollback"), UpdateFiles.Child(recovery, "started.json"), recoveryToken);
-                if (Ack(UpdateFiles.Child(recovery, "started.json"), recoveryToken, previousVersion, restored) == null)
+                Process restored = null;
+                if (StartConfirmed(UpdateFiles.Child(recovery, "runtime-rollback"),
+                    UpdateFiles.Child(recovery, "started.json"), recoveryToken, previousVersion,
+                    previousSize, previousSha, ref restored, ref recoveryStartAttempts) == null)
                 { Stop(restored); Result("recovery_needed", phase, "rollback_start_failed", recovery); return 3; }
                 Result("rolled_back", phase, "startup_failed", recovery); return 2;
             }

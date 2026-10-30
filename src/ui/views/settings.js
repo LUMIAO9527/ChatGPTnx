@@ -134,9 +134,9 @@ window.NXViews.update = c => {
   const label={checking:'正在检查…',downloading:`下载中 ${Number(u.progress)||0}%`,installing:'正在重启…',ready:'重启并更新',available:'下载更新'}[status]||(status==='error'?'重试':'检查更新');
   const disabled=working||status==='ready'&&blocked||action==='download-update'&&u.installable===false;
   const hasNotes=!!(u.available&&u.notes),notesOpen=hasNotes&&c.ui.disclosures.has('update-notes');
-  const stateTitle={idle:'检查是否有新版本',checking:'正在检查更新…',current:'当前已是最新版本',available:'发现新版本',downloading:'正在下载更新…',ready:'更新已准备好',installing:'正在重启并更新…',error:'更新未完成'}[status]||'检查是否有新版本';
-  const description=status==='ready'&&blocked?'请完成登录、切号或任务接续后更新。':status==='error'?u.message:u.available?`新版本 ${u.version}${u.installable===false?' · 内置更新仅适用于独立 EXE':status==='ready'?' · 已通过校验':''}`:'从 GitHub 获取最新正式版。';
-  const versionLabel=`新版本 ${u.version||''}`;
+  const stateTitle={idle:'检查是否有新版本',checking:'正在检查更新…',current:'当前已是最新版本',available:'发现可用更新',downloading:'正在下载更新…',ready:'更新已准备好',installing:'正在重启并更新…',error:'更新未完成'}[status]||'检查是否有新版本';
+  const description=status==='ready'&&blocked?'请完成登录、切号或任务接续后更新。':status==='error'?u.message:u.available?`版本 ${u.version}${u.installable===false?' · 内置更新仅适用于独立 EXE':status==='ready'?' · 已通过校验':''}`:'从 GitHub 获取最新正式版。';
+  const versionLabel=`版本 ${u.version||''}`;
   const versionEntry=hasNotes?`<button id="update-notes-toggle" class="control control--large update-notes-toggle" data-action="toggle-update-notes" aria-controls="update-notes-body" aria-expanded="${notesOpen}" aria-label="${notesOpen?'收起':'查看'}${esc(versionLabel)}的更新说明">${esc(versionLabel)}${icon('chevron')}</button>`:esc(description);
   const contextMessage=hasNotes?(status==='error'?u.message:status==='ready'&&blocked?'请完成登录、切号或任务接续后更新。':u.installable===false?'内置更新仅适用于独立 EXE':status==='ready'?'已通过校验':''):'';
   return {title:'版本更新',cls:'update-body',

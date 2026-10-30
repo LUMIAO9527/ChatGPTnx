@@ -69,8 +69,22 @@ def main():
             assert result['ok'], result
         return
     if args.update_ack:
-        if config['case'] in ('rollback', 'compat-rollback') and build == 'new':
+        starts_path = root / '_wip' / (build + '-starts.json')
+        starts = json.loads(starts_path.read_text(encoding='utf-8')) if starts_path.exists() else []
+        starts.append({'pid': os.getpid(), 'launcher_pid': args.launcher_pid,
+                       'temporary': os.environ.get('TEMP')})
+        write(starts_path, starts)
+        if config['case'] in ('restart-exit', 'restart-timeout', 'restart-stale-ack') and build == 'new' and len(starts) == 1:
+            if config['case'] == 'restart-timeout':
+                time.sleep(90)
+            elif config['case'] == 'restart-stale-ack':
+                write(args.update_ack, {'ready': True, 'token': '0'*32,
+                                       'version': APP_VERSION, 'pid': os.getpid()})
+            raise SystemExit(16)
+        if config['case'] in ('rollback', 'compat-rollback', 'rollback-restart') and build == 'new':
             raise SystemExit(17)
+        if config['case'] == 'rollback-restart' and build == 'old' and len(starts) == 1:
+            raise SystemExit(20)
         if config['case'] == 'timeout' and build == 'new':
             time.sleep(90)
             raise SystemExit(18)

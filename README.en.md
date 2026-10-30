@@ -61,7 +61,7 @@ The quota overview and usage statistics help you see which account is available 
 
 The current version is **v1.5.2**. Open `ChatGPTnx-v1.5.2.html` at the project root for all current pages and states.
 
-v1.5.2 recovers stale continuation connections and shows why a task is waiting or could not resume.
+v1.5.2 recovers stale continuation connections and shows why a task is waiting or could not resume. If an update does not start successfully, it restarts once before restoring the previous program.
 
 Download `ChatGPTnx.exe` from the [v1.5.2 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.5.2). The release also provides `ChatGPTnx-v1.5.2-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
 

@@ -107,12 +107,34 @@ class UpdateTests(unittest.TestCase):
         self.assertFalse(self.manager.download()['ok'])
         self.unchanged()
 
-    def test_same_and_older_versions_are_not_available(self):
-        for tag in ('v1.3','v1.0.2'):
+    def test_older_versions_are_not_available_even_when_hash_differs(self):
+        for tag in ('v1.2','v1.0.2'):
             self.document=fixture_release(self.content,tag)
             self.manager.check()
             self.assertEqual(self.wait()['status'],'current')
             self.assertFalse(self.manager.download()['ok'])
+
+    def test_same_version_with_replaced_program_can_be_updated(self):
+        self.document = fixture_release(self.content, 'v1.3')
+        self.manager.check()
+        self.assertEqual(self.wait()['status'], 'available')
+        self.assertTrue(self.manager.download()['ok'])
+        self.assertEqual(self.wait()['status'], 'ready')
+        self.unchanged()
+
+    def test_same_version_and_same_program_need_no_update(self):
+        self.document = fixture_release(self.original, 'v1.3')
+        self.manager.check()
+        self.assertEqual(self.wait()['status'], 'current')
+        self.assertFalse(self.manager.download()['ok'])
+        self.unchanged()
+
+    def test_source_mode_does_not_treat_interpreter_as_replaced_program(self):
+        self.manager.installable = False
+        self.document = fixture_release(self.content, 'v1.3')
+        self.manager.check()
+        self.assertEqual(self.wait()['status'], 'current')
+        self.unchanged()
 
     def test_changed_staged_exe_cannot_launch_helper(self):
         self.download()
