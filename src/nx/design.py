@@ -7,7 +7,7 @@ PANEL_CONFIG = {
     'background': '#ffffff',
     'radius': 16,
     'sizes': {
-        'home': [327, 458],
-        'workspace': [327, 458],
+        'home': [312, 458],
+        'workspace': [312, 458],
     },
 }

@@ -59,7 +59,7 @@ class DpiTests(unittest.TestCase):
         self.gdi.DeleteObject = Mock()
         with patch.object(desktop, '_find_hwnd', return_value=42), \
              patch.object(desktop.sys, 'getwindowsversion', return_value=SimpleNamespace(build=10240), create=True):
-            self.assertEqual(host._physical_size(42), (490, 687))
+            self.assertEqual(host._physical_size(42), (468, 687))
             self.assertTrue(host._apply_native_shape())
         self.gdi.CreateRoundRectRgn.assert_called_once_with(0, 0, 491, 688, 48, 48)
 

@@ -20,8 +20,8 @@ from nx.version import APP_VERSION
 from nx.resume_policy import ATTENTION_REASONS, RETRYABLE_REASONS
 from screen_catalog import CASES
 
-STYLES = ('tokens.css', 'common.css', 'feedback.css')
-SCRIPTS = ('usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'motion.js', 'range-motion.js', 'local-motion.js', 'disclosure.js', 'app.js')
+STYLES = ('tokens.css', 'common.css', 'feedback.css', 'material.css')
+SCRIPTS = ('material.js', 'usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'motion.js', 'range-motion.js', 'local-motion.js', 'disclosure.js', 'app.js')
 
 
 def ui_source_digest():
@@ -102,6 +102,8 @@ def build():
     (RESOURCES / 'switch_account.ps1').write_bytes((ROOT / 'src' / 'switch_account.ps1').read_bytes())
     (RESOURCES / 'continue_in_desktop.ps1').write_bytes((ROOT / 'src' / 'continue_in_desktop.ps1').read_bytes())
     helper = build_update_helper()
+    from build_backdrop import build_backdrop
+    build_backdrop(RESOURCES/'ChatGPTnx.Backdrop.dll')
     if helper:
         print('Built independent Windows updater')
     print('Built ChatGPTnx resources')

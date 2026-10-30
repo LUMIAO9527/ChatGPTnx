@@ -37,7 +37,7 @@ window.NXDemo = (() => {
       last_error:null,last_result:null,recent_results:[],chatgpt_running:true,pending:null,location:null,relay_wait:null,
       update:{status:'idle',current:window.NX_CONFIG.version,installable:true,message:'检查是否有新版本',progress:0},
       hotkeys:accounts.map((a,i)=>({email:a.email,shortcut:`ctrl+alt+${i+1}`,registered:true})),
-      settings:{appearance:'system',autostart:false,auto_relay:false,auto_relay_excluded:[],
+      settings:{appearance:'system',window_material:'glass',autostart:false,auto_relay:false,auto_relay_excluded:[],
         early_anchor:false,early_anchor_accounts:accounts.filter(a=>a.plan==='plus').map(a=>a.email),
         task_continuation:true,resume_message:'继续',notify_credential:true,
         notify_low:false,notify_reset_expiry:true,relay_pick:null}};
@@ -459,6 +459,7 @@ window.NXDemo = (() => {
   const params=new URLSearchParams(window.NX_PREVIEW_QUERY??location.search),requested=params.get('scenario');
   if(requested)scenario(requested);
   if(['light','dark'].includes(params.get('appearance')))state.settings.appearance=params.get('appearance');
+  if(['glass','solid'].includes(params.get('material')))state.settings.window_material=params.get('material');
   window.NX_SETUP=state.location||null;
   return {call,scenario,simulate,appearance:value=>{if(['light','dark'].includes(value))state.settings.appearance=value;},state:()=>clone(state)};
 })();

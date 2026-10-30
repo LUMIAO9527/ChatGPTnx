@@ -130,6 +130,48 @@ class PanelTests(unittest.TestCase):
         self.assertFalse(self.host._apply_native_shape())
         self.host.service.log.warning.assert_called_once()
 
+    def test_glass_keeps_the_shared_radius_on_win10_and_win11(self):
+        self.host._native_material = 'glass'
+        self.host._native_appearance = 'light'
+        self.host._window_material = Mock()
+        self.host._corner_edges = Mock()
+        self.host._bind_corner_events = Mock()
+        for build, mode in ((19045,'blur'),(22621,'acrylic')):
+            self.windows_version.return_value.build = build
+            self.host._window_material.apply.return_value = mode
+            for dpi in (96,120,144,168,192,240):
+                self.dpi = dpi
+                self.size = (round(312*dpi/96),round(458*dpi/96))
+                self.assertTrue(self.host._apply_native_shape())
+                self.host._corner_edges.apply.assert_called_with(HWND,round(16*dpi/96),(255,255,255,196))
+
+    def test_early_html_publish_does_not_disable_a_successful_backdrop(self):
+        self.windows_version.return_value.build = 22621
+        self.host._native_material = 'glass'
+        self.host._window_material = Mock()
+        self.host._corner_edges = Mock()
+        self.host._bind_corner_events = Mock()
+        self.host._window_material.apply.return_value = 'acrylic'
+        self.host._post_script.side_effect = RuntimeError('WebView is initializing')
+        self.assertTrue(self.host._apply_native_shape())
+        self.assertEqual(self.dwm.DwmSetWindowAttribute.calls, [])
+
+    def test_win10_solid_fallback_repaints_existing_glass_edges(self):
+        self.windows_version.return_value.build = 19045
+        self.host._native_material = 'glass'
+        self.host._native_appearance = 'dark'
+        self.host._window_material = Mock()
+        self.host._corner_edges = Mock()
+        self.host._bind_corner_events = Mock()
+        self.host._window_material.apply.return_value = 'blur'
+        self.assertTrue(self.host._apply_native_shape())
+        self.host._corner_edges.apply.assert_called_with(HWND,round(16*self.dpi/96),(226,237,255,59))
+        self.host._window_material.apply.return_value = 'solid'
+        self.assertTrue(self.host._apply_native_shape())
+        self.host._corner_edges.apply.assert_called_with(HWND,round(16*self.dpi/96),(29,29,29))
+        self.assertEqual(self.gdi.CreateRoundRectRgn.calls, [])
+        self.assertEqual(self.dwm.DwmSetWindowAttribute.calls, [])
+
     def test_dwm_failure_does_not_show_a_square_or_hard_clipped_window(self):
         self.windows_version.return_value.build = 26200
         self.dwm.DwmSetWindowAttribute.result = -1
@@ -224,7 +266,7 @@ class PanelTests(unittest.TestCase):
 
     def test_physical_size_binds_dpi_function_before_use(self):
         self.dpi = 144
-        self.assertEqual(self.host._physical_size(HWND), (490, 687))
+        self.assertEqual(self.host._physical_size(HWND), (468, 687))
         self.assertEqual(self.user.GetDpiForWindow.argtypes, [ctypes.c_void_p])
         self.assertIs(self.user.GetDpiForWindow.restype, desktop.wt.UINT)
         self.assertEqual(self.user.GetDpiForWindow.calls, [(HWND,)])
@@ -478,9 +520,9 @@ class PanelTests(unittest.TestCase):
         self.assertIn('background: var(--bg); border-radius: var(--window-r);', css)
 
     def test_product_geometry_and_release_version(self):
-        self.assertEqual(APP_VERSION, '1.4.3')
+        self.assertEqual(APP_VERSION, '1.5.0')
         self.assertEqual(PANEL_CONFIG['radius'], 16)
-        self.assertEqual(PANEL_CONFIG['sizes'], {'home': [327, 458], 'workspace': [327, 458]})
+        self.assertEqual(PANEL_CONFIG['sizes'], {'home': [312, 458], 'workspace': [312, 458]})
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-"""DPI-scaled, antialiased corners around an opaque WebView2 surface.
+"""DPI-scaled, antialiased corners around a WebView2 surface.
 
 The HWND region contains only fully covered pixels. Four tiny owned layered
 windows supply the partial edge pixels against the real desktop. They cannot
@@ -135,9 +135,11 @@ class WindowCorners:
         for y in range(radius):
             for x in range(radius):
                 alpha = matrix[radius - y - 1 if index // 2 else y][radius - x - 1 if index % 2 else x]
-                # Full pixels are owned by the opaque WebView. Only its omitted
+                # Full pixels are owned by the WebView. Only its omitted
                 # partial pixels need compositing against the actual backdrop.
                 if 0 < alpha < 255:
+                    if len(rgb) > 3:
+                        alpha = round(alpha * rgb[3] / 255)
                     offset = (y * radius + x) * 4
                     pixels[offset:offset+4] = bytes((round(rgb[2] * alpha / 255),
                                                    round(rgb[1] * alpha / 255),

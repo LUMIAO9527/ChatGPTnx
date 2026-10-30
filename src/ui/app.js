@@ -15,7 +15,7 @@
   const $ = (q, root = document) => root.querySelector(q);
   const {esc, icon, tool, actionButton, selectionButton, switchButton, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
          notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, readableQuota, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity} = window.NXComponents;
-  const defaults = {appearance:'system', autostart:false,
+  const defaults = {appearance:'system', window_material:'glass', autostart:false,
     auto_relay:false, auto_relay_excluded:[], early_anchor:false, early_anchor_accounts:[], task_continuation:true, resume_message:'继续',
     notify_credential:true, notify_low:false, notify_reset_expiry:true, relay_pick:null};
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[], location:window.NX_SETUP||null};
@@ -213,7 +213,9 @@
   function setSize(view) {
     const size=config.sizes[view] || config.sizes.home;
     if (config.demo) {
-      app.style.width=Math.min(size[0], Math.max(280, window.innerWidth-16))+'px';
+      const requested=Number(new URLSearchParams(window.NX_PREVIEW_QUERY??location.search).get('width'));
+      const width=[300,312,327].includes(requested)?requested:size[0];
+      app.style.width=Math.min(width, Math.max(280, window.innerWidth-16))+'px';
       app.style.height=size[1]+'px';
     } else api('resize_panel',view).catch(()=>{});
   }
@@ -897,14 +899,20 @@
   window.addEventListener('blur',()=>{if(!config.demo&&!nativeDialog&&!data.adding&&!data.reauth&&!data.operation&&!document.hasFocus())api('hide','blur').catch(()=>{});});
   window.nxRequestSwitch=target=>requestSwitch(target);
   const systemAppearance=window.matchMedia('(prefers-color-scheme: dark)');
+  let publishedNativeAppearance='';
   function applyAppearance(value){
     const appearance=['light','dark'].includes(value)?value:systemAppearance.matches?'dark':'light';
+    const material=data.settings.window_material==='solid'?'solid':'glass';
+    window.NXMaterial.preference(material);
     const changed=document.documentElement.dataset.appearance!==appearance;
     // A palette change does not cancel local movement or an open disclosure.
     if(changed)window.NXMotion?.settlePage();
     document.documentElement.dataset.appearance=appearance;
-    if(changed&&!config.demo&&window.pywebview?.api?.native_appearance)
-      window.pywebview.api.native_appearance(appearance).catch(()=>{});
+    const nativeKey=appearance+':'+material;
+    if(nativeKey!==publishedNativeAppearance&&!config.demo&&window.pywebview?.api?.native_appearance){
+      publishedNativeAppearance=nativeKey;
+      window.pywebview.api.native_appearance(appearance,material).catch(()=>{publishedNativeAppearance='';});
+    }
   }
   systemAppearance.addEventListener('change',()=>applyAppearance(data.settings.appearance));
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
@@ -945,6 +953,7 @@
       home:()=>closeSheet(),
       refresh:()=>poll(true),
       appearance:async value=>{window.NXDemo.appearance(value);applyAppearance(value);},
+      material:value=>{if(['glass','solid'].includes(value))preferences.set('window_material',value);},
       info:()=>({page:ui.page||(home.classList.contains('is-onboarding')?'onboarding':'home'),width:app.clientWidth,height:app.clientHeight,version:config.version,update_state:data.update?.status||'idle',login_state:data.adding?'adding':data.reauth?'reauth':'idle'})
     };
     window.NXPreviewReady=window.NXPreview.open(new URLSearchParams(window.NX_PREVIEW_QUERY??location.search));

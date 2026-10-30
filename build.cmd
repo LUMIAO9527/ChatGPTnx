@@ -30,6 +30,7 @@ if errorlevel 1 (
   --add-data "%BUILD_ROOT%\resources\switch_account.ps1;." ^
   --add-data "%BUILD_ROOT%\resources\continue_in_desktop.ps1;." ^
   --add-data "%BUILD_ROOT%\resources\ChatGPTnx.Update.exe;." ^
+  --add-data "%BUILD_ROOT%\resources\ChatGPTnx.Backdrop.dll;." ^
   --distpath "%BUILD_ROOT%\dist" --workpath "%BUILD_ROOT%\work" ^
   --specpath "%BUILD_ROOT%\spec" src\chatgptnx.py
 if errorlevel 1 exit /b 1

@@ -1,0 +1,68 @@
+/* One native backdrop under the whole panel; controls keep their text opaque. */
+:root[data-material="glass"] {
+  --bg: rgb(247 249 253 / .58); --surface: rgb(255 255 255 / .61);
+  --surface-2: rgb(207 214 227 / .38); --line: rgb(81 96 119 / .13);
+  --muted: #515c6c; --glass-edge: rgb(255 255 255 / .77);
+  --glass-card-edge: rgb(255 255 255 / .72);
+  --glass-card-shadow: 0 3px 14px rgb(26 42 65 / .045);
+  --status-surface: rgb(248 250 255 / .97); --status-edge: rgb(109 126 153 / .22);
+  --shadow-window: 0 22px 65px rgb(17 31 53 / .18), 0 2px 10px rgb(17 31 53 / .08);
+}
+:root[data-material="glass"][data-appearance="dark"] {
+  --bg: rgb(22 27 35 / .46); --surface: rgb(95 108 127 / .25);
+  --surface-2: rgb(121 140 170 / .18); --line: rgb(213 226 248 / .12);
+  --muted: #c0c9d7; --ink: #f5f7fc; --glass-edge: rgb(226 237 255 / .23);
+  --glass-card-edge: rgb(221 234 255 / .12);
+  --glass-card-shadow: 0 3px 16px rgb(0 0 0 / .10);
+  --status-surface: rgb(35 42 55 / .98); --status-edge: rgb(204 222 250 / .20);
+  --shadow-window: 0 22px 65px rgb(0 0 0 / .38), 0 2px 10px rgb(0 0 0 / .15);
+}
+:root[data-material="glass"] body.live { background: transparent; }
+:root[data-material="glass"] #app {
+  background: linear-gradient(145deg, rgb(255 255 255 / .16), transparent 43%, rgb(255 255 255 / .035)), var(--bg);
+}
+:root[data-material="glass"] #app::after {
+  content: ''; position: absolute; inset: 0; z-index: 1000; pointer-events: none;
+  border-radius: var(--radius-window); box-shadow: inset 0 0 0 1px var(--glass-edge);
+}
+:root[data-material="glass"] .card {
+  box-shadow: inset 0 0 0 1px var(--glass-card-edge), var(--glass-card-shadow);
+}
+:root[data-material="glass"] .sheet { background: transparent; }
+:root[data-material="glass"] .footer { background: transparent; }
+:root[data-material="glass"] .settings-list > .toggle-line,
+:root[data-material="glass"] .settings-disclosure { background: rgb(247 249 253 / .34); }
+:root[data-material="glass"] .settings-disclosure > .disclosure-body {
+  background: rgb(53 65 83 / .055);
+  border-bottom-left-radius: var(--radius-card); border-bottom-right-radius: var(--radius-card);
+}
+:root[data-material="glass"] .settings-list .segmented { background: rgb(60 75 97 / .07); }
+:root[data-material="glass"] .segmented::before { background: rgb(247 249 253 / .42); }
+:root[data-material="glass"][data-appearance="dark"] .settings-list > .toggle-line,
+:root[data-material="glass"][data-appearance="dark"] .settings-disclosure { background: var(--surface); }
+:root[data-material="glass"][data-appearance="dark"] .settings-disclosure > .disclosure-body { background: rgb(9 15 24 / .10); }
+:root[data-material="glass"][data-appearance="dark"] .settings-list .segmented { background: rgb(185 205 233 / .08); }
+:root[data-material="glass"][data-appearance="dark"] .segmented::before { background: rgb(187 205 229 / .17); }
+:root[data-material="glass"] .quota-overview-toolbar {
+  background: var(--bg); backdrop-filter: blur(16px);
+}
+/* Browser previews have their own backdrop, inside the same document. */
+:root[data-material-preview] body.demo {
+  background: radial-gradient(ellipse at 12% 12%, #b4d4f8 0, transparent 52%),
+    radial-gradient(ellipse at 87% 76%, #d6c9f4 0, transparent 55%),
+    radial-gradient(ellipse at 12% 92%, #f9c6b4 0, transparent 55%), #c4d5e6;
+}
+:root[data-material-preview="midnight"] body.demo {
+  background: radial-gradient(ellipse at 12% 12%, #426983 0, transparent 52%),
+    radial-gradient(ellipse at 88% 80%, #624b82 0, transparent 55%),
+    radial-gradient(ellipse at 12% 92%, #755248 0, transparent 55%), #1c2b40;
+}
+:root[data-material-preview="contrast"] body.demo {
+  background: repeating-linear-gradient(125deg, #262c39 0 34px, #e3ac75 34px 68px, #bbcde6 68px 102px);
+}
+:root[data-material="glass"] body.demo #app { backdrop-filter: blur(25px) saturate(1.22); }
+@media (forced-colors: active) {
+  :root[data-material="glass"] { --bg: Canvas; --surface: Canvas; --surface-2: Canvas; --ink: CanvasText; --muted: CanvasText; --line: ButtonBorder; }
+  :root[data-material="glass"] #app { background: Canvas; backdrop-filter: none !important; }
+  :root[data-material="glass"] #app::after { display: none; }
+}

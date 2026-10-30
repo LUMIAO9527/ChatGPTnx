@@ -460,10 +460,10 @@ class Bridge:
         self._host.view = view
         self._host.layout()
         return {'ok': True}
-    def native_appearance(self, appearance):
-        if appearance not in ('light', 'dark'):
+    def native_appearance(self, appearance, material='glass'):
+        if appearance not in ('light', 'dark') or material not in ('glass', 'solid'):
             return {'ok': False}
-        self._host._dispatch_ui(lambda: self._host._set_native_appearance(appearance))
+        self._host._dispatch_ui(lambda: self._host._set_native_appearance(appearance, material))
         return {'ok': True}
     def hide(self, reason='user'):
         self._host.hide(reason=reason)
@@ -494,6 +494,8 @@ class Desktop:
         self._corner_edges = None
         self._corner_form = None
         self._native_appearance = None
+        self._native_material = None
+        self._window_material = None
         self._hide_token = 0  # show() invalidates pending blur-confirm timers
         self._relay_restore = None
         self._relay_pinned = False
@@ -633,6 +635,41 @@ class Desktop:
         if not hwnd:
             return False
         version = getattr(sys, 'getwindowsversion', None)
+        if self._native_material is not None:
+            try:
+                form = self._form()
+                if not form:
+                    return False
+                if form.InvokeRequired:
+                    return self._dispatch_ui(self._apply_native_shape)
+                if self._window_material is None:
+                    from .window_material import WindowMaterial
+                    self._window_material = WindowMaterial(self.service.log, self.service.paths.resources)
+                    try:
+                        self._window_material.bind_policy_changes(form, lambda: self._dispatch_ui(self._apply_native_shape))
+                    except Exception as error:
+                        self.service.log.warning('window_material_events_failed type=%s', type(error).__name__)
+                mode = self._window_material.apply(form, hwnd, dark=self._native_appearance == 'dark',
+                                                   requested=self._native_material == 'glass')
+                try:
+                    self._post_script('window.nxNativeBackdrop?.(' + json.dumps(mode) + ')')
+                except Exception:
+                    # The native surface can exist before CoreWebView2 is ready.
+                    # show() reapplies and publishes the active material later.
+                    pass
+                if mode != 'solid' or not version or version().build < 22621:
+                    from .window_corners import WindowCorners
+                    from .window_material import edge_color
+                    if self._corner_edges is None:
+                        self._corner_edges = WindowCorners()
+                    self._bind_corner_events(form)
+                    radius=max(1,round(self.config['radius'] * window_dpi(hwnd) / 96))
+                    dark = self._native_appearance == 'dark'
+                    color = edge_color(dark) if mode != 'solid' else ((29,29,29) if dark else (255,255,255))
+                    self._corner_edges.apply(hwnd,radius,color)
+                    return True
+            except Exception as error:
+                self.service.log.warning('window_material_failed type=%s', type(error).__name__)
         if not version or version().build < 22621:
             return self._apply_native_region()
         try:
@@ -698,10 +735,12 @@ class Desktop:
         form.HandleDestroyed += close
         self._corner_callbacks = (move, resize, close)
 
-    def _set_native_appearance(self, appearance):
-        if self._native_appearance == appearance:
+    def _set_native_appearance(self, appearance, material=None):
+        if self._native_appearance == appearance and (material is None or self._native_material == material):
             return
         self._native_appearance = appearance
+        if material is not None:
+            self._native_material = material
         if not self._apply_native_shape() and self.visible:
             self.hide(reason='shape')
 
@@ -1409,6 +1448,7 @@ class Desktop:
         dark = settings.get('appearance', 'system') == 'dark' or (
             settings.get('appearance', 'system') == 'system' and system_prefers_dark())
         self._native_appearance = 'dark' if dark else 'light'
+        self._native_material = settings.get('window_material', 'glass')
         background = '#1d1d1d' if dark else self.config['background']
         # HTML injection instead of serving the app folder; snapshots are never
         # exposed through a local file server.

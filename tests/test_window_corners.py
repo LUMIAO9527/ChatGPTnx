@@ -129,6 +129,27 @@ class NativeCornerTests(unittest.TestCase):
         self.edges.apply(101,28,(29,29,29))
         self.assertEqual([c.args[1] for c in self.user.SetWindowPos.call_args_list],[601,201,202,203])
 
+    def test_glass_corner_pixels_keep_premultiplied_partial_alpha(self):
+        size=16
+        pixels=ctypes.create_string_buffer(size*size*4)
+        def bitmap(dc,info,kind,out,section,offset):
+            out._obj.value=ctypes.addressof(pixels)
+            return 3
+        self.gdi.CreateCompatibleDC=Mock(return_value=2)
+        self.gdi.CreateDIBSection=Mock(side_effect=bitmap)
+        self.gdi.SelectObject=Mock(return_value=4)
+        self.gdi.DeleteDC=Mock()
+        self.user.UpdateLayeredWindow=Mock(return_value=1)
+        for color in ((252,253,255,230),(47,54,68,180)):
+            WindowCorners._paint(self.edges,201,size,color,coverage(size),0,0,0)
+            values=list(zip(*[iter(pixels.raw)]*4))
+            alpha=[a for b,g,r,a in values if a]
+            self.assertTrue(alpha)
+            self.assertLessEqual(max(alpha),color[3])
+            self.assertGreater(len(set(alpha)),8)
+            self.assertTrue(all(max(b,g,r)<=a for b,g,r,a in values))
+            self.assertEqual(values[-1],(0,0,0,0))
+
 
 if __name__ == '__main__':
     unittest.main()

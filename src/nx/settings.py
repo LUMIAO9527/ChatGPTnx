@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import re
 
-DEFAULTS = {'appearance': 'system', 'autostart': False,
+DEFAULTS = {'appearance': 'system', 'window_material': 'glass', 'autostart': False,
             'auto_relay': False, 'auto_relay_excluded': [],
             'early_anchor': False, 'early_anchor_accounts': [],
             'task_continuation': True, 'resume_message': '继续',
@@ -12,6 +12,7 @@ DEFAULTS = {'appearance': 'system', 'autostart': False,
             'notify_low': False, 'notify_reset_expiry': True, 'notify_credential': True,
             'poll_minutes': 10, 'query_timeout': 45, 'query_workers': 2}
 ENUMS = {'appearance': ('system', 'light', 'dark'),
+         'window_material': ('glass', 'solid'),
          'resume_transport': ('desktop_bridge', 'desktop_ui')}
 RANGES = {'poll_minutes': (1, 1440), 'query_timeout': (5, 180), 'query_workers': (1, 2)}
 

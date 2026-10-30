@@ -160,8 +160,9 @@
   const surfaceTone = node => {
     let color=node&&getComputedStyle(node).backgroundColor;
     if(!color||color==='transparent'||/rgba\([^)]*,\s*0\)$/.test(color))color=getComputedStyle(scene.app).backgroundColor;
-    const rgb=(color?.match(/[\d.]+/g)||[]).slice(0,3).map(Number);
-    return rgb.length===3?rgb:[255,255,255];
+    const rgba=(color?.match(/[\d.]+/g)||[]).slice(0,4).map(Number);
+    if(rgba.length===3)rgba.push(1);
+    return rgba.length===4?rgba:[255,255,255,1];
   };
   const primaryControl = surface => {
     if (!surface) return null;
@@ -328,7 +329,7 @@
       if(chosen==='control'&&models.has(source.identity+':label')){
         if(page.plate?.root!==target.root){
           clearIdentityPlate();const node=document.createElement('span');node.className='motion-identity-plate';node.__nxMotionRetained=true;node.__nxMotionDecoration=true;node.setAttribute('aria-hidden','true');node.inert=true;
-          target.root.insertBefore(node,target.root.firstChild);page.plate={node,root:target.root,from:source.tone,to:surfaceTone(target.root),color:source.tone,avatar:rect(target.avatar),label:rect(target.label)};
+          target.root.insertBefore(node,target.root.firstChild);page.plate={node,root:target.root,from:source.tone,to:surfaceTone(target.root),color:source.tone,initialAlpha:source.plateAlpha||0,glass:document.documentElement.dataset.material==='glass',avatar:rect(target.avatar),label:rect(target.label)};
           for(const [property,value]of Object.entries({position:'fixed','z-index':'-1','pointer-events':'none',transition:'none','border-radius':'16px'}))style(node,property,value);
         }
         page.plate.avatar=models.get(source.identity+':avatar')?.goal||rect(target.avatar);page.plate.label=models.get(source.identity+':label')?.goal||rect(target.label);
@@ -436,7 +437,11 @@
       const right=Math.max(a.x+a.w/2,l.x-l.w/2+label.w)+6,bottom=Math.max(a.y+a.h/2,l.y-l.h/2+label.h)+6;
       const progress=trajectory(0,0,0,1,Math.max(0,performance.now()-page.start)/1000,moveDuration/1000)[0];
       plate.color=plate.from.map((value,index)=>value+(plate.to[index]-value)*progress);
-      for(const [key,value]of Object.entries({left:left+'px',top:top+'px',width:(right-left)+'px',height:(bottom-top)+'px','background-color':`rgb(${plate.color.map(n=>n.toFixed(3)).join(',')})`}))style(plate.node,key,value);
+      if(plate.glass){
+        const ease=value=>{const t=Math.max(0,Math.min(1,value));return t*t*(3-2*t);};
+        plate.color[3]=(plate.initialAlpha+(plate.color[3]-plate.initialAlpha)*ease(progress/.2))*ease((1-progress)/.2);
+      }
+      for(const [key,value]of Object.entries({left:left+'px',top:top+'px',width:(right-left)+'px',height:(bottom-top)+'px','background-color':`rgba(${plate.color.map(n=>n.toFixed(3)).join(',')})`}))style(plate.node,key,value);
       if(page.backdrop){
         // The moving identity still needs protection while crossing the black
         // action. Cut the persistent card out of that protection, so its shade
@@ -469,7 +474,7 @@
       const usage=window.NXUsageMotion?.beforeNavigation(surface),report=reportParts(surface);
       const identity = surface.querySelector('.current-card')?.dataset.motionIdentity || null;
       const anchor = findAnchor(surface,preferredIdentity) || findAnchor(surface,identity);
-      const source = {identity:anchor?.identity||null,avatar:anchor?.avatar?capturePart(anchor.avatar,surface):null,label:anchor?.label?capturePart(anchor.label,surface):null,tone:page?.plate?.color||surfaceTone(anchor?.root),control:primaryControl(surface),surface:anchor?.root.matches('.current-card')?contextSurface(surface):null,card:!!anchor?.root.matches('.current-card'),box:anchor?rect(anchor.root):null};
+      const source = {identity:anchor?.identity||null,avatar:anchor?.avatar?capturePart(anchor.avatar,surface):null,label:anchor?.label?capturePart(anchor.label,surface):null,tone:page?.plate?.color||surfaceTone(anchor?.root),plateAlpha:page?.plate?.color?.[3]||0,control:primaryControl(surface),surface:anchor?.root.matches('.current-card')?contextSurface(surface):null,card:!!anchor?.root.matches('.current-card'),box:anchor?rect(anchor.root):null};
       const backdrop=contextSurface(surface);
       const entry=route.from&&route.to&&route.from!==route.to?entryControl(surface,route):null;
       const media=['purchase','support-qr'].includes(route.from)&&['purchase','support-qr'].includes(route.to)&&route.from!==route.to?sharedMedia(surface):null;

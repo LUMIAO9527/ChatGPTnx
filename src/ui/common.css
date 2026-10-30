@@ -19,7 +19,7 @@ input, select, .field, .detail-line, .quota-failure, .mark { border-radius: var(
 .badge, .current-chip, .coverage, .track { border-radius: var(--radius-pill); }
 [hidden] { display: none !important; }
 .icon { width: 19px; height: 19px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
-#app { width: 327px; height: 458px; position: relative; overflow: hidden; background: var(--bg); border-radius: var(--window-r);
+#app { width: 312px; height: 458px; position: relative; overflow: hidden; background: var(--bg); border-radius: var(--window-r);
   box-shadow: var(--shadow-window); isolation: isolate; contain: paint; }
 body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-shadow: none; border-radius: 0; overflow: hidden; }
 #home, .sheet { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -27,7 +27,7 @@ body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-sh
 .header { display: flex; align-items: center; gap: 5px; flex: 0 0 34px; min-height: 34px; }
 .brand { display: flex; align-items: center; gap: 9px; margin-right: auto; font-size: var(--font-emphasis); font-weight: 650; letter-spacing: -.35px; }
 .mark { font-size: var(--font-brand-mark); font-weight: 750; letter-spacing: -1.5px; display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; background: var(--ink); color: var(--bg); }
+  width: 30px; height: 30px; background: var(--ink); color: var(--inverse); }
 /* NX-CONTROLS-BEGIN
    A single skin for the product and its offline demonstration console.
    Action radius = short-side size * 3/8. Content and focus need >=4px.
@@ -243,7 +243,7 @@ h3 { font-size: var(--font-page-title); font-weight: 620; }
   border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: var(--font-body); font-weight: 600;
   display: inline-flex; align-items: center; justify-content: center; }
 .add-progress li.done { color: var(--muted); }
-.add-progress li.done::before { background: var(--ink); color: var(--bg); }
+.add-progress li.done::before { background: var(--ink); color: var(--inverse); }
 .add-progress li.current { color: var(--ink); font-weight: 600; }
 .add-progress li.current::before { background: var(--action); color: var(--action-ink); }
 
@@ -397,7 +397,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .quota-overview-row > .icon { width: 14px; color: var(--muted); }
 .quota-overview-main { flex: 1; min-width: 0; }
 .quota-overview-main .identity-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-control); }
-.current-chip { flex: 0 0 auto; padding: 2px 5px; background: var(--ink); color: var(--bg); font-size: var(--font-micro); }
+.current-chip { flex: 0 0 auto; padding: 2px 5px; background: var(--ink); color: var(--inverse); font-size: var(--font-micro); }
 .quota-overview-windows { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
 .quota-overview-window { min-width: 0; display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
 .quota-overview-window em { color: var(--muted); font-size: var(--font-micro); font-style: normal; }
@@ -660,7 +660,9 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
   width: calc(100% + 14px); margin: 0 -7px;
 }
 .footer.slim { min-height: 32px; padding: 2px 1px 0; gap: 4px; }
-.sheet-head { min-height: var(--sheet-header-height); padding: 7px 12px; gap: 7px; }
+.sheet-head { min-height: var(--sheet-header-height); padding: 3px 12px; gap: 7px; margin-bottom: var(--sheet-header-gap); }
+.sheet:has(> .settings-body) .sheet-head { margin-bottom: 0; }
+#home[inert] { visibility: hidden; }
 .sheet-body { padding: var(--content-top) var(--panel-edge) 14px; }
 .sheet-foot { padding: 10px 14px; gap: 7px; }
 .link-row { min-height: 42px; padding: 8px; }
