@@ -218,9 +218,10 @@ h3 { font-size: var(--font-page-title); font-weight: 620; }
 .quota-bars.duo { grid-template-columns: 1fr 1fr; gap: 10px; }
 .quota-bars.duo > div { min-width: 0; }
 .quota-bars.duo .quota-bar-head { min-width: 0; }
-.quota-bar-head { display: flex; align-items: center; font-size: var(--font-body); gap: var(--space-3); }
-.quota-label { min-width: 0; display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
-.quota-bar-head b { margin-left: auto; font-size: var(--font-heading); font-weight: 620; }
+.quota-bar-head { display: flex; align-items: flex-start; font-size: var(--font-body); gap: var(--space-3); }
+.quota-label { min-width: 0; display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
+.quota-label .reset { line-height: 13px; }
+.quota-bar-head b { flex: 0 0 auto; white-space: nowrap; margin-left: auto; font-size: var(--font-heading); font-weight: 620; }
 .track { height: 5px; margin-top: var(--space-3); background: var(--surface-2); overflow: hidden; }
 .track > span { height: 100%; background: var(--ink); display: block; border-radius: inherit; }
 .low .track > span { background: var(--danger); }
@@ -374,11 +375,11 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .current-card { position:relative; isolation:isolate; height:var(--account-card-height); min-height:var(--account-card-height); flex:0 0 var(--account-card-height); padding:10px 12px; }
 .motion-surface { pointer-events:none; }
 .current-identity { display: flex; align-items: center; width: calc(100% + 16px); margin: 0 -8px;
-  height:50px; min-height:50px; padding:5px 12px; border:1px solid transparent; text-align:left; }
+  height:40px; min-height:40px; padding:0 12px; border:1px solid transparent; text-align:left; }
 .current-identity .identity { flex: 1; }
 .current-identity > .icon { width: 15px; margin-left: 8px; color: var(--muted); }
 .current-card .avatar { width: var(--avatar-size); height: var(--avatar-size); }
-.current-card .quota-slot { height:29px; min-height:29px; margin-top:9px; }
+.current-card .quota-slot { height:43px; min-height:43px; margin-top:5px; }
 .current-card .quota-bars { gap:8px; }
 .roster { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; margin-bottom: -4px; overflow: hidden; }
 
@@ -399,7 +400,8 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .quota-overview-main .identity-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-control); }
 .current-chip { flex: 0 0 auto; padding: 2px 5px; background: var(--ink); color: var(--inverse); font-size: var(--font-micro); }
 .quota-overview-windows { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
-.quota-overview-window { min-width: 0; display: flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.quota-overview-window { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 4px; row-gap: 2px; white-space: nowrap; }
+.quota-overview-window small { flex-basis: 100%; line-height: 13px; }
 .quota-overview-window em { color: var(--muted); font-size: var(--font-micro); font-style: normal; }
 .quota-overview-window strong { font-size: var(--font-body); }
 .quota-overview-window small { color: var(--muted); font-size: var(--font-micro); white-space: nowrap; }

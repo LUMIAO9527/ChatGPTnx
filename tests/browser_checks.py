@@ -262,7 +262,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   check('quota-overview/all-accounts-and-resets',document.querySelectorAll('.quota-overview-row').length===window.NXDemo.state().accounts.length&&document.querySelectorAll('.quota-overview-window [data-reset]').length>=2,
         [document.querySelectorAll('.quota-overview-row').length,window.NXDemo.state().accounts.length]);
   const quotaRow=box('.quota-overview-row'),quotaWindow=document.querySelector('.quota-overview-window');
-  check('quota-overview/reset-follows-percentage-on-one-line',quotaRow.height<=64&&Math.abs(box(quotaWindow.querySelector('strong')).top-box(quotaWindow.querySelector('small')).top)<=4&&box(quotaWindow.querySelector('small')).left>box(quotaWindow.querySelector('strong')).right,
+  check('quota-overview/reset-on-separate-line',quotaRow.height<=68&&box(quotaWindow.querySelector('small')).top>=box(quotaWindow.querySelector('strong')).bottom-.5&&box(quotaWindow.querySelector('small')).right<=box(quotaWindow).right+.5,
         [quotaRow.height,box(quotaWindow.querySelector('strong')).top,box(quotaWindow.querySelector('small')).top]);
   check('quota-overview/two-compact-sort-controls',document.querySelectorAll('.quota-metric button').length===2&&document.querySelectorAll('.quota-scope button').length===3,
         [document.querySelectorAll('.quota-metric button').length,document.querySelectorAll('.quota-scope button').length]);
@@ -290,7 +290,7 @@ window.addEventListener('unhandledrejection',event=>nxReportHarnessError(event.r
   const manyRows=[...document.querySelectorAll('.quota-overview-row')];
   const quotaScroll=stableScrollRegion(document.querySelector('.quota-overview-body'));
   check('quota-overview/scroll-keeps-width',quotaScroll.every(Boolean),quotaScroll);
-  check('quota-overview/many-accounts-fit-without-horizontal-overflow',manyRows.length>8&&manyRows.every(row=>row.scrollWidth<=row.clientWidth+1&&box(row).height<=64),
+  check('quota-overview/many-accounts-fit-without-horizontal-overflow',manyRows.length>8&&manyRows.every(row=>row.scrollWidth<=row.clientWidth+1&&box(row).height<=68),
         [manyRows.length,...manyRows.map(row=>[row.scrollWidth,row.clientWidth,box(row).height])]);
   document.querySelector('[data-action="back"]').click();await wait(50);
 
