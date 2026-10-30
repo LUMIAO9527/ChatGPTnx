@@ -174,9 +174,10 @@ class BridgeResumeTests(unittest.TestCase):
             with self.assertRaises(BridgeUnavailable):
                 text_result(value)
 
-    def test_source_must_be_configured(self):
-        self.settings.write_text('{"settings":{}}')
-        self.assertEqual(self.run_resume(), ('failed', 'resume_source_unconfigured'))
+    def test_no_caller_is_reported_before_any_desktop_request(self):
+        self.settings.write_text(json.dumps({'settings': {
+            'task_continuation': True, 'resume_message': '继续'}}))
+        self.assertEqual(self.run_resume(), ('failed', 'resume_source_unavailable'))
         self.pipe.request.assert_not_called()
 
     def test_source_cannot_impersonate_target(self):
@@ -246,6 +247,14 @@ class PipeTransportTests(unittest.TestCase):
     def test_read_timeout(self):
         with self.assertRaises(BridgeUnavailable):
             self.exchange(None, delay=.15, timeout=.05)
+
+    def test_rejected_read_preserves_diagnostic_category(self):
+        with self.assertRaisesRegex(BridgeUnavailable, 'desktop_request_rejected'):
+            self.exchange({'id': 1, 'jsonrpc': '2.0', 'error': {'code': -32000}})
+
+    def test_rejected_send_still_has_an_uncertain_outcome(self):
+        with self.assertRaises(BridgeUncertain):
+            self.exchange({'id': 1, 'jsonrpc': '2.0', 'error': {'code': -32000}}, write=True)
 
     def test_write_timeout_is_uncertain(self):
         with self.assertRaises(BridgeUncertain):

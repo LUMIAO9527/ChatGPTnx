@@ -57,6 +57,7 @@ RETRYABLE_REASONS = AUTO_RETRY_PRE_DISPATCH | AUTO_RETRY_TURN_FAILURES | frozens
     'target_changed',
     'desktop_window_ambiguous', 'desktop_location_unreadable',
     'desktop_bridge_ambiguous', 'resume_source_unconfigured',
+    'desktop_request_rejected',
     'title_unavailable_or_ambiguous',
     'task_navigation_unconfirmed', 'account_guard_unavailable',
     'native_continue_unavailable',

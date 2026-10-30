@@ -31,6 +31,7 @@ class LocationTests(unittest.TestCase):
         with sqlite3.connect(self.home / 'state_1.sqlite') as db:
             db.execute('CREATE TABLE threads (id TEXT, archived INTEGER, rollout_path TEXT)')
             db.execute('INSERT INTO threads VALUES (?,0,?)', (self.TARGET, f'rollout_{self.RUNTIME}.jsonl'))
+            db.execute('INSERT INTO threads VALUES (?,0,NULL)', (self.SOURCE,))
         db.close()
         self.pipe = Mock()
         self.snapshot = {'thread': {'id': self.TARGET, 'kind': 'codex'},

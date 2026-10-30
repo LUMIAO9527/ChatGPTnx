@@ -272,7 +272,8 @@ def _resume_interrupted(home, script, item, stop, log, *, stale_index):
         from .desktop_location import locate_task
         located, reason = locate_task(home, thread_id, item['settings_file'],
                                       expected_turn=turn_id, stop=stop,
-                                      required_status='interrupted')
+                                      required_status='interrupted',
+                                      excluded=item.get('context_excluded_threads', ()))
         if located != 'located':
             return located, reason
     elif stale_index:

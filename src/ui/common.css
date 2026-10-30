@@ -783,7 +783,9 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .resume-inline-dot.state-failed { background:var(--danger); }
 .resume-inline-dot.state-active { background:var(--ink); }
 .resume-inline-dot.state-waiting { background:#b78324; }
-.resume-inline-title { flex:0 1 auto; max-width:48%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--font-body); font-weight:500; }
+.resume-inline-copy { flex:0 1 48%; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.resume-inline-title { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:var(--font-body); font-weight:500; }
+.resume-inline-reason { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:var(--font-caption); line-height:12px; }
 .resume-inline-time { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--muted); font-size:var(--font-small); }
 .resume-inline-result { display:flex; align-items:center; justify-content:center; flex:0 0 48px; width:48px; min-width:48px; height:var(--control-size-small); font-size:var(--font-small); color:var(--muted); white-space:nowrap; text-align:center; }
 .resume-inline-result.is-failed { color:var(--danger); }

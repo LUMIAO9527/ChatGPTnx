@@ -171,6 +171,57 @@ class ContinuationContractTests(unittest.TestCase):
                                           self.item, self.fast_stop, self.log)
         self.assertEqual(result, ('done', 'new_turn_observed'))
 
+    def recover_caller(self, configured):
+        settings = json.loads(self.settings.read_text(encoding='utf-8'))
+        settings['settings']['resume_source_thread_id'] = configured
+        self.settings.write_text(json.dumps(settings), encoding='utf-8')
+        before = self.settings.read_bytes()
+        with sqlite3.connect(self.paths.home/'state_1.sqlite') as db:
+            db.execute('ALTER TABLE threads ADD COLUMN has_user_event INTEGER DEFAULT 1')
+            db.execute('ALTER TABLE threads ADD COLUMN updated_at INTEGER DEFAULT 1')
+        db.close()
+        pipe = self.pipe()
+        with patch('nx.app_bridge.discover', return_value=pipe), patch('nx.desktop_resume._invoke') as native:
+            result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
+                                          self.item, self.fast_stop, self.log)
+        native.assert_not_called()
+        self.assertEqual(result, ('done', 'new_turn_observed'))
+        self.assertEqual(self.settings.read_bytes(), before)
+        self.assertEqual([call.args[1]['tool'] for call in pipe.request.call_args_list],
+                         ['read_thread', 'send_message_to_thread'])
+        self.assertTrue(all(call.args[1]['hostId'] == 'local' for call in pipe.request.call_args_list))
+
+    def test_deleted_source_recovers_and_sends_once_without_editing_settings(self):
+        self.recover_caller(OTHER)
+
+    def test_initial_blank_source_recovers_and_sends_once(self):
+        self.recover_caller('')
+
+    def test_source_disappearing_after_read_cannot_send(self):
+        pipe = self.pipe()
+        original = pipe.request.side_effect
+        def request(method, params, **kwargs):
+            result = original(method, params, **kwargs)
+            with sqlite3.connect(self.paths.home/'state_1.sqlite') as db:
+                db.execute('DELETE FROM threads WHERE id=?', (SOURCE,))
+            db.close()
+            return result
+        pipe.request.side_effect = request
+        with patch('nx.app_bridge.discover', return_value=pipe):
+            result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
+                                          self.item, self.fast_stop, self.log)
+        self.assertEqual(result, ('failed', 'resume_source_unavailable'))
+        pipe.request.assert_called_once()
+
+    def test_rejected_read_reports_exact_stage_without_dispatch(self):
+        pipe = Mock()
+        pipe.request.return_value = {'success': False, 'contentItems': []}
+        with patch('nx.app_bridge.discover', return_value=pipe):
+            result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
+                                          self.item, self.fast_stop, self.log)
+        self.assertEqual(result, ('failed', 'desktop_request_rejected'))
+        pipe.request.assert_called_once()
+
     def test_stale_running_index_uses_exact_interrupted_desktop_turn(self):
         with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
             db.execute("UPDATE thread_turns SET status='inProgress', error_json=NULL")

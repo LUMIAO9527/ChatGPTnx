@@ -91,12 +91,14 @@ class Pipe:
             if reply.get('id') != self.sequence or reply.get('jsonrpc') != '2.0':
                 raise BridgeUnavailable('invalid_reply')
             if 'error' in reply:
-                raise BridgeUnavailable('desktop_rejected_request')
+                raise BridgeUnavailable('desktop_request_rejected')
             return reply['result']
         except Exception as error:
             # Even an error response can follow a completed downstream action.
             if side_effect:
                 raise BridgeUncertain('dispatch_outcome_unknown') from error
+            if isinstance(error, BridgeUnavailable):
+                raise
             raise BridgeUnavailable('bridge_read_failed') from error
 
 
@@ -194,13 +196,15 @@ def discover_when_ready(stop, auth_file, expected_auth, timeout=12, required=Non
 
 
 def call_params(source_thread, source_turn, tool, arguments, call_id=None):
-    return {'arguments': arguments, 'callerSource': 'codex',
+    return {'arguments': arguments, 'callerSource': 'codex', 'hostId': 'local',
             'callId': call_id or 'nx-' + str(uuid.uuid4()), 'namespace': 'codex_app',
             'threadId': source_thread, 'turnId': source_turn, 'tool': tool}
 
 
 def text_result(result):
     try:
+        if isinstance(result, dict) and result.get('success') is False:
+            raise BridgeUnavailable('desktop_request_rejected')
         if not isinstance(result, dict) or result.get('success') is not True:
             raise ValueError('app_tool_failed')
         content = result.get('contentItems')
@@ -241,7 +245,7 @@ def resume_existing(home, item, stop, log, *, interrupted=False):
     import hashlib
     from pathlib import Path
     from .desktop_resume import latest_turn, continuation_guard, observe_start, THREAD_ID
-    from .desktop_location import canonical_task
+    from .desktop_location import canonical_task, resume_source
     from .resume_policy import message_resume_eligible
     from .storage import fingerprint
     from .settings import valid_setting
@@ -261,20 +265,18 @@ def resume_existing(home, item, stop, log, *, interrupted=False):
                 raise ValueError('invalid_settings')
             return settings
         settings = read_settings()
-        source = settings.get('resume_source_thread_id')
-        if not source or not valid_setting('resume_source_thread_id', source):
-            return 'failed', 'resume_source_unconfigured'
+        configured = settings.get('resume_source_thread_id', '')
         target = canonical_task(home, item['thread_id'])
         if not target:
             return 'failed', 'task_identity_unavailable'
-        if source == target:
-            return 'failed', 'resume_source_is_target'
-        if canonical_task(home, source, allow_archived=True) != source:
-            return 'failed', 'resume_source_unavailable'
         if settings.get('task_continuation') is not True:
             return 'failed', 'continuation_disabled'
         if not valid_setting('resume_message', settings.get('resume_message')):
             return 'failed', 'invalid_resume_message'
+        source = resume_source(home, configured, target,
+                               excluded=item.get('context_excluded_threads', ()))
+    except BridgeUnavailable as error:
+        return 'failed', str(error)
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return 'failed', 'account_guard_unavailable'
     pipe = None
@@ -311,7 +313,7 @@ def resume_existing(home, item, stop, log, *, interrupted=False):
         elif current.get('status') != 'failed' or not message_resume_eligible(error):
             return 'failed', 'unrelated_failure'
         settings = read_settings()
-        if settings.get('resume_source_thread_id') != source:
+        if settings.get('resume_source_thread_id', '') != configured:
             return 'failed', 'resume_source_unconfigured'
         if settings.get('task_continuation') is not True:
             return 'failed', 'continuation_disabled'
@@ -320,6 +322,8 @@ def resume_existing(home, item, stop, log, *, interrupted=False):
             return 'failed', 'invalid_resume_message'
         if canonical_task(home, item['thread_id']) != target:
             return 'failed', 'task_identity_unavailable'
+        if canonical_task(home, source, allow_archived=True) != source:
+            return 'failed', 'resume_source_unavailable'
         if stop.is_set():
             return 'failed', 'shutting_down'
         if fingerprint(auth) != before:
@@ -337,7 +341,8 @@ def resume_existing(home, item, stop, log, *, interrupted=False):
         if dispatched:
             return 'failed', 'action_outcome_unknown'
         reason = (str(error) if isinstance(error, BridgeUnavailable)
-                  and str(error) in ('desktop_bridge_ambiguous', 'account_changed', 'shutting_down')
+                  and str(error) in ('desktop_bridge_ambiguous', 'desktop_request_rejected',
+                                     'account_changed', 'shutting_down')
                   else 'desktop_bridge_unavailable')
         return 'failed', reason
     finally:
@@ -385,13 +390,14 @@ def observe_bridge_start(pipe, home, source, target, item, stop, *, expected_aut
 def observe_native_start(home, item, stop, *, expected_auth):
     """Observe an interrupted turn after the native Continue button was clicked."""
     from pathlib import Path
-    from .desktop_location import canonical_task
+    from .desktop_location import canonical_task, resume_source
     try:
         settings = json.loads(Path(item['settings_file']).read_text(encoding='utf-8-sig'))['settings']
-        source = settings['resume_source_thread_id']
         target = canonical_task(home, item['thread_id'])
-        if not target or not source:
+        if not target:
             return 'failed', 'action_outcome_unknown'
+        source = resume_source(home, settings.get('resume_source_thread_id', ''), target,
+                               excluded=item.get('context_excluded_threads', ()))
         pipe = discover_when_ready(stop, Path(home) / 'auth.json', expected_auth)
     except Exception:
         return 'failed', 'action_outcome_unknown'

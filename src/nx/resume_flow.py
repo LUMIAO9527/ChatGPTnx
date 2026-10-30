@@ -659,6 +659,9 @@ class ResumeCoordinator:
                         expected = session.get('target_identity_key') or self._target_identity(session.get('target'))
                         return session['id'], {**copy.deepcopy(item),
                             'settings_file': str(self.paths.data / 'state.json'),
+                            'context_excluded_threads': [i['thread_id'] for s in self.sessions
+                                if s.get('phase') in ('switching', 'resuming')
+                                for i in s['items']],
                             'expected_account_key': expected}
                 if session['items'] and all(i['state'] in TERMINAL for i in session['items']):
                     session['phase'] = ('failed' if any(i['state'] == 'failed'

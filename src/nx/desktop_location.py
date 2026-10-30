@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import threading
 import uuid
 from pathlib import Path
@@ -35,12 +36,64 @@ def canonical_task(home, runtime_id, *, allow_archived=False):
     return None
 
 
+def resume_source(home, configured, target, *, excluded=()):
+    """Resolve a real local caller afresh; never use a queued target as caller.
+
+    An existing configured caller stays authoritative. A missing caller is
+    replaced only by an indexed, user-owned main task. No task is created and
+    no setting is rewritten. The subsequent desktop read verifies that caller
+    before navigation or dispatch can occur.
+    """
+    from .task_metadata import task_metadata
+
+    if not valid_setting('resume_source_thread_id', configured):
+        raise BridgeUnavailable('resume_source_unconfigured')
+    blocked = {target}
+    for ident in excluded:
+        blocked.add(canonical_task(home, ident, allow_archived=True) or ident)
+    source = canonical_task(home, configured, allow_archived=True) if configured else None
+    if source in blocked:
+        raise BridgeUnavailable('resume_source_is_target')
+    if source:
+        return source
+    path = latest_database(home, 'state_*.sqlite')
+    if not path:
+        raise BridgeUnavailable('resume_source_unavailable')
+    try:
+        with read_only(path) as db:
+            columns = {row[1] for row in db.execute('PRAGMA table_info(threads)')}
+            if not {'id', 'archived'} <= columns:
+                raise ValueError('caller_metadata_unavailable')
+            user_flags = []
+            if 'has_user_event' in columns:
+                user_flags.append('has_user_event=1')
+            if 'thread_source' in columns:
+                user_flags.append("thread_source='user'")
+            if not user_flags:
+                raise ValueError('caller_metadata_unavailable')
+            updated = next((key for key in ('updated_at_ms', 'updated_at', 'created_at')
+                            if key in columns), 'id')
+            rows = db.execute('SELECT id FROM threads WHERE (' + ' OR '.join(user_flags) + ') '
+                              f'ORDER BY archived ASC, {updated} DESC, id ASC LIMIT 64').fetchall()
+        ids = [row[0] for row in rows if row[0] not in blocked]
+        metadata = task_metadata(home, ids)
+        for ident in ids:
+            entry = metadata.get(ident, {})
+            if (entry.get('kind') == 'task' and entry.get('canonical_id') == ident
+                    and not entry.get('parent_id')
+                    and entry.get('agent_path') in (None, '/root')):
+                return ident
+    except (OSError, ValueError, TypeError, sqlite3.Error):
+        pass
+    raise BridgeUnavailable('resume_source_unavailable')
+
+
 def locate_task(home, runtime_id, settings_file, *, expected_turn=None, stop=None,
-                required_status=None):
+                required_status=None, excluded=()):
     """Read and navigate only. A navigation acknowledgement is never resume success.
 
     Automatic callers supply the interrupted turn. A newer or running turn is
-    left alone. Keep the configured real source; never impersonate the target.
+    left alone. Resolve a real local caller and never impersonate the target.
     """
     from .desktop_resume import latest_turn
 
@@ -49,18 +102,17 @@ def locate_task(home, runtime_id, settings_file, *, expected_turn=None, stop=Non
 
     try:
         initial = settings()
-        source = initial.get('resume_source_thread_id')
-        if not source or not valid_setting('resume_source_thread_id', source):
-            return 'failed', 'resume_source_unconfigured'
+        configured = initial.get('resume_source_thread_id', '')
         target = canonical_task(home, runtime_id)
         if not target:
             return 'failed', 'task_identity_unavailable'
-        if source == target:
-            return 'failed', 'resume_source_is_target'
+        source = resume_source(home, configured, target, excluded=excluded)
         auth = Path(home) / 'auth.json'
         before = fingerprint(auth)
         if not before:
             return 'failed', 'account_guard_unavailable'
+    except BridgeUnavailable as error:
+        return 'failed', str(error)
     except (OSError, ValueError, TypeError, AttributeError):
         return 'failed', 'account_guard_unavailable'
 
@@ -95,7 +147,7 @@ def locate_task(home, runtime_id, settings_file, *, expected_turn=None, stop=Non
             if record['turn_id'] != expected_turn:
                 return 'skipped', 'newer_turn'
         current = settings()
-        if current.get('resume_source_thread_id') != source:
+        if current.get('resume_source_thread_id', '') != configured:
             return 'failed', 'resume_source_unconfigured'
         if expected_turn and current.get('task_continuation') is not True:
             return 'failed', 'continuation_disabled'
@@ -103,6 +155,8 @@ def locate_task(home, runtime_id, settings_file, *, expected_turn=None, stop=Non
             return 'failed', 'shutting_down'
         if fingerprint(auth) != before:
             return 'failed', 'account_changed'
+        if canonical_task(home, source, allow_archived=True) != source:
+            return 'failed', 'resume_source_unavailable'
         reply = text_result(pipe.request('tools/call', call_params(
             source, 'nx-locate-' + str(uuid.uuid4()), 'navigate_to_codex_page',
             {'threadId': target}), side_effect=True))
@@ -114,7 +168,12 @@ def locate_task(home, runtime_id, settings_file, *, expected_turn=None, stop=Non
         # Navigation cannot submit or start a turn. A future navigation is safe,
         # but this attempt must not type anything after an unconfirmed response.
         return 'failed', 'task_navigation_unconfirmed'
-    except (BridgeUnavailable, OSError, ValueError, TypeError, AttributeError):
+    except BridgeUnavailable as error:
+        reason = str(error)
+        return 'failed', reason if reason in (
+            'desktop_bridge_ambiguous', 'desktop_request_rejected',
+            'account_changed', 'shutting_down') else 'desktop_bridge_unavailable'
+    except (OSError, ValueError, TypeError, AttributeError):
         return 'failed', 'desktop_bridge_unavailable'
     finally:
         if pipe:

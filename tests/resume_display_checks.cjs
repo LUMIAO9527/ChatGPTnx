@@ -84,7 +84,7 @@ fs.mkdirSync(output, {recursive:true});
           const body=document.querySelector('.sheet-body');
           const copy=[...document.querySelectorAll('.resume-inline-task')];
           const rect=element=>element.getBoundingClientRect();
-          return NXPreview.info().width===327&&NXPreview.info().height===458
+          return NXPreview.info().width===NX_CONFIG.sizes.home[0]&&NXPreview.info().height===NX_CONFIG.sizes.home[1]
             &&body.scrollWidth<=body.clientWidth+1
             &&copy.every(element=>rect(element).width>0&&[...element.children].every(child=>rect(child).right<=rect(element).right+1))
             &&[...document.querySelectorAll('.is-subagent .resume-inline-title')].every(element=>getComputedStyle(element).textOverflow==='ellipsis');
@@ -100,7 +100,7 @@ fs.mkdirSync(output, {recursive:true});
           await NXPreview.refresh();
         });
         assert.equal(await page.locator('.is-subagent [data-action="retry-resume-task"]').count(),0);
-        assert((await page.locator('.is-subagent .resume-inline-task').first().getAttribute('title')).includes('桌面桥接不可用，未发送消息'));
+        assert((await page.locator('.is-subagent .resume-inline-task').first().getAttribute('title')).includes('等待桌面连接恢复'));
       });
       await check(name('newly-skipped-child-has-specific-reason'),async()=>{
         await page.evaluate(async()=>{
@@ -116,6 +116,23 @@ fs.mkdirSync(output, {recursive:true});
       await check(name('ordinary-task-retains-manual-retry'),async()=>{
         assert.equal(await page.locator('[data-action="retry-resume-task"]').count(),1);
         assert.equal(await page.locator('.resume-subagent-note').count(),0);
+      });
+      await check(name('waiting-reason-visible-without-opening-tooltip'),async()=>{
+        await page.evaluate(async()=>{
+          const call=NXDemo.call,details=await call('get_resume_details');
+          details[0].items[0].state='waiting';
+          details[0].items[0].reason='desktop_bridge_unavailable';
+          NXDemo.call=(method,...args)=>method==='get_resume_details'?structuredClone(details):call(method,...args);
+          await NXPreview.refresh();
+        });
+        const reason=page.locator('.resume-inline-reason').first();
+        assert.equal(await reason.innerText(),'等待桌面连接恢复');
+        assert.equal(await reason.isVisible(),true);
+        assert(await reason.evaluate(element=>{
+          const row=element.closest('.resume-inline-row').getBoundingClientRect(),box=element.getBoundingClientRect();
+          return box.bottom<=row.bottom&&box.top>=row.top&&box.right<=row.right;
+        }));
+        await page.locator('#app').screenshot({path:path.join(output,'resume-waiting-'+appearance+'.png')});
       });
     }
     assert.deepEqual(errors,[]);
