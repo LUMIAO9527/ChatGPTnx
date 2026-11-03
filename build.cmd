@@ -12,6 +12,8 @@ set "TEMP=%BUILD_ROOT%\temp"
 set "TMP=%TEMP%"
 if not exist "%TEMP%" mkdir "%TEMP%"
 
+"%PYTHON%" tools\check_build_dependencies.py
+if errorlevel 1 exit /b 1
 "%PYTHON%" tools\build.py
 if errorlevel 1 exit /b 1
 "%PYTHON%" tools\build_explorer.py

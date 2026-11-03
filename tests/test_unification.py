@@ -43,13 +43,13 @@ class AutomaticResultsTests(unittest.TestCase):
    result=attempt_continuation(Path('none'),Path('none'),{'thread_id':THREAD,'turn_id':TURN},stop,Mock())
   self.assertEqual(run.call_count,1);return result
  def test_native_action_needs_new_turn_evidence(self):
-  self.assertEqual(self.attempt('invoked:native_continue',observed=True),('done','new_turn_observed'))
+  self.assertEqual(self.attempt('clicked:native_continue',observed=True),('done','new_turn_observed'))
  def test_native_click_without_observed_turn_does_not_retry(self):
-  self.assertEqual(self.attempt('invoked:native_continue'),('failed','start_not_observed'))
+  self.assertEqual(self.attempt('clicked:native_continue'),('failed','start_not_observed'))
  def test_uncertain_click_is_never_retryable(self):
   self.assertEqual(self.attempt('uncertain:desktop_error',code=2),('failed','action_outcome_unknown'))
- def test_nonzero_invoked_is_not_success(self):
-  self.assertEqual(self.attempt('invoked:native_continue',code=2),('failed','action_outcome_unknown'))
+ def test_nonzero_click_result_is_not_success(self):
+  self.assertEqual(self.attempt('clicked:native_continue',code=2),('failed','action_outcome_unknown'))
  def test_missing_button_is_a_failure(self):
   self.assertEqual(self.attempt('skip:native_continue_unavailable',code=2),('failed','native_continue_unavailable'))
  def test_private_text_in_response_does_not_become_reason(self):
@@ -90,7 +90,7 @@ class NativeSourceBoundariesTests(unittest.TestCase):
   for forbidden in ('.SetValue(', 'Set-Clipboard', 'Start-Process', 'SendKeys', 'codex://'):
    self.assertNotIn(forbidden,s)
   self.assertNotIn('Assert-EmptyComposer $composer',s);self.assertNotIn('Assert-CollapsedCaret $composer',s)
-  self.assertNotIn('SendInput',s);self.assertNotIn('Send-ResumeMessage',s)
+  self.assertNotIn('KEYBDINPUT',s);self.assertNotIn('Send-ResumeMessage',s)
  def test_automatic_navigation_waits_for_idle_but_explicit_open_is_separate(self):
   s=(ROOT/'src/continue_in_desktop.ps1').read_text(encoding='utf-8-sig')
   start=s.index("# Select the unique sidebar entry")

@@ -126,7 +126,7 @@ class LocationTests(unittest.TestCase):
     def test_native_route_locates_then_clicks_continue(self):
         before = {'turn_id': '44444444-4444-4444-8444-444444444444', 'status': 'interrupted'}
         after = {'turn_id': '55555555-5555-4555-8555-555555555555', 'status': 'inProgress', 'started_at': 1900000000}
-        result, invoke = self.native_attempt(Mock(stdout='invoked:native_continue', returncode=0), [before, before, after])
+        result, invoke = self.native_attempt(Mock(stdout='clicked:native_continue', returncode=0), [before, before, after])
         self.assertEqual(result, ('done', 'new_turn_observed'))
         invoke.assert_called_once()
         self.assertIn('-WaitForTarget', invoke.call_args.args[0])

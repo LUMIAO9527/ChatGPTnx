@@ -304,7 +304,7 @@ def _resume_interrupted(home, script, item, stop, log, *, stale_index):
         _log_location_evidence(result, log)
         outcome = (result.stdout or '').strip().splitlines()[-1:]
         raw_label = outcome[0] if outcome else ''
-        allowed = {'invoked:native_continue', 'uncertain:native_continue', 'uncertain:desktop_error'}
+        allowed = {'clicked:native_continue', 'uncertain:native_continue', 'uncertain:desktop_error'}
         allowed.update('skip:' + r for r in (
             'native_continue_unavailable', 'native_continue_not_ready', 'native_continue_ambiguous',
             'account_changed', 'account_guard_unavailable', 'continuation_disabled', 'bridge_required',
@@ -313,7 +313,7 @@ def _resume_interrupted(home, script, item, stop, log, *, stale_index):
         label = raw_label if raw_label in allowed else 'unrecognized_response'
         log.info('desktop_resume_result action=interrupted result=%s code=%d',
                  label, result.returncode)
-        if label == 'invoked:native_continue' and result.returncode == 0:
+        if label == 'clicked:native_continue' and result.returncode == 0:
             if stale_index:
                 from .app_bridge import observe_native_start
                 return observe_native_start(home, item, stop, expected_auth=before)

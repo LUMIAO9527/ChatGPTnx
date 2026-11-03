@@ -4,7 +4,8 @@ $tokens=$null;$errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '..\src\continue_in_desktop.ps1'),[ref]$tokens,[ref]$errors)
 if($errors.Count){throw 'Parse failed'}
 Add-Type -AssemblyName UIAutomationClient
-foreach($name in @('Resume-Task','Runtime-Key')) {
+Add-Type -AssemblyName WindowsBase
+foreach($name in @('Resume-Task','Runtime-Key','Invoke-NativeClick')) {
     $f=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$true)
     Invoke-Expression $f.Extent.Text
 }
@@ -14,6 +15,21 @@ function Native-Continue {
     return $script:buttons
 }
 function Assert-Account {}
+function Focus-ResumeWindow {
+    $script:focusChecks++
+    if ($script:focusFails) { Skip 'native_continue_not_ready' }
+}
+function Native-ClickPoint($document,$button) {
+    if ($script:occluded) { Skip 'native_continue_not_ready' }
+    if ((Runtime-Key $button) -ne '3') { throw 'Wrong click target' }
+    return [pscustomobject]@{X=120;Y=240}
+}
+function Send-ContinueClick($point) {
+    if ($point.X -ne 120 -or $point.Y -ne 240) { throw 'Click escaped the revalidated point' }
+    $script:clickCalls++
+    if ($script:sent -gt 1) { $script:clicked++ }
+    return $script:sent
+}
 function Assert-Target {
     $script:targetChecks++
     if ($script:changeTarget -and $script:targetChecks -gt 1) { return $script:otherDocument }
@@ -29,11 +45,13 @@ function Control([int]$id, [bool]$enabled=$true) {
     return $control
 }
 $script:pattern=New-Object PSObject
-$script:pattern | Add-Member ScriptMethod Invoke {$script:clicked++}
+$script:pattern | Add-Member ScriptMethod Invoke {$script:virtualInvokes++}
 $script:document=Control 1
 $script:otherDocument=Control 2
 $button=Control 3
 $script:clicked=0;$script:checks=0;$script:targetChecks=0
+$script:virtualInvokes=0;$script:focusChecks=0;$script:clickCalls=0;$script:sent=3
+$script:focusFails=$false;$script:occluded=$false
 $script:changeTarget=$false;$script:appearAfter=0;$script:buttons=@($button)
 Resume-Task $script:document
 if($script:clicked -ne 1){throw 'Native button not clicked exactly once'}
@@ -56,6 +74,23 @@ $unreadable | Add-Member ScriptMethod GetRuntimeId {throw 'synthetic unreadable 
 $script:buttons=@($unreadable)
 try {Resume-Task $script:document;throw 'Unknown button identity accepted'}catch{if($_.Exception.Message -ne 'target_changed'){throw}}
 if($script:clicked -ne 2){throw 'Unknown button identity was clicked'}
+if($script:virtualInvokes -ne 0){throw 'Continue must use pointer input rather than a provider acknowledgement'}
+$script:buttons=@($button)
+$script:focusFails=$true
+try {Resume-Task $script:document;throw 'Unfocused task accepted'}catch{if($_.Exception.Message -ne 'native_continue_not_ready'){throw}}
+$script:focusFails=$false;$script:occluded=$true
+try {Resume-Task $script:document;throw 'Occluded task accepted'}catch{if($_.Exception.Message -ne 'native_continue_not_ready'){throw}}
+if($script:clickCalls -ne 2){throw 'Focus or hit-test failure dispatched input'}
+$script:occluded=$false;$script:sent=0
+try {Resume-Task $script:document;throw 'Rejected input accepted'}catch{if($_.Exception.Message -ne 'native_continue_not_ready'){throw}}
+if($script:actionStarted){throw 'Zero inserted inputs must remain a pre-dispatch failure'}
+$script:sent=2
+try {Resume-Task $script:document;throw 'Partial input accepted'}catch{if($_.Exception.Message -ne 'native_continue'){throw}}
+if(-not $script:actionStarted -or $script:clickCalls -ne 4){throw 'Partial input outcome must remain uncertain without replay'}
+$script:sent=3;$DryRun=$true
+Resume-Task $script:document
+if($script:clickCalls -ne 4){throw 'Dry run dispatched input'}
+$DryRun=$false
 $native=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Native-Continue'},$true)
 Invoke-Expression $native.Extent.Text
 function Pinned-Window { throw 'Native lookup must not inspect sibling controls' }
@@ -66,12 +101,45 @@ function Find-Controls {
     return @($script:documentButtons | Where-Object {$_.Current.Name -in $Names})
 }
 $action=[pscustomobject]@{Current=[pscustomobject]@{Name='继续生成'}}
+$resume=[pscustomobject]@{Current=[pscustomobject]@{Name='Resume'}}
 $start=[pscustomobject]@{Current=[pscustomobject]@{Name='Start'}}
 $script:documentButtons=@($action,$start)
 $found=@(Native-Continue 'document')
 if($found.Count -ne 1 -or $found[0] -ne $action){throw 'Exact task-owned Continue not selected'}
+$script:documentButtons=@($resume,$start)
+$found=@(Native-Continue 'document')
+if($found.Count -ne 1 -or $found[0] -ne $resume){throw 'English Resume button not selected'}
 $script:documentButtons=@($start)
 if(@(Native-Continue 'document').Count -ne 0){throw 'Generic Start button selected'}
 $script:documentButtons=@()
 if(@(Native-Continue 'document').Count -ne 0){throw 'Sibling fallback is forbidden'}
-Write-Output '10 synthetic native continuation cases passed; no desktop actions'
+# Exercise the actual point/bounds validation against synthetic controls. The
+# fake hit-test provider cannot read a real window or dispatch an input event.
+Add-Type 'public static class NXResumeFakeHit { public static object Hit; public static object FromPoint(object point) { return Hit; } }'
+$element = [NXResumeFakeHit]
+$pointFunction=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Native-ClickPoint'},$true)
+Invoke-Expression $pointFunction.Extent.Text
+$script:pointAvailable=$true;$script:pointX=120;$script:pointY=240
+$pointButton=Control 3
+$pointButton.Current | Add-Member NoteProperty BoundingRectangle ([System.Windows.Rect]::new(100,200,80,80))
+$pointButton | Add-Member ScriptMethod TryGetClickablePoint {
+    param($outPoint)
+    $outPoint.Value=[System.Windows.Point]::new($script:pointX,$script:pointY)
+    return $script:pointAvailable
+}
+$pointDocument=Control 1
+$pointDocument.Current | Add-Member NoteProperty BoundingRectangle ([System.Windows.Rect]::new(0,0,1000,1000))
+[NXResumeFakeHit]::Hit=$pointButton
+$point=Native-ClickPoint $pointDocument $pointButton
+if($point.X -ne 120 -or $point.Y -ne 240){throw 'Clickable point was not preserved'}
+$script:pointAvailable=$false
+try {Native-ClickPoint $pointDocument $pointButton;throw 'Unavailable point accepted'}catch{if($_.Exception.Message -ne 'native_continue_not_ready'){throw}}
+$script:pointAvailable=$true;$script:pointX=181
+try {Native-ClickPoint $pointDocument $pointButton;throw 'Point outside button accepted'}catch{if($_.Exception.Message -ne 'native_continue_not_ready'){throw}}
+$script:pointX=120
+$pointDocument.Current.BoundingRectangle=[System.Windows.Rect]::new(0,0,100,100)
+try {Native-ClickPoint $pointDocument $pointButton;throw 'Point outside task accepted'}catch{if($_.Exception.Message -ne 'native_continue_not_ready'){throw}}
+$pointDocument.Current.BoundingRectangle=[System.Windows.Rect]::new(0,0,1000,1000)
+[NXResumeFakeHit]::Hit=Control 99
+try {Native-ClickPoint $pointDocument $pointButton;throw 'Different hit target accepted'}catch{if($_.Exception.Message -ne 'native_continue_not_ready'){throw}}
+Write-Output '21 synthetic native continuation cases passed; no desktop actions'

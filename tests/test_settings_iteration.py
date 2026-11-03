@@ -20,7 +20,7 @@ class ContinuationEvidenceTests(unittest.TestCase):
   result,log=self.attempt('secret draft content');self.assertEqual(result,('failed','action_outcome_unknown'));self.assertNotIn('secret draft content',str(log.mock_calls))
  def test_native_helper_has_no_message_or_editor_write_path(self):
   s=(ROOT/'src/continue_in_desktop.ps1').read_text(encoding='utf-8-sig')
-  self.assertNotIn('SendInput',s)
+  self.assertNotIn('KEYBDINPUT',s)
   self.assertNotIn('Send-ResumeMessage',s)
   self.assertNotIn('Find-Composer',s)
   self.assertIn("if (-not $NavigateOnly -and $Action -ne 'interrupted') { Skip 'bridge_required' }",s)

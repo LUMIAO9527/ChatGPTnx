@@ -113,7 +113,7 @@ class DesktopResumeTests(unittest.TestCase):
         def desktop_invocation(command, **kwargs):
             self.assertEqual(command[command.index('-Action') + 1], 'interrupted')
             self.add_turn(self.NEW, 'inProgress', 2)
-            return Mock(stdout='invoked:native_continue\n', returncode=0)
+            return Mock(stdout='clicked:native_continue\n', returncode=0)
 
         with patch('nx.desktop_resume.subprocess.run', side_effect=desktop_invocation) as run:
             result=attempt_continuation(self.home, self.home / 'helper.ps1',
@@ -135,6 +135,19 @@ class DesktopResumeTests(unittest.TestCase):
                                           threading.Event(), Mock())
         self.assertEqual(result, ('done', 'new_turn_observed'))
         self.assertTrue(bridge.call_args.kwargs['interrupted'])
+
+    def test_native_click_without_start_is_failed_without_another_submission(self):
+        self.add_turn(self.FAILED, 'interrupted', 1)
+        stop = Mock(is_set=lambda: False, wait=lambda _: False)
+        with patch('nx.desktop_resume._invoke', return_value=Mock(
+                stdout='clicked:native_continue\n', returncode=0)) as native, \
+             patch('nx.app_bridge.resume_existing') as bridge:
+            result = attempt_continuation(self.home, self.home / 'helper.ps1',
+                                          {'thread_id': self.THREAD, 'turn_id': self.FAILED},
+                                          stop, Mock())
+        self.assertEqual(result, ('failed', 'start_not_observed'))
+        native.assert_called_once()
+        bridge.assert_not_called()
 
     def test_uncertain_native_action_never_uses_bridge_fallback(self):
         self.add_turn(self.FAILED, 'interrupted', 1)

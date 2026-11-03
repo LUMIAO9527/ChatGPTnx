@@ -32,7 +32,7 @@ window.NXResumeDisplay=(()=>{
       switch_failed:'账号切换未完成',
       switch_boundary_ambiguous:'切号期间无法确认任务所属账号',
       relay_not_available:'没有可用的接力账号',
-      start_not_observed:'未确认新回合已开始',
+      start_not_observed:'未检测到任务启动',
       native_continue_unavailable:'未找到原生继续按钮',
       native_continue_not_ready:'原生继续按钮不可用',
       native_continue_ambiguous:'页面有多个继续按钮',

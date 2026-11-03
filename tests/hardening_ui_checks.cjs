@@ -23,7 +23,7 @@ fs.mkdirSync(output, {recursive:true});
     await page.screenshot({path:path.join(output,'settings.png')});
     for(const scenario of ['query-forbidden','reset-forbidden','query-cooling','monitor-degraded']) {
       await page.goto('about:blank');
-      await page.setContent(html.replace('location.search',JSON.stringify('?scenario='+scenario)));
+      await page.setContent(html.replace('window.NX_CONFIG=','window.NX_PREVIEW_QUERY='+JSON.stringify('?scenario='+scenario)+';window.NX_CONFIG='));
       await page.waitForSelector('.current-card');
       if(scenario==='query-forbidden') {
         await page.locator('.current-card [data-action="detail"]').click();
@@ -33,7 +33,7 @@ fs.mkdirSync(output, {recursive:true});
         await page.locator('.current-card [data-action="detail"]').click();
         await page.locator('[data-action="toggle-reset-credits"]').click();
         const button=page.locator('.reset-credit-details [data-action="retry-query"]');
-        assert.equal(await button.innerText(),'恢复详情查询');
+        assert.equal(await button.innerText(),'恢复查询');
         await button.click();
         await button.waitFor({state:'detached'});
       } else if(scenario==='query-cooling') {
@@ -41,7 +41,7 @@ fs.mkdirSync(output, {recursive:true});
         assert.equal(await page.locator('.current-card .quota-failure').count(),0);
         assert.equal(await page.locator('.current-card [data-action="reauth"]').count(),0);
       } else {
-        assert((await page.locator('.notice').innerText()).includes('监控暂不可用'));
+        assert((await page.locator('.status-dock').innerText()).includes('监控暂不可用'));
         assert.equal(await page.locator('[data-action="diagnostics"]').count(),0);
       }
       await page.screenshot({path:path.join(output,scenario+'.png')});

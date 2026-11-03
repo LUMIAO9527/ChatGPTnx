@@ -18,6 +18,7 @@ if ($ThreadId -notmatch '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or
     $ExpectedAuthHash -notmatch '^[0-9a-f]{64}$') { throw 'Invalid action identity' }
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
+Add-Type -AssemblyName WindowsBase
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
@@ -27,7 +28,52 @@ public static class NXResumeWindow {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-
+    [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)] struct MouseInput {
+        public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra;
+    }
+    [StructLayout(LayoutKind.Sequential)] struct Input { public uint Type; public MouseInput Mouse; }
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+    [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, Input[] inputs, int size);
+    public static int NormalizeCoordinate(int value, int origin, int size) {
+        if (size < 2 || value < origin || (long)value >= (long)origin + size)
+            throw new ArgumentOutOfRangeException("value");
+        return (int)Math.Round(((double)value - origin) * 65535 / (size - 1));
+    }
+    public static int Click(IntPtr window, int x, int y) {
+        IntPtr previous = IntPtr.Zero;
+        try {
+            try { previous = SetThreadDpiAwarenessContext(new IntPtr(-4)); }
+            catch (EntryPointNotFoundException) { }
+            // All rejection paths precede input. Never click through an overlay
+            // or combine the action with a user's held mouse/modifier key.
+            if (!IsWindow(window) || GetForegroundWindow() != window ||
+                GetAncestor(WindowFromPoint(new Point { X=x, Y=y }), 2) != window) return 0;
+            foreach (int key in new int[] {1,2,4,5,6,16,17,18,91,92})
+                if ((GetAsyncKeyState(key) & 0x8000) != 0) return 0;
+            int left=GetSystemMetrics(76), top=GetSystemMetrics(77);
+            int width=GetSystemMetrics(78), height=GetSystemMetrics(79);
+            if (width < 2 || height < 2 || x < left || y < top ||
+                (long)x >= (long)left+width || (long)y >= (long)top+height) return 0;
+            Input[] inputs = new Input[3];
+            inputs[0].Mouse.X = NormalizeCoordinate(x, left, width);
+            inputs[0].Mouse.Y = NormalizeCoordinate(y, top, height);
+            inputs[0].Mouse.Flags = 0x0001 | 0x8000 | 0x4000; // move, absolute, virtual desktop
+            inputs[1].Mouse.Flags = 0x0002;
+            inputs[2].Mouse.Flags = 0x0004;
+            uint sent = SendInput(3, inputs, Marshal.SizeOf(typeof(Input)));
+            // A partially injected sequence has an unknown action outcome.
+            // Release an injected down event without issuing another down.
+            if (sent == 2) SendInput(1, new Input[] { inputs[2] }, Marshal.SizeOf(typeof(Input)));
+            return (int)sent;
+        } finally {
+            if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous);
+        }
+    }
 }
 
 '@
@@ -39,7 +85,7 @@ $linkType = [System.Windows.Automation.ControlType]::Hyperlink
 $script:actionStarted = $false
 
 function Skip([string]$Reason) {
-    # An error after Invoke cannot be retried automatically: the click may
+    # An error after input cannot be retried automatically: the click may
     # have taken effect even when the UIA call did not return.
     if ($script:actionStarted) { Write-Output ('uncertain:' + $Reason) }
     else { Write-Output ('skip:' + $Reason) }
@@ -207,10 +253,54 @@ function Native-Continue($document) {
     # Only actions owned by this task document; never infer ownership from an
     # editor's position or choose a generic Start button in the surrounding UI.
     $names = @('继续','继续生成','继续回答','继续响应','继续对话',
-        'Continue','Continue generating','Continue response','Continue conversation')
+        'Continue','Continue generating','Continue response','Continue conversation','Resume')
     return @(Find-Controls $document $names $buttonType $true)
 }
 
+function Focus-ResumeWindow {
+    $null = [NXResumeWindow]::SetForegroundWindow($script:pin.Hwnd)
+    $deadline = [DateTime]::UtcNow.AddMilliseconds(1500)
+    do {
+        Assert-Account
+        if ($null -eq (Pinned-Window)) { Skip 'target_changed' }
+        if ([NXResumeWindow]::GetForegroundWindow() -eq $script:pin.Hwnd) { return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    Skip 'native_continue_not_ready'
+}
+function Native-ClickPoint($document, $button) {
+    $point = [System.Windows.Point]::new(0,0)
+    try {
+        if (-not $button.TryGetClickablePoint([ref]$point) -or
+            -not $button.Current.BoundingRectangle.Contains($point) -or
+            -not $document.Current.BoundingRectangle.Contains($point)) { Skip 'native_continue_not_ready' }
+        $key = Runtime-Key $button
+        $hit = $element::FromPoint($point)
+        # Chromium may expose a child icon at the point. Its owning button
+        # must be the exact control that was revalidated in this task.
+        for ($depth=0; $null -ne $hit -and $depth -lt 16; $depth++) {
+            if ($key -and (Runtime-Key $hit) -eq $key) {
+                return [pscustomobject]@{X=[int][Math]::Round($point.X); Y=[int][Math]::Round($point.Y)}
+            }
+            $hit = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($hit)
+        }
+    } catch { Skip 'native_continue_not_ready' }
+    Skip 'native_continue_not_ready'
+}
+function Send-ContinueClick($point) {
+    return [NXResumeWindow]::Click($script:pin.Hwnd, $point.X, $point.Y)
+}
+function Invoke-NativeClick($point) {
+    Assert-Account
+    $script:actionStarted = $true
+    $sent = Send-ContinueClick $point
+    if ($sent -eq 0) {
+        $script:actionStarted = $false
+        Skip 'native_continue_not_ready'
+    }
+    if ($sent -ne 3) { Skip 'native_continue' }
+    Write-Output 'clicked:native_continue'
+}
 function Resume-Task($document) {
     $document = Assert-Target
     $originalKey = Runtime-Key $document
@@ -229,6 +319,7 @@ function Resume-Task($document) {
     if ($buttons.Count -eq 1) {
         if (-not $buttons[0].Current.IsEnabled) { Skip 'native_continue_not_ready' }
         if ($DryRun) { Write-Output 'ready:native_continue'; return }
+        Focus-ResumeWindow
         $current = Assert-Target
         if ((Runtime-Key $current) -ne $originalKey) { Skip 'target_changed' }
         $buttonKey = Runtime-Key $buttons[0]
@@ -237,11 +328,14 @@ function Resume-Task($document) {
         if ($currentButtons.Count -ne 1 -or
             (Runtime-Key $currentButtons[0]) -ne $buttonKey) { Skip 'target_changed' }
         if (-not $currentButtons[0].Current.IsEnabled) { Skip 'native_continue_not_ready' }
-        $invoke = $currentButtons[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-        Assert-Account
-        $script:actionStarted = $true
-        $invoke.Invoke()
-        Write-Output 'invoked:native_continue'
+        $verified = Assert-Target
+        if ((Runtime-Key $verified) -ne $originalKey) { Skip 'target_changed' }
+        $verifiedButtons = @(Native-Continue $verified)
+        if ($verifiedButtons.Count -ne 1 -or
+            (Runtime-Key $verifiedButtons[0]) -ne $buttonKey) { Skip 'target_changed' }
+        if (-not $verifiedButtons[0].Current.IsEnabled) { Skip 'native_continue_not_ready' }
+        $point = Native-ClickPoint $verified $verifiedButtons[0]
+        Invoke-NativeClick $point
         return
     }
     Skip 'native_continue_unavailable'

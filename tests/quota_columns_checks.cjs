@@ -4,7 +4,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
-const ctx={window:{}};vm.createContext(ctx);
+const ctx={window:{NX_CONFIG:require('./ui_config_fixture.cjs')}};vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/ui/components.js'),'utf8'),ctx);
 const C=ctx.window.NXComponents, results=[];
 function windows(rows){return rows.map(w=>({resets_at:1900000000,...w}));}

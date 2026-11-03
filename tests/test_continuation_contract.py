@@ -240,7 +240,7 @@ class ContinuationContractTests(unittest.TestCase):
         def native_click(command):
             nonlocal continued
             continued = True
-            return Mock(stdout='invoked:native_continue', returncode=0)
+            return Mock(stdout='clicked:native_continue', returncode=0)
         with patch('nx.app_bridge.discover', return_value=pipe), \
              patch('nx.desktop_resume._invoke', side_effect=native_click) as native:
             result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
@@ -249,6 +249,30 @@ class ContinuationContractTests(unittest.TestCase):
         self.assertEqual(self.item['observed_turn_id'], TURN)
         self.assertEqual(pipe.request.call_count, 3)
         native.assert_called_once()
+
+    def test_native_click_without_start_does_not_trust_stale_running_index(self):
+        with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
+            db.execute("UPDATE thread_turns SET status='inProgress', error_json=NULL")
+        db.close()
+        pipe = Mock()
+        def request(method, params, **kwargs):
+            if params['tool'] == 'navigate_to_codex_page':
+                return reply({'navigated': True})
+            self.assertEqual(params['tool'], 'read_thread')
+            return reply({'thread': {'id': TASK, 'kind': 'codex', 'status': {'type': 'idle'}},
+                          'turns': [{'id': TURN, 'status': 'interrupted',
+                                     'startedAt': 1900000000}]})
+        pipe.request.side_effect = request
+        with patch('nx.app_bridge.discover', return_value=pipe), \
+             patch('nx.desktop_resume._invoke', return_value=Mock(
+                 stdout='clicked:native_continue', returncode=0)) as native, \
+             patch('nx.app_bridge.resume_existing') as send:
+            result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
+                                          self.item, self.fast_stop, self.log)
+        self.assertEqual(result, ('failed', 'start_not_observed'))
+        self.assertEqual(self.item['observed_turn_id'], TURN)
+        native.assert_called_once()
+        send.assert_not_called()
 
     def test_stale_running_index_does_not_send_to_running_desktop_turn(self):
         with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:

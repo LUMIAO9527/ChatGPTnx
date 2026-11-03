@@ -381,7 +381,7 @@ class ExistingDesktopSafetyTests(TemporaryCase):
 
     def test_native_invocation_without_observed_turn_is_not_reissued(self):
         stop = Mock(); stop.is_set.return_value=False; stop.wait.return_value=False
-        result, run = self.attempt(output=Mock(stdout='invoked:native_continue', returncode=0), stop=stop)
+        result, run = self.attempt(output=Mock(stdout='clicked:native_continue', returncode=0), stop=stop)
         self.assertEqual(result, ('failed', 'start_not_observed'))
         run.assert_called_once()
 
@@ -415,7 +415,7 @@ class ExistingDesktopSafetyTests(TemporaryCase):
         self.assertNotIn("Skip 'composer_state_unknown'", script)
         self.assertIn('SessionId', script)
         self.assertNotIn('Send-ResumeMessage', script)
-        self.assertNotIn('SendInput', script)
+        self.assertNotIn('KEYBDINPUT', script)
         self.assertNotIn('Assert-CollapsedCaret $composer', script)
         self.assertNotIn('class NXInputGuard', script)
         self.assertIn('Started=$process.StartTime.Ticks', script)
