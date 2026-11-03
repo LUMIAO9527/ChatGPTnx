@@ -74,6 +74,7 @@ window.NXDemo = (() => {
     else if(state.relay_wait)state.relay_wait.origin=email;
   }
   async function call(method,...args){
+    if(window.NXDataDemo?.handles(method))return window.NXDataDemo.call(method,...args);
     const [email,force]=args;
     switch(method){
       case 'check_update':state.update={...state.update,status:'checking',message:'正在检查更新…'};setTimeout(()=>{state.update={...state.update,status:'available',available:true,version:'1.4',message:'发现新版本',notes:'改善登录体验与版本更新。'};},500);return {ok:true,accepted:true};
@@ -372,7 +373,11 @@ window.NXDemo = (() => {
     if(which==='credits-precise')state.accounts[0].credits='123456789012345.6789';
     if(which==='membership-manual')state.accounts[0].manual_subscription_date='2027-01-18';
     if(which==='banked-zero')state.accounts[0].banked_resets={available_count:0,items:[]};
-    if(which==='banked-many'){const a=state.accounts[0];a.banked_resets={available_count:8,items:Array.from({length:8},(_,i)=>({...a.banked_resets.items[0],expires_at:sec()+(i+1)*86400,status:i===1?'redeeming':'available'}))};}
+    if(['banked-three','banked-five','banked-six'].includes(which)){
+      const count={'banked-three':3,'banked-five':5,'banked-six':6}[which],a=state.accounts[0];
+      a.banked_resets={available_count:count,items:Array.from({length:count},(_,i)=>({...a.banked_resets.items[0],id:`fixture-reset-${i+1}`,expires_at:sec()+(i+1)*86400,status:'available'}))};
+    }
+    if(which==='banked-many'){const a=state.accounts[0];a.banked_resets={available_count:8,items:Array.from({length:8},(_,i)=>({...a.banked_resets.items[0],id:`fixture-reset-${i+1}`,expires_at:sec()+(i+1)*86400,status:i===1?'redeeming':'available'}))};}
     if(which==='single-account')state.accounts=state.accounts.slice(0,1);
     if(which==='three-accounts')state.accounts=state.accounts.slice(0,3);
     if(which==='four-accounts')state.accounts=state.accounts.slice(0,4);
@@ -434,6 +439,7 @@ window.NXDemo = (() => {
       ]}];
       state.resume={id:'subagent-history',phase:'failed',done:2,failed:1,total:6};
     }
+    if(which==='archives-many')archives=Array.from({length:12},(_,i)=>{const email=`archived-${i+1}@example.com`;return {key:`archived-demo-${i+1}`,email,archived_at:sec()-i*86400,account:{...clone(state.accounts[1]),email,alias:`归档账号 ${i+1}`,identity_key:`archived-${i+1}`}};});
     if(which==='many')for(let i=5;i<14;i++)state.accounts.push({...clone(state.accounts[1]),email:`extra-${i}@example.com`,alias:`账号 ${i+1}`,identity_key:`extra-${i}`});
   }
   function simulate(event) {
@@ -461,5 +467,5 @@ window.NXDemo = (() => {
   if(['light','dark'].includes(params.get('appearance')))state.settings.appearance=params.get('appearance');
   if(['glass','solid'].includes(params.get('material')))state.settings.window_material=params.get('material');
   window.NX_SETUP=state.location||null;
-  return {call,scenario,simulate,appearance:value=>{if(['light','dark'].includes(value))state.settings.appearance=value;},state:()=>clone(state)};
+  return {call,scenario,simulate,importAccount:account=>{if(!state.accounts.some(a=>a.email===account.email))state.accounts.push(clone(account));},appearance:value=>{if(['light','dark'].includes(value))state.settings.appearance=value;},state:()=>clone(state)};
 })();

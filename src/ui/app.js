@@ -21,7 +21,7 @@
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[], location:window.NX_SETUP||null};
   let workflowResume = false;
   let lastLoginResult = '';
-  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), disclosures:new Set(), fullCollections:new Set(), inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
+  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
   let connected = false, bridgeError = '', acting = false, nativeDialog = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
   const app = $('#app');
   app.innerHTML = '<main id="home"></main><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden></section><div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>';
@@ -129,6 +129,12 @@
     const mins=Math.ceil(sec/60), h=Math.floor(mins/60), m=mins%60;
     return h>=24?`${Math.floor(h/24)}天${h%24}时${String(m).padStart(2,'0')}分`:`${h}时${String(m).padStart(2,'0')}分`;
   }
+  function compactReset(ts) {
+    if(!Number.isFinite(ts))return '未知';
+    const seconds=Math.max(0,Math.ceil(ts-now()));if(!seconds)return '待核验';
+    const minutes=Math.ceil(seconds/60),hours=Math.floor(minutes/60);
+    return hours>=24?`${Math.floor(hours/24)}天${hours%24}时`:hours?`${hours}时${minutes%60?`${minutes%60}分`:''}`:`${minutes}分`;
+  }
   const dt=ts=>ts?new Date(ts*1000).toLocaleDateString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit'}):'未提供';
   const recordedDate=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)?value.replaceAll('-','/'):null;
   const dateTime=ts=>new Date(ts*1000).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
@@ -150,7 +156,7 @@
       return `<div class="quota-failure quota-slot" role="group" aria-label="${esc(state.title)}">${icon('info')}<span class="quota-failure-copy"><strong>${esc(state.title)}</strong><small title="${esc(state.detail)}">${esc(state.detail)}</small></span>${retry&&state.action?`<button class="control control--large secondary" data-action="${state.action}" data-email="${esc(a.email)}" ${disabled()}>${esc(state.label)}</button>`:''}</div>`;
     }
     const duo=displayWindows(a).length>1;
-    return `<div class="quota-bars quota-slot ${duo?'duo':''}">${displayWindows(a).slice(0,2).map(w=>`<div class="${100-w.used<=10?'low':''}"><div class="quota-bar-head"><span class="quota-label">${esc(w.label)}剩余 <span class="reset mono" data-reset="${w.resets_at}">${reset(w.resets_at)}</span></span><b class="mono">${remaining(w)}%</b></div><div class="track"><span style="width:${remaining(w)}%"></span></div></div>`).join('')}</div>`;
+    return `<div class="quota-bars quota-slot ${duo?'duo':''}" aria-label="剩余额度">${displayWindows(a).slice(0,2).map(w=>`<div class="${100-w.used<=10?'low':''}"><div class="quota-bar-head" title="${esc(w.label)}剩余 ${remaining(w)}% · ${esc(reset(w.resets_at))}后重置"><span class="quota-label">${esc(w.label)}剩余</span><span class="reset mono" data-reset="${w.resets_at}" data-reset-compact>${compactReset(w.resets_at)}</span><b class="mono">${remaining(w)}%</b></div><div class="track"><span style="width:${remaining(w)}%"></span></div></div>`).join('')}</div>`;
   }
   const identity=accountIdentity;
   function accountCard(a, detail=false, note='') {
@@ -208,7 +214,9 @@
     if (config.demo) return window.NXDemo.call(method,...args);
     const bridge=window.pywebview?.api;
     if (typeof bridge?.[method]!=='function') throw new Error('本地接口尚未就绪或版本不匹配');
-    return await bridge[method](...args);
+    const opensDialog=['backup_choose','backup_export'].includes(method);
+    if(opensDialog)nativeDialog=true;
+    try{return await bridge[method](...args);}finally{if(opensDialog)nativeDialog=false;}
   }
   function setSize(view) {
     const size=config.sizes[view] || config.sizes.home;
@@ -262,8 +270,8 @@
     if(page==='edit')page='detail';
     window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','confirm','remove','reauth'].includes(page)?target:null,{from:ui.page||'home',to:page});
     const returningToSettings = page==='settings' && saved?.page==='settings';
-    if(page==='settings' && !returningToSettings){ui.disclosures.clear();ui.fullCollections.clear();}
-    if(page==='detail'){ui.disclosures.clear();ui.resetExpanded.clear();}
+    if(page==='settings' && !returningToSettings){ui.disclosures.clear();ui.collectionPages={};}
+    if(page==='detail'){ui.disclosures.clear();ui.resetExpanded.clear();ui.collectionPages['reset:'+target]=1;}
     if(page==='resume'){ui.resumeExpanded.clear();ui.resumeCollapsed.clear();}
     if(Object.hasOwn(aliases,initial)&&aliases[initial])selectSettingDisclosure(aliases[initial]);
     if(initial==='edit')ui.disclosures.add('meta:'+target);
@@ -290,39 +298,38 @@
     if(!home.contains(document.activeElement))home.querySelector('button')?.focus({preventScroll:true});
   }
   function back() {
+    if(window.NXDataTransfer?.busy(ui.page))return;
     const saved=ui.history.pop();if(!saved){closeSheet();return;}
     ui.scope=saved.scope;show(saved.page,saved.email,false,saved);
   }
   const link=(i,label,action,attrs='')=>`<button class="link-row" data-action="${action}" ${attrs}>${i?icon(i):''}<span>${esc(label)}</span>${icon('chevron')}</button>`;
   const settingsGroup=(label,...groups)=>`<section class="settings-section"><h3 class="settings-heading">${esc(label)}</h3>${groups.map(content=>`<div class="settings-list">${content}</div>`).join('')}</section>`;
-  const detail=(label,value,hint='')=>`<div class="detail-line"><span>${esc(label)}</span><span class="right"><strong>${esc(value)}</strong>${hint?`<small>${esc(hint)}</small>`:''}</span></div>`;
+  const detail=(label,value,hint='')=>`<div class="detail-line detail-item detail-value-row"><span>${esc(label)}</span><span class="right"><strong>${esc(value)}</strong>${hint?`<small>${esc(hint)}</small>`:''}</span></div>`;
   function resetCredits(a) {
     const bank=readableQuota(a)?a.banked_resets:null;
     const count=Number.isSafeInteger(bank?.available_count)&&bank.available_count>=0?bank.available_count:null;
     const expanded=ui.resetExpanded.has(a.email);
     const items=Array.isArray(bank?.items)?bank.items:[];
-    let content='';
-    if(count===null) content='<div class="inline-empty">暂未读到重置次数。</div>';
-    else if(count===0) content='<div class="inline-empty">暂无可用的额度重置次数。</div>';
-    else if(!items.length) content='<div class="inline-empty">到期时间暂未提供。</div>';
-    else {
-      content=items.map((item,index)=>{
+    let entries=[],empty=count===null?'暂未读到重置次数。':count===0?'暂无可用的额度重置次数。':'到期时间暂未提供。';
+    if(count!==null&&count>0&&items.length) {
+      entries=items.map((item,index)=>{
         const expiry=!item.expires_known?'未提供':item.expires_at===null?'无到期时间':dateTime(item.expires_at);
         const status=item.status==='redeeming'?' · 使用中':item.status==='redeemed'?' · 已使用':'';
         const pending=a.reset_attempt?.credit_id===item.id;
         const available=item.id&&(item.status==='available'||pending);
         const confirming=resetConfirmation?.email===a.email&&resetConfirmation?.creditId===item.id;
         const button=available?`<button class="control ${confirming?'primary control--confirmation':'secondary'} small-action control--small reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(item.id)}" ${disabled()}>${confirming?'确认':pending?'重试':'使用'}</button>`:'';
-        return `<div class="reset-credit"><span class="reset-credit-copy"><span>第 ${index+1} 次${status}</span><strong>${esc(expiry)}${item.expires_known&&item.expires_at!==null?' 到期':''}</strong></span>${button}</div>`;
-      }).join('');
-      if(count>items.length) content+=`<p>另有 ${count-items.length} 次未提供逐项详情。</p>`;
+        return `<div class="reset-credit collection-row"><span class="reset-credit-copy"><span>第 ${index+1} 次${status}</span><strong>${esc(expiry)}${item.expires_known&&item.expires_at!==null?' 到期':''}</strong></span>${button}</div>`;
+      });
+      if(count>items.length) entries.push(`<div class="collection-row reset-credit"><span>另有 ${count-items.length} 次未提供逐项详情。</span></div>`);
     }
     if(a.reset_attempt&&!items.some(item=>item.id===a.reset_attempt.credit_id)){
       const confirming=resetConfirmation?.email===a.email&&resetConfirmation?.creditId===a.reset_attempt.credit_id;
-      content+=`<div class="reset-credit"><span>上次重置待确认</span><button class="control ${confirming?'primary control--confirmation':'secondary'} small-action control--small reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(a.reset_attempt.credit_id)}" ${disabled()}>${confirming?'确认':'重试'}</button></div>`;
+      entries.push(`<div class="reset-credit collection-row"><span>上次重置待确认</span><button class="control ${confirming?'primary control--confirmation':'secondary'} small-action control--small reset-use" data-action="use-reset" data-email="${esc(a.email)}" data-credit="${esc(a.reset_attempt.credit_id)}" ${disabled()}>${confirming?'确认':'重试'}</button></div>`);
     }
-    if(a.query_warning?.scope==='reset_credits'&&a.query_warning.paused) content+=`<p>重置详情查询已暂停，主额度查询正常。</p><button class="control secondary control--small" data-action="retry-query" data-email="${esc(a.email)}">恢复详情查询</button>`;
-    return `<div class="detail-reset control-container" data-disclosure="reset:${esc(a.email)}"><button class="detail-line detail-action reset-summary control-header" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div class="reset-credit-details">${content}</div>`:''}</div>`;
+    if(a.query_warning?.scope==='reset_credits'&&a.query_warning.paused) entries.push(`<div class="reset-credit collection-row"><span title="重置详情查询已暂停，主额度查询正常">详情查询已暂停</span><button class="control secondary control--small" data-action="retry-query" data-email="${esc(a.email)}">恢复查询</button></div>`);
+    const content=expanded?window.NXComponents.pagedList(viewContext(),'reset:'+a.email,entries,markup=>markup,{label:'重置次数',empty}):'';
+    return `<div class="detail-reset detail-item control-container" data-disclosure="reset:${esc(a.email)}"><button class="detail-line detail-action reset-summary control-header" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}" aria-controls="reset-credit-details"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div id="reset-credit-details" class="reset-credit-details" role="region" aria-label="重置次数详情">${content}</div>`:''}</div>`;
   }
   function scopeUsage() {
     if (!ui.usage) return null;
@@ -344,7 +351,7 @@
   const statuses={ready:'已计入',pending:'尚未读取',unavailable:'查询失败',missing_total:'未提供累计',duplicate:'重复身份 · 未重复计入',identity_changed:'身份已变 · 请重查'};
   const usageContent=()=>window.NXViews.usage(viewContext());
   function viewContext(){
-    return {data,ui,config,esc,icon,tool,name,plan,now,duration,reset,quotaValue,resetValue,
+    return {data,ui,config,api,refresh:()=>poll(true),esc,icon,tool,name,plan,now,duration,reset,compactReset,quotaValue,resetValue,
       remaining,segmented,actionButton,selectionButton,switchButton,disabled,scopeUsage,math,metricsRow,countMarkup,short,durText,statuses,
       link,settingsGroup,systemSettings,autoRelaySetting,taskContinuationSetting,
       notificationSettings,quotaSummary,accountChoice,statusBar,statusRegion,hotkeyLabel,dt,resumeContent,
@@ -376,8 +383,8 @@
           `<div class="detail-actions is-current"><button class="control control--large primary current-status" data-action="home" aria-label="当前使用，返回首页">${icon('check')}当前使用</button></div>`:
           `<div class="detail-actions"><button class="control control--large primary" data-action="pick" ${attr} ${!waiting&&!picked&&(busy()||data.adding||data.reauth)?'disabled':''} aria-pressed="${waiting||picked}" title="${exhausted&&!waiting?'额度恢复并核验后自动接力':pickLabel}">${icon(pickIcon)}${pickLabel}</button><button class="control control--large secondary" data-action="switch" ${attr} ${busy()||data.adding?'disabled':''}>切换到此账号 ${icon('arrow')}</button></div>`;
         const archive=isCurrent?`<button class="danger-row unavailable" disabled title="切换到其他账号后可归档">${icon('archive')}归档账号</button>`:`<button class="danger-row" data-action="remove" ${attr}>${icon('archive')}归档账号</button>`;
-        body=`${accountCard(a,true,isCurrent?'正在使用':'')}${actionArea}${link('chart','个人用量','usage-account',attr)}<div class="detail-compact">${window.NXEditors.account(viewContext(),a)}${resetCredits(a)}${detail('Credits',creditValue(a))}</div>`;
-        cls=`detail-body ${isCurrent?'is-current':''} has-credits`;foot=`<div class="detail-bottom">${archive}<div class="detail-expiry-note">${esc(expiryNote)}</div></div>`;footClass='detail-footer';break;}
+        body=`${accountCard(a,true,isCurrent?'正在使用':'')}${actionArea}<div class="detail-compact"><button class="link-row detail-item detail-usage" data-action="usage-account" ${attr}>${icon('chart')}<span>个人用量</span>${icon('chevron')}</button>${window.NXEditors.account(viewContext(),a)}${resetCredits(a)}${detail('Credits',creditValue(a))}<div class="detail-archive">${archive}<div class="detail-expiry-note">${esc(expiryNote)}</div></div></div>`;
+        cls=`detail-body ${isCurrent?'is-current':''} has-credits${ui.resetExpanded.has(a.email)?' reset-expanded':''}`;break;}
       case 'confirm': {
         const quota=quotaSummary(a);
         title=ui.switchKind==='relay'?'账号接力':'切换账号';body=`<div class="confirm-mark">${icon('baton')}</div><h3 class="confirm-title">${ui.switchKind==='relay'?'下一棒，交给':'切换到'}<br>${esc(name(a))}</h3><p class="note">将重启 ChatGPT 桌面端。</p><button class="confirm-account" data-action="detail" ${attr} aria-label="查看 ${esc(name(a))} 的账号详情">${avatar(a)}<span class="confirm-account-copy"><span class="identity-title"><strong title="${esc(name(a))}">${esc(name(a))}</strong><span class="badge">${esc(plan(a?.plan))}</span></span><span class="confirm-account-quota">${quota}</span></span><span class="confirm-account-more">详情 ${icon('chevron')}</span></button>${data.operation?statusRegion(statusBar({text:data.operation.phase,tone:'progress',className:'operation-notice'})):''}`;
@@ -412,7 +419,11 @@
         title='演示场景';body=`<div class="menu-list">${[['default','正常 · 含 1 个失败账号'],['detail-dense','详情含双额度与 Credits'],['banked-partial','重置次数有部分详情'],['banked-unknown','重置次数未提供'],['resume-progress','任务接续中'],['resume-waiting','等待可用接力账号'],['resume-failed','任务接续失败'],['reauth','账号需要重新登录'],['chatgpt-off','ChatGPT 桌面端未运行'],['complete','所有账号用量可读'],['usage-empty','所有用量均未提供'],['stale','额度缓存过期'],['expired','窗口到点待核验'],['fail-switch','下一次接力失败'],['many','14 个账号'],['empty','空账号清单'],['member-none','会员日期未提供']].map(([key,label])=>`<button class="control control--large secondary" data-action="scenario" data-value="${key}">${label}</button>`).join('')}</div>`;break;
       case 'error':
         closeSheet();return;
-      default:closeSheet();return;
+      default:{
+        const proposal=window.NXDataTransfer?.view(ui.page,viewContext());
+        if(!proposal){closeSheet();return;}
+        ({title,body,cls,foot,footClass}=proposal);break;
+      }
     }
     sheet.dataset.page=ui.page;
     const oldError=preserve?sheet.querySelector('#form-error')?.textContent:'';
@@ -421,6 +432,7 @@
     // Keep shared identity nodes alive across routes. New routes reset input
     // nodes and scroll; passive state refreshes preserve both.
     patchHTML(sheet,markup,{preserveFields:preserve});
+    if(window.NXDataTransfer?.busy(ui.page))sheet.querySelector('.sheet-head [data-action="back"]').disabled=true;
     if(!preserve){const body=sheet.querySelector('.sheet-body');if(body)body.scrollTop=0;}
     if(preserve)for(const saved of oldFields){const node=document.getElementById(saved.id);if(node&&sheet.contains(node)){if(node!==saved.node)node.replaceWith(saved.node);const live=saved.node;live.value=saved.value;if(saved.invalid)live.setAttribute('aria-invalid',saved.invalid);if(saved.focused){live.focus({preventScroll:true});try{live.setSelectionRange(saved.start,saved.end);}catch{}}}}
     if(oldError&&sheet.querySelector('#form-error'))sheet.querySelector('#form-error').textContent=oldError;
@@ -672,6 +684,7 @@
     if(b.dataset.rootNav==='true'&&ui.page)closeSheet();
     const target=b.dataset.email,val=b.dataset.value;
     const ticket=navigation.ticket(),run=(method,...args)=>actionFrom(b,method,...args);
+    if(window.NXDataTransfer?.handle(b,{...viewContext(),show,back,render:()=>renderSheet()}))return;
     try { switch(b.dataset.action){
       case 'refresh-state':{const token=feedback.begin(b,'正在检测…');await poll(true);feedback.finish(token,{text:bridgeError?'':'已重新检测'});break;}
       case 'refresh':if(data.accounts.length)await run('refresh');else show('add');break;
@@ -775,7 +788,14 @@
       case 'auto-relay-account':preferences.set('account:'+target,b.getAttribute('aria-checked')!=='true');break;
       case 'early-anchor-account':preferences.set('anchor:'+target,b.getAttribute('aria-checked')!=='true');break;
       case 'pref':window.NXMotion?.settlePage();preferences.set(b.dataset.key,val);break;
-      case 'collection-more':if(ui.fullCollections.has(val))holdSettingsScroll(b.closest('.sheet-body'));disclose(()=>{ui.fullCollections.has(val)?ui.fullCollections.delete(val):ui.fullCollections.add(val);renderSheet();});break;
+      case 'collection-page':{
+        const key=b.dataset.key,position=captureScroll(sheet),focus=focusKey(b);
+        ui.collectionPages[key]=Math.max(1,(Number(ui.collectionPages[key])||1)+(val==='next'?1:-1));
+        ui.recording=null;renderSheet();restoreScroll(sheet,position);
+        const list=[...sheet.querySelectorAll('[data-collection]')].find(n=>n.dataset.collection===key);
+        const control=list?.querySelector(`[data-action="collection-page"][data-value="${focus.value}"]`);
+        (control&&!control.disabled?control:list?.querySelector('.resume-inline-pager'))?.focus({preventScroll:true});
+        break;}
       case 'resume-page':{
         const body=sheet.querySelector('[data-disclosure="resume-history"] .disclosure-body');
         if(!body)break;
@@ -915,13 +935,17 @@
     }
   }
   systemAppearance.addEventListener('change',()=>applyAppearance(data.settings.appearance));
+  window.nxOpenUninstall=()=>{panelVisible=true;window.NXDataTransfer.handle({dataset:{action:"uninstall-open"}},{...viewContext(),show,back,render:()=>renderSheet()});poll();};
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
   window.nxHidden=()=>{window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
   window.addEventListener('pywebviewready',poll);
   window.addEventListener('resize',()=>{window.NXMotion?.stop();if(config.demo)setSize(ui.page?'workspace':'home');});
   setInterval(()=>{
     if(!panelVisible && !config.demo) return;
-    for(const el of app.querySelectorAll('[data-reset]'))el.textContent=reset(Number(el.dataset.reset));
+    for(const el of app.querySelectorAll('[data-reset]')){
+      const ts=Number(el.dataset.reset);el.textContent=el.hasAttribute('data-reset-compact')?compactReset(ts):reset(ts);
+      if(el.hasAttribute('data-reset-compact'))el.title=reset(ts)+'后重置';
+    }
     const sig=data.accounts.map(a=>`${a.email}:${valid(a)}`).join('|');if(sig!==freshSignature){freshSignature=sig;renderHome();}
   },1000);
   function schedulePoll(delay=null){
@@ -937,6 +961,7 @@
       async open(params) {
         await poll(true);
         const page=params.get('open');
+        window.NXDataTransfer?.init(params,viewContext());
         if(!page)return;
         if(page==='usage'){
           const period=params.get('days');ui.days=period==='all'?'all':[7,30,180].includes(Number(period))?Number(period):30;

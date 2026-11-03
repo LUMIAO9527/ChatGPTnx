@@ -36,6 +36,7 @@ for key,label,sc,params in [
  ('detail-credits','详情 · Credits 余额','detail-dense',{}),('detail-credits-zero','详情 · Credits 为零','credits-zero',{}),
  ('detail-credits-unlimited','详情 · Credits 不限额','credits-unlimited',{}),('detail-credits-invalid','详情 · Credits 数据异常','credits-invalid',{}),('detail-credits-precise','详情 · Credits 精度','credits-precise',{}),
  ('detail-expanded','详情 · 重置次数展开',None,{'expand':'reset'}),('detail-zero-resets','详情 · 无可用重置次数','banked-zero',{'expand':'reset'}),('detail-unknown-resets','详情 · 重置次数未提供','banked-unknown',{'expand':'reset'}),('detail-partial-resets','详情 · 部分重置详情','banked-partial',{'expand':'reset'}),('detail-many-resets','详情 · 八条重置详情','banked-many',{'expand':'reset'}),
+ ('detail-three-resets','详情 · 三条重置次数','banked-three',{'expand':'reset'}),('detail-five-resets','详情 · 五条重置次数','banked-five',{'expand':'reset'}),('detail-six-resets','详情 · 六条重置次数','banked-six',{'expand':'reset'}),
  ('detail-manual-date','详情 · 手工记录到期日','membership-manual',{}),('detail-no-date','详情 · 到期日未提供','member-none',{}),
  ('detail-timeout','详情 · 查询超时','detail-timeout',{}),('detail-reauth','详情 · 需要重新登录','reauth',{'email':'remote@example.com'}),
  ('detail-missing','详情 · 登录快照缺失','detail-missing',{}),('detail-unsupported','详情 · 查询接口不支持','detail-schema',{})]:add(G,key,label,route='detail',scenario=sc,**params)
@@ -107,7 +108,7 @@ add(G,'first-launch-pending','首次引导 · 单一悬浮进度',scenario='firs
 add(G,'first-launch-failed','首次引导 · 打开失败可关闭',scenario='first-launch-failed',steps=[click('launch-chatgpt',wait=850)])
 add(G,'first-launch-done','首次引导 · 请求已提交',scenario='first-waiting',steps=[click('launch-chatgpt',wait=850)])
 add(G,'first-recheck','首次引导 · 原按钮检测反馈',scenario='first-waiting',steps=[click('refresh-state')])
-add(G,'detail-date-entry','详情 · 昵称与会员期限展开',route='detail',scenario='member-none',steps=[selector('.account-editor summary')])
+add(G,'detail-date-entry','详情 · 会员期限编辑',route='detail',scenario='member-none',steps=[selector('.account-editor summary')])
 add(G,'detail-date-saved','详情 · 日期保存后收起',route='detail',scenario='member-none',steps=[selector('.account-editor summary'),{'fill':'#manual-date','value':'2027-01-15'},click('save-expiry'),selector('.account-editor summary')])
 add(G,'edit-saving','账号编辑 · 原按钮保存中',route='edit',scenario='save-pending',steps=[{'fill':'#alias','value':'我的工作账号'},click('save-alias')])
 add(G,'edit-save-failed','账号编辑 · 内联保存错误与草稿',route='edit',scenario='save-failed',steps=[{'fill':'#alias','value':'我的工作账号'},click('save-alias')])
@@ -119,7 +120,7 @@ add(G,'message-saving','接续消息 · 原按钮保存中',route='resume-messag
 
 G='11 · 即时设置与原地展开'
 add(G,'inline-relay','接力规则 · 参与账号展开',route='automation',steps=[selector('[data-disclosure="relay"] > summary')])
-add(G,'inline-relay-many','接力规则 · 长名单全部展开',route='automation',scenario='many',steps=[selector('[data-disclosure="relay"] > summary'),selector('[data-action="collection-more"][data-value="relay"]')])
+add(G,'inline-relay-many','接力规则 · 长名单分页',route='automation',scenario='many',steps=[selector('[data-disclosure="relay"] > summary'),selector('[data-action="collection-page"][data-key="relay"][data-value="next"]')])
 add(G,'inline-message','接力规则 · 消息原地编辑',route='automation',steps=[selector('[data-disclosure="message"] > summary')])
 add(G,'inline-message-failed','接力规则 · 消息保存失败桥接不可用',route='automation',scenario='preference-failed',steps=[selector('[data-disclosure="message"] > summary'),{'fill':'#resume-message','value':'继续核对剩余项目'},click('save-resume-message',wait=500)])
 add(G,'inline-resume','一级设置 → 独立接续记录',route='settings',scenario='resume-history',steps=[click('resume-details')])
@@ -137,13 +138,13 @@ add(G,'root-notifications','系统 · 通知原地展开',route='settings',steps
 add(G,'root-relay','一级设置 · 参与账号简洁名单',route='settings',steps=[selector('[data-disclosure="relay"] > summary')])
 add(G,'root-message','一级设置 · 单行消息与保存勾',route='settings',steps=[selector('[data-disclosure="message"] > summary')])
 add(G,'root-message-saved','一级设置 · 消息保存原位反馈',route='settings',steps=[selector('[data-disclosure="message"] > summary'),{'fill':'#resume-message','value':'继续核对未完成部分'},click('save-resume-message')])
-add(G,'root-relay-many','一级设置 · 14个参与账号展开',route='relay-accounts',scenario='many',steps=[selector('[data-action="collection-more"][data-value="relay"]')])
+add(G,'root-relay-many','一级设置 · 参与账号分页',route='relay-accounts',scenario='many',steps=[selector('[data-action="collection-page"][data-key="relay"][data-value="next"]')])
 add(G,'root-all-expanded','一级设置 · 连续切换仅保留最后一项',route='settings',scenario='resume-history',steps=[selector('[data-disclosure="notifications"] > summary'),selector('[data-disclosure="relay"] > summary'),selector('[data-disclosure="message"] > summary'),selector('[data-disclosure="hotkeys"] > summary'),selector('[data-disclosure="archives"] > summary')])
 add(G,'detail-inline-alias','详情 · 昵称单行编辑',route='edit',steps=[{'fill':'#alias','value':'我的工作账号'}])
 add(G,'detail-inline-expiry','详情 · 会员期限单行编辑',route='edit',steps=[{'fill':'#manual-date','value':'2027-01-15'}])
 add(G,'detail-inline-saved','详情 · 昵称保存不跳页',route='edit',steps=[{'fill':'#alias','value':'我的工作账号'},click('save-alias')])
 add(G,'detail-inline-error','详情 · 保存失败保留两个输入',route='edit',scenario='save-failed',steps=[{'fill':'#alias','value':'待保存昵称'},{'fill':'#manual-date','value':'2027-01-15'},click('save-alias')])
-add(G,'detail-inline-both','详情 · 昵称与重置次数同时展开',route='edit',steps=[click('toggle-reset-credits')])
+add(G,'detail-inline-both','详情 · 编辑草稿与重置次数',route='edit',steps=[click('toggle-reset-credits')])
 add(G,'home-empty-centered','首页 · 其他账号空状态居中',scenario='single-account')
 
 G='13 · 无卡片用量与固定悬浮状态'
@@ -165,7 +166,7 @@ add(G,'appearance-expanded','设置 · 外观选项展开',route='settings',step
 add(G,'appearance-selected','设置 · 系统外观跟随',route='settings',steps=[selector('[data-disclosure="appearance"] > summary'),selector('[data-action="pref"][data-key="appearance"][data-value="system"]')])
 add(G,'settings-header-hover','设置 · 收起条悬停',route='settings',steps=[{'hover':'[data-disclosure="notifications"] > summary'}])
 add(G,'settings-expanded-hover','设置 · 展开条悬停轮廓',route='settings',steps=[selector('[data-disclosure="notifications"] > summary'),{'hover':'[data-disclosure="notifications"] > summary'}])
-add(G,'hotkeys-many-expanded','快捷键 · 同高长名单',route='hotkeys',scenario='many',steps=[selector('[data-action="collection-more"][data-value="hotkeys"]')])
+add(G,'hotkeys-many-expanded','快捷键 · 同高列表分页',route='hotkeys',scenario='many',steps=[selector('[data-action="collection-page"][data-key="hotkeys"][data-value="next"]')])
 add(G,'resume-auto-blocked','接续记录 · 自动消息路径不可用',route='resume',scenario='resume-auto-blocked')
 add(G,'home-auto-blocked','首页 · 自动接续异常提示',scenario='resume-auto-blocked')
 
@@ -403,6 +404,47 @@ _history_cases = {'settings': {'id': 'settings',
                            'expected': 'settings'}}
 CASES = [_history_cases.pop(case["id"], case) for case in CASES]
 CASES.extend(_history_cases.values())
+
+G='17 · 数据迁移与卸载'
+for key,label,route,flow,scenario in [
+ ('data-settings','数据入口 · 设置页','settings','',None),
+ ('data-transfer','导入与导出 · 总览','data-transfer','',None),
+ ('data-export','导出 · 资料与密码','data-export','',None),
+ ('data-export-ready','导出 · 可以保存','data-export','export-ready',None),
+ ('data-export-mismatch','导出 · 密码不一致','data-export','export-mismatch',None),
+ ('data-export-long','导出 · 长名单','data-export','export-long','many'),
+ ('data-export-empty','导出 · 无账号','data-export','','empty'),
+ ('data-export-working','导出 · 正在加密','data-export','export-working',None),
+ ('data-export-done','导出 · 完成','data-export','export-done',None),
+ ('data-import','导入 · 选择文件','data-import','',None),
+ ('data-import-unlock','导入 · 输入密码','data-import','import-unlock',None),
+ ('data-import-wrong','导入 · 密码错误','data-import','import-wrong',None),
+ ('data-import-invalid','导入 · 格式不支持','data-import','import-invalid',None),
+ ('data-import-damaged','导入 · 文件不完整','data-import','import-damaged',None),
+ ('data-import-review','导入 · 确认范围与重复项','data-import','import-review',None),
+ ('data-import-working','导入 · 正在保存','data-import','import-working',None),
+ ('data-import-done','导入 · 完成','data-import','import-done',None),
+ ('data-uninstall','卸载 · 保留数据','uninstall','',None),
+ ('data-uninstall-delete','卸载 · 删除数据','uninstall','uninstall-delete',None),
+ ('data-uninstall-busy','卸载 · 等待当前操作','uninstall','uninstall-busy',None),
+ ('data-uninstall-working','卸载 · 清理中','uninstall','uninstall-working',None),
+ ('data-uninstall-done','卸载 · 完成','uninstall','uninstall-done',None),
+]:
+    add(G,key,label,route=route,scenario=scenario,flow=flow,
+        note='数据管理交互预览。'+('导入演示文件密码：nx-demo-2026。' if route=='data-import' else ''))
+    CASES[-1]['expected']=route
+add(G,'data-first-import','首次使用 · 从备份导入',scenario='first-run',steps=[click('transfer-import')])
+CASES[-1]['expected']='data-import'
+
+G='18 · 列表展开与分页'
+add(G,'early-anchor-paged','接力预热 · 账号分页',route='settings',scenario='many',steps=[selector('[data-disclosure="early-anchor"] > summary')])
+add(G,'archives-paged','归档账号 · 列表分页',route='archives',scenario='archives-many')
+add(G,'reset-paged-next','重置次数 · 下一页',route='detail',scenario='banked-many',expand='reset',steps=[selector('[data-action="collection-page"][data-value="next"]')])
+add(G,'export-paged-next','导出账号 · 下一页',route='data-export',scenario='many',flow='export-long',steps=[selector('[data-action="collection-page"][data-value="next"]')])
+add(G,'import-paged','导入账号 · 列表分页',route='data-import',flow='import-long',steps=[selector('[data-disclosure="import-accounts"] > summary')])
+add(G,'export-data-options','随附资料 · 三项完整显示',route='data-export',steps=[selector('[data-disclosure="export-data"] > summary')])
+for item in CASES:
+    if item['group']==G:item['expected']={'archives':'settings'}.get(item['route'],item['route'])
 
 NATIVE_SURFACES = [
  {'surface':'托盘菜单与气泡通知','source':'src/nx/desktop.py / src/nx/trayicon.py','verification':'由 Windows 原生绘制，须在本机验收；不以 HTML 模型冒充真实截图。'},

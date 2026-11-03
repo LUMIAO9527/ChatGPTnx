@@ -88,23 +88,7 @@ window.NXViews.resume = context => {
           : scheduled?'正在核验额度':'等待额度刷新'
         : new Date(s.updated_at*1000).toLocaleString('zh-CN',s.updated_at*1000<day.getTime()?{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}:{hour:'2-digit',minute:'2-digit'});
       const progressMarkup=(progress,failed=false)=>progress==='0/1'&&failed?'<span class="resume-zero">0</span>/1':esc(progress);
-      const rows=expanded?s.items.map(i=>{
-        const reason=i.state==='failed'?(reasons[i.reason]||'接续失败，请查看原任务')
-          :i.state==='skipped'?(reasons[i.reason]||'已跳过')
-          :i.state==='waiting'&&i.reason?(reasons[i.reason]||'稍后自动重试'):'';
-        const subagent=i.is_subagent===true;
-        const parent=subagent&&i.parent_thread_id!==i.thread_id&&typeof i.parent_thread_id==='string'&&/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(i.parent_thread_id)?i.parent_thread_id:null;
-        const target=subagent?parent:i.thread_id;
-        const title=i.title||(subagent?'后台子任务':'任务 '+String(i.thread_id||'').slice(-8));
-        const retry=!subagent&&i.state==='failed'&&window.NX_RESUME_POLICY.retryable.includes(i.reason);
-        const status=i.state==='waiting'&&i.reason?'等待重试':
-          ({waiting:'等待中',acting:'接续中'}[i.state]||(!['done','failed','skipped'].includes(i.state)?'处理中':''));
-        const accessibleState=i.state==='done'?'成功':i.state==='failed'?'失败':i.state==='skipped'?'已跳过':status;
-        const navigation=subagent?(parent?'打开所属主任务'+(i.parent_title?'：'+i.parent_title:''):'所属主任务未确认，不能独立打开'):'';
-        const hint=`${title} · ${accessibleState}${reason&&reason!==accessibleState?' · '+reason:''}${subagent?' · 后台子任务，当前版本不单独接续 · '+navigation:''}`;
-        const action=target?`data-action="open-resume-task" data-value="${esc(target)}"`:'disabled';
-        return `<div class="resume-task-row interaction-row${subagent?' is-subagent':''}"><button class="resume-task control--embedded" ${action} title="${esc(hint)}" aria-label="${esc(hint)}"><span class="resume-task-copy"><strong>${esc(title)}</strong>${reason?`<small class="${i.state==='failed'?'resume-failure-reason':''}">· ${esc(reason)}</small>`:''}${subagent&&!parent?'<small>所属主任务未确认，不能独立打开</small>':''}</span>${status?`<em class="resume-progress">${esc(status)}</em>`:''}${target?icon('external'):''}</button>${retry?`<button class="resume-retry control control--small control--danger" data-action="retry-resume-task" data-session="${esc(s.id)}" data-value="${esc(i.thread_id)}">重新接续</button>`:''}</div>`;
-      }).join(''):'';
+      const rows=expanded?window.NXComponents.pagedList(context,'resume:'+s.id,s.items,i=>window.NXSettingsContent.resumeRecord(context,s,i,true),{label:'接续任务'}):'';
       const progress=`${done}/${s.items.length}`;
       const counts=`成功 ${done} · 跳过 ${skipped} · 需查看 ${failed}${pending?' · 待处理 '+pending:''}`;
       const hint=`${account?name(account):'账号接力'} · ${time} · 已接续 ${progress} · ${counts}`;

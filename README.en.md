@@ -26,6 +26,8 @@ https://github.com/user-attachments/assets/e1d24f80-0716-4bba-a024-7058e5c0b2e0
 - **Task continuation:** After a switch, attempt to resume the original desktop task. Configure a continuation message and review successful, skipped, and unresolved results separately. Identified background agents do not trigger independent desktop continuation.
 - **Quotas and usage:** See each account's remaining quota, reset times, and token usage. Temporary query failures retain known quotas consistently across views and handoff decisions. Normal queries and preheat share pause and cooldown rules.
 - **Credential protection and diagnostics:** Protect account snapshots with Windows current-user encryption, and preview or copy a redacted diagnostic summary.
+- **Portable backups:** Export selected accounts and membership details in a password-encrypted backup, with optional usage, quota history, and general settings, then import them on another computer.
+- **Installation and removal:** Register in Windows Installed apps and open the same uninstall page from Windows or Settings, with a choice to retain account data.
 - **Sign-in and updates:** Keep the panel visible during sign-in, automatically verify and save completed sign-ins, and check for official GitHub updates from Settings.
 - **Lightweight desktop controls:** Keep the app in the Windows tray, with notifications, keyboard shortcuts, and light and dark themes.
 
@@ -61,7 +63,7 @@ The quota overview and usage statistics help you see which account is available 
 
 The current version is **v1.5.2**. Open `ChatGPTnx-v1.5.2.html` at the project root for all current pages and states.
 
-v1.5.2 recovers stale continuation connections and shows why a task is waiting or could not resume. If an update does not start successfully, it restarts once before restoring the previous program.
+v1.5.2 aligns home, account-detail, and expanded-list geometry, corrects floating notice placement, and adds encrypted account-data migration and Windows uninstall integration. Continuation rechecks stale connections, and updates retry startup automatically when needed.
 
 Download `ChatGPTnx.exe` from the [v1.5.2 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.5.2). The release also provides `ChatGPTnx-v1.5.2-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
 
@@ -74,7 +76,7 @@ Closing the panel only hides it; the app keeps running in the tray. Use the tray
 
 ## Data and privacy
 
-Account snapshots, archived snapshots, and transaction recovery backups use Windows current-user encryption and restricted file permissions. Encrypted snapshots cannot be copied directly to another Windows user. The official desktop app's active authentication file keeps its existing format.
+Account snapshots, archived snapshots, and transaction recovery backups use Windows current-user encryption and restricted file permissions. Use the application's password-encrypted backup to move data between computers; importing protects credentials again for the new Windows user. The official desktop app's active authentication file keeps its existing format.
 
 Account and runtime data are stored next to the EXE. Keep that folder private and do not upload it publicly. When reporting an issue, use the diagnostic summary in Settings. It excludes email addresses, tokens, task content, and local paths, and is never uploaded automatically.
 

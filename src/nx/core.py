@@ -164,6 +164,10 @@ def relay_candidate(accounts, current, picked=None):
 class Service:
     def __init__(self, paths: Paths, query=None, runner=None, executable=None, update_parent_pid=None,
                  location_setup=False, location_root=None):
+        from .backup import recover, Backups
+        from .credentials import credential_store_lock
+        with credential_store_lock(paths.snapshots):
+            recover(paths)
         self.paths, self.accounts, self.state = paths, Accounts(paths), State(paths)
         self.executable = executable
         self.location_setup = bool(location_setup)
@@ -216,6 +220,8 @@ class Service:
         from .updater import UpdateManager
         self.updater = UpdateManager(paths.root, paths.resources, self.notify,
                                      executable=executable)
+        self.backups = Backups(self)
+        self.backup_lock = threading.RLock()
         self.update_parent_pid = update_parent_pid
         if self.state.recovery_path or self.resumer.recovery_path:
             self.last_error = {'id': uuid.uuid4().hex, 'kind': 'recovery', 'target': None,

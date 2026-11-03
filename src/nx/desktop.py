@@ -415,6 +415,33 @@ class Bridge:
         if result.get('ok'):
             self._host.shutdown_for_update()
         return result
+    def _backup_call(self, method, *args):
+        try:
+            with self._service.backup_lock:
+                return getattr(self._service.backups, method)(*args)
+        except ValueError as error:
+            return {'ok':False,'error':str(error)}
+        except Exception:
+            return {'ok':False,'error':'备份操作未完成，请检查文件后重试'}
+    def backup_info(self): return self._backup_call('info')
+    def backup_choose(self):
+        chosen=self._host.choose_backup_file(False)
+        if not chosen.get('ok') or chosen.get('cancelled'):return chosen
+        return self._backup_call('select',chosen['path'])
+    def backup_unlock(self,password): return self._backup_call('unlock',password)
+    def backup_import(self,options): return self._backup_call('import_selected',options)
+    def backup_export(self,options,password):
+        chosen=self._host.choose_backup_file(True)
+        if not chosen.get('ok') or chosen.get('cancelled'):return chosen
+        return self._backup_call('export',chosen['path'],options,password)
+    def uninstall_app(self,keep=True):
+        try:
+            from .installation import start_uninstall
+            result=start_uninstall(self._service,keep)
+        except ValueError as error:return {'ok':False,'error':str(error)}
+        except Exception:return {'ok':False,'error':'卸载准备未完成，请重试'}
+        if result.get('ok'):self._host.shutdown_for_update()
+        return result
     def set_account_hotkey(self, email, shortcut=None): return self._service.set_account_hotkey(email, shortcut)
     def set_relay_pick(self, email=None): return self._service.set_relay_pick(email)
     def cancel_relay_pick(self, email): return self._service.cancel_relay_pick(email)
@@ -473,9 +500,11 @@ class Bridge:
         return {'ok': True}
 
 class Desktop:
-    def __init__(self, service, startup_ready=None):
+    def __init__(self, service, startup_ready=None, initial_page=None):
         self.service = service
+        self.initial_page = initial_page
         self.window = None
+        self.native_dialog = False
         self.icon = None
         self.visible = False
         self.view = 'home'
@@ -570,6 +599,21 @@ class Desktop:
             return {'ok': False, 'error': '无法打开文件夹选择'}
         path = result[0] if result else None
         return {'ok': True, 'path': str(path) if path else None}
+
+    def choose_backup_file(self,save):
+        self.native_dialog=True
+        try:
+            import webview
+            from datetime import date
+            options={'file_types':('NX 备份 (*.nxbackup)',)}
+            if save:options['save_filename']='ChatGPTnx-'+date.today().isoformat()+'.nxbackup'
+            result=self.window.create_file_dialog(webview.SAVE_DIALOG if save else webview.OPEN_DIALOG,**options)
+            path=result if isinstance(result,str) else result[0] if result else None
+            return {'ok':True,'path':str(path)} if path else {'ok':True,'cancelled':True}
+        except Exception:
+            return {'ok':False,'error':'无法打开备份文件选择'}
+        finally:
+            self.native_dialog=False
 
     def layout(self):
         if not self.window or not self.ready.is_set() or not self.visible:
@@ -998,6 +1042,8 @@ class Desktop:
         return True
 
     def hide(self, *args, reason='user'):
+        if getattr(self,'native_dialog',False) and reason in ('blur','focus','outside'):
+            return
         # The first-run bootstrap panel must outlive every automatic foreground
         # or style change: the native folder dialog takes the foreground while
         # the choice is made, and a shape or repair pass must never hide the only
@@ -1063,6 +1109,20 @@ class Desktop:
         # A single presentation, including upgrades from old compact settings.
         self._show_view('home', "window.nxShown && window.nxShown()",
                         relay_operation_id=relay_operation_id)
+
+    def show_uninstall(self):
+        self._show_view('workspace',"window.nxOpenUninstall && window.nxOpenUninstall()")
+
+    def watch_application_requests(self):
+        from .installation import REQUEST
+        request=self.service.paths.data/REQUEST
+        while not self.service.stop.wait(.5):
+            try:
+                if request.exists():
+                    request.unlink()
+                    self.show_uninstall()
+            except OSError:
+                pass
 
     def tray_menu(self):
         data = self.service.get_data()
@@ -1217,7 +1277,7 @@ class Desktop:
         def confirm_hide(token):
             if token != self._hide_token:
                 return  # a show() happened after this confirmation was armed
-            if self._setup_active():
+            if self._setup_active() or self.native_dialog:
                 return  # the setup panel owns the foreground while it is open
             if not self.visible or not self.window:
                 return
@@ -1469,6 +1529,7 @@ class Desktop:
             self.window.events.loaded += self._acknowledge_startup
         if os.environ.get('CHATGPTNX_SHOW'):
             self.window.events.loaded += self.show
+        if self.initial_page=='uninstall':self.window.events.loaded += self.show_uninstall
         # No events.shown hook: its Python callback needs the GIL on the UI
         # thread during Show(), which deadlocks with the tray thread's
         # cross-thread Invoke. First-show styling is handled by show() itself
@@ -1488,6 +1549,7 @@ class Desktop:
             self.layout()
             threading.Thread(target=self.update, daemon=True).start()
             threading.Thread(target=self.watch_focus, daemon=True).start()
+            if getattr(sys,'frozen',False):threading.Thread(target=self.watch_application_requests,daemon=True).start()
             self.changed.set()
         try:
             webview.start(ready, gui='edgechromium', debug=False, private_mode=True)

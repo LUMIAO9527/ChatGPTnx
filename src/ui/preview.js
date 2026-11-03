@@ -15,11 +15,78 @@
     const app=document.getElementById('app'),info=window.NXPreview.info();
     const surface=info.page==='home'||info.page==='onboarding'?document.getElementById('home'):document.getElementById('sheet');
     const problems=[];
-    if(Math.abs(app.getBoundingClientRect().width-327)>.5||Math.abs(app.getBoundingClientRect().height-458)>.5)problems.push('面板尺寸变化');
+    const [width,height]=window.NX_CONFIG.sizes.home;
+    if(Math.abs(app.getBoundingClientRect().width-width)>.5||Math.abs(app.getBoundingClientRect().height-height)>.5)problems.push('面板尺寸变化');
     if(app.scrollWidth>app.clientWidth+1)problems.push('面板横向溢出');
     if(!surface)problems.push('缺少活动页面');
     const body=surface?.querySelector('.sheet-body');
     if(body&&body.scrollWidth>body.clientWidth+1)problems.push('正文横向溢出');
+    if(info.page==='detail'&&body){
+      const rows=[...body.querySelectorAll('.detail-item')].map(n=>n.matches('.control-container')?n.querySelector('.control-header'):n);
+      const archive=body.querySelector('.danger-row'),note=body.querySelector('.detail-expiry-note'),editor=body.querySelector('.account-editor details[open]'),reset=body.classList.contains('reset-expanded');
+      if(!archive||!note||note.previousElementSibling!==archive||getComputedStyle(note).position!=='static')problems.push('账号详情归档和日期未随正文排列');
+      if(rows.length!==4)problems.push('账号详情缺少信息行');
+      const controls=archive?[...rows,archive]:rows;
+      if(new Set(controls.map(n=>n.getBoundingClientRect().height)).size>1||new Set(controls.map(n=>getComputedStyle(n).borderTopLeftRadius)).size>1)problems.push('账号详情信息行尺寸不一致');
+      if(!reset&&!editor){
+        if(body.scrollTop||body.scrollHeight>body.clientHeight+1)problems.push('账号详情产生滚动');
+        if(controls.slice(1).some((n,i)=>Math.abs(n.getBoundingClientRect().top-controls[i].getBoundingClientRect().bottom-6)>.5))problems.push('账号详情行间距不一致');
+        if(archive&&archive.getBoundingClientRect().bottom>body.getBoundingClientRect().bottom+.5)problems.push('账号详情归档行溢出正文');
+        if(note&&note.getBoundingClientRect().bottom>body.getBoundingClientRect().bottom+.5)problems.push('账号详情日期溢出正文');
+      }
+      if(editor&&[...editor.querySelectorAll('.inline-field')].some(n=>Math.abs(n.getBoundingClientRect().height-editor.querySelector('summary').getBoundingClientRect().height)>.5))problems.push('昵称与会员期限展开行高度不一致');
+      if(reset){
+        const summary=body.querySelector('.reset-summary'),list=body.querySelector('.reset-credit-details');
+        if(list&&(getComputedStyle(list).position!=='static'||Math.abs(list.getBoundingClientRect().top-summary.getBoundingClientRect().bottom)>.5))problems.push('重置详情未随行展开');
+        if(list&&[...list.querySelectorAll('.collection-row,.inline-empty')].some(n=>Math.abs(n.getBoundingClientRect().height-summary.getBoundingClientRect().height)>.5))problems.push('重置次数展开行高度不一致');
+      }
+      for(const selector of ['.detail-usage','.danger-row'])if(getComputedStyle(surface.querySelector(selector)).backgroundColor!=='rgba(0, 0, 0, 0)')problems.push('账号详情透明行出现底色');
+    }
+    for(const body of surface?.querySelectorAll('.settings-disclosure[open] > .disclosure-body')||[]){
+      if(getComputedStyle(body).backgroundColor!=='rgba(0, 0, 0, 0)')problems.push('展开区域与入口底色不一致');
+    }
+    const message=surface?.querySelector('[data-disclosure="message"][open]');
+    if(message){
+      const height=message.querySelector('summary').getBoundingClientRect().height;
+      if([...message.querySelectorAll('.toggle-line,.inline-field')].some(n=>Math.abs(n.getBoundingClientRect().height-height)>.5))problems.push('任务接续展开行高度不一致');
+    }
+    const current=info.page==='home'&&surface?.querySelector('.current-card > .current-identity');
+    if(current){
+      const card=current.parentElement.getBoundingClientRect(),row=current.getBoundingClientRect(),avatar=current.querySelector('.avatar')?.getBoundingClientRect();
+      if(Math.abs(row.top-card.top-row.left+card.left)>.5)problems.push('首页账号悬停框上侧与左侧边距不一致');
+      if(avatar&&Math.abs(row.top+row.height/2-avatar.top-avatar.height/2)>.5)problems.push('首页账号悬停框与头像未垂直居中');
+    }
+    const uninstallMark=surface?.querySelector('.uninstall-identity > .update-mark');
+    if(uninstallMark){
+      const mark=uninstallMark.getBoundingClientRect(),panel=surface.getBoundingClientRect(),css=getComputedStyle(uninstallMark),brand=document.querySelector('#home .header .mark');
+      if(mark.width!==40||mark.height!==40||Math.abs(mark.left+mark.width/2-panel.left-panel.width/2)>.5||Math.abs(mark.top-body.getBoundingClientRect().top-20)>.5)problems.push('卸载页应用图标位置或尺寸不一致');
+      if(brand&&css.color!==getComputedStyle(brand).color||css.opacity!=='1'||css.filter!=='none'||css.boxShadow!=='none')problems.push('卸载页应用图标颜色或遮罩异常');
+    }
+    for(const list of surface?.querySelectorAll('.disclosure-list')||[]){
+      const count=Number(list.dataset.itemCount),size=window.NXComponents.listPageSize;
+      if(!!list.querySelector('.resume-inline-pager')!==(count>size))problems.push('分页栏与条目数量不符');
+      if(list.querySelectorAll('.resume-page-content > .collection-row').length>size)problems.push('列表单页条目超出上限');
+    }
+    for(const label of surface?.querySelectorAll('.settings-disclosure > summary > span:first-child,.toggle-line > span,.sheet-head h2,.transfer-select-head > span')||[]){
+      if(!label.getBoundingClientRect().height||label.closest('[hidden],[inert],details:not([open]) .disclosure-body'))continue;
+      const range=document.createRange();range.selectNodeContents(label);
+      const tops=[];for(const r of range.getClientRects())if(r.width&&!tops.some(y=>Math.abs(y-r.y)<4))tops.push(r.y);
+      if(tops.length>1)problems.push('单行标签换行：'+label.textContent.trim());
+    }
+    for(const line of surface?.querySelectorAll('.quota-bar-head,.quota-overview-window')||[]){
+      if(!line.getBoundingClientRect().height)continue;
+      const pieces=[...line.children].map(node=>node.getBoundingClientRect());
+      if(line.scrollWidth>line.clientWidth+1||line.getBoundingClientRect().height>24||pieces.some((box,i)=>i&&box.left<pieces[i-1].right-1))problems.push('额度内容重叠或换行');
+    }
+    const roster=surface?.querySelector('.account-list'),heading=surface?.querySelector('.section-link');
+    if(roster&&heading&&roster.getBoundingClientRect().top<heading.getBoundingClientRect().bottom-1)problems.push('账号列表侵入标题行');
+    const selectHead=surface?.querySelector('.transfer-select-head'),selectAll=selectHead?.querySelector('button');
+    if(selectAll&&selectHead.getBoundingClientRect().height){const a=selectHead.getBoundingClientRect(),b=selectAll.getBoundingClientRect();if(Math.abs(a.top+a.height/2-b.top-b.height/2)>.75)problems.push('全选按钮未垂直居中');}
+    if(document.documentElement.dataset.material==='glass')for(const bar of surface?.querySelectorAll('.quota-overview-toolbar')||[])if(getComputedStyle(bar).backgroundColor!=='rgba(0, 0, 0, 0)')problems.push('玻璃材质栏位背景叠加');
+    for(const head of surface?.querySelectorAll('.quota-bar-head')||[]){
+      const time=head.querySelector('.reset'),percent=head.querySelector('b');
+      if(time&&percent&&time.getBoundingClientRect().right>percent.getBoundingClientRect().left)problems.push('倒计时占用额度位置');
+    }
     if([...app.querySelectorAll('*')].some(n=>n.__nxLocalMotionOwned||n.__nxMotionOwned||n.__nxMotionPlaceholder||n.__nxDisclosureOwned||n.__nxMotionRetained||n.__nxPopupActive))problems.push('动画结束后样式未释放');
     const notes=surface?.querySelector('#update-notes-body'),toggle=surface?.querySelector('#update-notes-toggle');
     if(notes&&!notes.hidden&&toggle){
@@ -33,7 +100,9 @@
       const radius=parseFloat(css.borderTopLeftRadius),floor=4;
       const label=button.getAttribute('aria-label')||button.dataset.action||button.textContent.trim();
       const family=button.matches('.control')?'action':button.matches('.switch')?'switch':button.matches('.control--embedded')?'joined':button.matches('.support-code')?'media':button.matches('.status-bar')?'notification':'row';
-      const expected=family==='action'||family==='switch'?height*.375:family==='joined'?0:family==='media'?12:family==='notification'?15:button.matches('.section-link')?12:16;
+      const proportionalRow=button.closest('.detail-compact')||button.matches('.settings-disclosure > summary,.settings-list > .link-row,.settings-list > .toggle-line,.settings-list > .setting-choice,.row,#home .current-card > .current-identity');
+      const notification=button.closest('.status-notification');
+      const expected=family==='action'||family==='switch'?height*.375:family==='joined'?0:family==='media'?12:family==='notification'?parseFloat(getComputedStyle(notification||button).height)*.375:button.matches('.section-link')?12:proportionalRow?height*.375:16;
       if(Math.abs(radius-expected)>.1)problems.push('控件圆角比例不一致：'+label);
       if(family==='action') {
         const icon=button.querySelector('.icon'),contentHeight=icon?parseFloat(getComputedStyle(icon).height):parseFloat(css.lineHeight);
@@ -46,7 +115,7 @@
       }
       const operation=button.dataset.action||'';
       const content=(button.querySelector(':scope > .control-content')||button).textContent.trim();
-      const confirmation=['execute-switch','execute-remove','adopt','start-add','start-reauth','install-update'].includes(operation)||['use-reset','resume-clear'].includes(operation)&&content==='确认';
+      const confirmation=['execute-switch','execute-remove','adopt','start-add','start-reauth','install-update'].includes(operation)||['import-start','uninstall-start'].includes(operation)&&!content.startsWith('正在')||['use-reset','resume-clear'].includes(operation)&&content==='确认';
       const expectedWeight=confirmation?550:400;
       if(Number(css.fontWeight)!==expectedWeight)problems.push('操作按钮字重不一致：'+label);
       if(button.matches('.relay')&&Number(getComputedStyle(button.querySelector('.relay-label')).fontWeight)!==400)problems.push('首页接力操作文字过粗');
@@ -82,7 +151,7 @@
         active:node.style.getPropertyValue('--segment-x')!=='',opacity:Number(css.opacity)};
     });
     const rows=[...app.querySelectorAll('[data-motion-list] > [data-email]')].map(node=>({email:node.dataset.email,...bounds(node),active:node.hasAttribute('data-local-moving')}));
-    const pages=[...app.querySelectorAll('[data-motion-pages]')].filter(node=>node.getBoundingClientRect().width).map(node=>{
+    const pages=[...app.querySelectorAll('[data-motion-pages]')].filter(node=>node.getBoundingClientRect().width&&!node.closest('[hidden],[inert],details:not([open]) .disclosure-body')).map(node=>{
       const content=node.querySelector('.resume-page-content');let x=0;
       try{x=new DOMMatrixReadOnly(getComputedStyle(content).transform).m41;}catch{}
       return {key:node.dataset.motionPages,page:Number(node.dataset.page),offset:x,...bounds(node),
@@ -138,7 +207,7 @@
       recording=false;
       const after=inspectLayout(),problems=after.problems.filter(p=>!(step.interrupt&&p==='动画结束后样式未释放'));
       if(frames.some(f=>f.moving.length>3||f.slots>3||new Set(f.moving.map(n=>n.role)).size!==f.moving.length||f.moving.some(n=>n.role==='primary')&&f.moving.some(n=>n.role==='surface')))problems.push('转场重复移动同一角色或抢占主按钮');
-      if(frames.some(f=>f.moving.some(n=>n.x<-.75||n.y<-.75||n.x+n.w>327.75||n.y+n.h>458.75)))problems.push('移动元素超出面板');
+      if(frames.some(f=>f.moving.some(n=>n.x<-.75||n.y<-.75||n.x+n.w>app.clientWidth+.75||n.y+n.h>app.clientHeight+.75)))problems.push('移动元素超出面板');
       if(frames.some(f=>f.moving.some(n=>n.role==='primary'&&n.transform!=='none'&&!/^matrix\(1, 0, 0, 1,/.test(n.transform))))problems.push('主按钮文字发生缩放');
       if(step.stable){
         if(frames.some(f=>f.moving.length))problems.push('数据刷新重播切页动画');
@@ -209,9 +278,10 @@
         }
         if(step.pagination){
           const before=beforeLocal.pages[0],end=endLocal.pages[0];
+          const references=new Map(beforeLocal.pages.map(page=>[page.key,page]));
           if(!end||end.page!==step.pagination)problems.push('换页没有保留最后一次选择');
           if(localFrames.some(value=>value.pages.some(page=>page.opacity!==1)))problems.push('换页出现淡入淡出');
-          if(localFrames.some(value=>value.scroll!==beforeLocal.scroll||value.pages.some(page=>['x','y','w','h'].some(key=>Math.abs(page[key]-before[key])>.5)||['x','y','w','h'].some(key=>Math.abs(page.tools[key]-before.tools[key])>.5))))problems.push('换页改变了外框、按钮或滚动位置');
+          if(localFrames.some(value=>value.scroll!==beforeLocal.scroll||value.pages.some(page=>{const reference=references.get(page.key);return reference&&(['x','y','w','h'].some(key=>Math.abs(page[key]-reference[key])>.5)||['x','y','w','h'].some(key=>Math.abs(page.tools[key]-reference.tools[key])>.5));})))problems.push('换页改变了外框、按钮或滚动位置');
           if(step.pageMove&&!localFrames.some(value=>value.pages.some(page=>page.active&&Math.abs(page.offset)>.5)))problems.push('换页没有平滑移动');
           if(!step.interrupt&&end&&(end.active||end.ghosts||Math.abs(end.offset)>.01))problems.push('换页结束后临时内容未释放');
         }
@@ -263,6 +333,8 @@
     if(step.hover){node.dispatchEvent(new MouseEvent('mouseover',{bubbles:true}));}
     await wait(step.wait??120);
   }
+  window.NXPreview.inspectLayout=inspectLayout;
+  window.NXPreview.inspectMotion=inspectMotion;
   window.NX_CASE_READY=false;
   window.NX_CASE_PROMISE=(async()=>{
     await window.NXPreviewReady;

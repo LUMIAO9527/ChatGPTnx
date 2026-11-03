@@ -2,15 +2,12 @@
 'use strict';
 window.NXViews ??= {};
 window.NXSettingsContent = (()=>{
-  function disclosure(c,key,label,content,count='') {
+  function disclosure(c,key,label,content,count='',{className='',summaryClass=''}={}) {
     const {ui,esc,icon}=c;
-    return `<details class="settings-disclosure control-container" data-disclosure="${esc(key)}" ${ui.disclosures.has(key)?'open':''}><summary class="control-header" aria-expanded="${ui.disclosures.has(key)}"><span>${esc(label)}</span><span class="disclosure-meta">${esc(count)}</span>${icon('chevron')}</summary><div class="disclosure-body">${content}</div></details>`;
+    return `<details class="settings-disclosure control-container ${className}" data-disclosure="${esc(key)}" ${ui.disclosures.has(key)?'open':''}><summary class="control-header ${summaryClass}" aria-expanded="${ui.disclosures.has(key)}"><span>${esc(label)}</span><span class="disclosure-meta">${esc(count)}</span>${icon('chevron')}</summary><div class="disclosure-body">${content}</div></details>`;
   }
   function collection(c,key,items,render) {
-    if(!items.length)return '<div class="inline-empty" role="status">暂无条目</div>';
-    const expanded=c.ui.fullCollections.has(key),limit=8;
-    return (expanded?items:items.slice(0,limit)).map(render).join('')
-      +(items.length>limit?`<button class="control control--small collection-more" data-action="collection-more" data-value="${key}">${expanded?'收起长名单':`显示其余 ${items.length-limit} 项`}</button>`:'');
+    return window.NXComponents.pagedList(c,key,items,render);
   }
   function relay(c) {
     const {data,esc,name,plan,icon}=c,excluded=new Set(data.settings.auto_relay_excluded||[]);
@@ -39,7 +36,7 @@ window.NXSettingsContent = (()=>{
     return `<div class="archive-list">${collection(c,'archives',ui.archives||[],x=>`<div class="archive-row collection-row"><strong class="collection-name" title="${esc(x.email)} · ${dt(x.archived_at)}">${esc(x.email)}</strong><button class="control secondary small-action control--small" data-action="restore" data-value="${esc(x.key)}">恢复</button></div>`)}</div>`;
   }
   function message(c) {
-    return window.NXEditors.row({id:'resume-message',label:'接续消息',value:String(c.ui.messageDraft??c.data.settings.resume_message).replace(/\r\n?|\n/g,' '),action:'save-resume-message'})
+    return window.NXEditors.row({id:'resume-message',label:'接续消息',value:String(c.ui.messageDraft??c.data.settings.resume_message).replace(/\r\n?|\n/g,' '),action:'save-resume-message',max:200,visibleLabel:true})
       +'<span id="form-error" class="field-feedback" role="alert"></span>';
   }
 
@@ -55,6 +52,25 @@ window.NXSettingsContent = (()=>{
       attrs:`aria-busy="${!!ui.resumeClearPending}" ${ui.resumeClearPending?'disabled':''}`});
   }
 
+  function resumeRecord(c,s,i,collection=false) {
+    const {esc,actionButton}=c;
+    const target=window.NXResumeDisplay.target(i),subagent=!!i.is_subagent;
+    const rawTitle=i.title||'未命名任务';
+    const title=subagent&&!rawTitle.startsWith('后台子任务：')?'后台子任务：'+rawTitle:rawTitle;
+    const status=({done:'已接续',failed:subagent?'失败':'重试',skipped:'已跳过',acting:'接续中',waiting:'等待中'})[i.state]||'处理中';
+    const reason=window.NXResumeDisplay.reason(i);
+    const navigation=subagent?(target?'打开所属主任务'+(i.parent_title?'：'+i.parent_title:''):'所属主任务未确认，不能独立打开'):target?'打开原任务':'任务编号未确认';
+    const stateClass=({done:'done',failed:'failed',skipped:'skipped',acting:'active',waiting:'waiting'})[i.state]||'pending';
+    const date=new Date(s.updated_at*1000),today=date.toDateString()===new Date().toDateString();
+    const time=(today?'今天 ':'')+date.toLocaleString('zh-CN',today?{hour:'2-digit',minute:'2-digit'}:{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const compactTime=time;
+    const retry=!i.is_subagent&&i.state==='failed'&&window.NX_RESUME_POLICY.retryable.includes(i.reason);
+    const result=i.state==='failed'&&!subagent?actionButton({content:'重试',action:'retry-resume-task',size:'small',tone:'danger',className:'resume-inline-retry',label:'重试接续：'+title,title:retry?'重试接续':(reason+'；此记录暂不可重试，点击任务查看'),attrs:`data-session="${esc(s.id)}" data-value="${esc(i.thread_id)}" ${retry?'':'disabled'}`}):esc(status);
+    const detail=reason&&['waiting','failed'].includes(i.state)?`<small class="resume-inline-reason">${esc(reason)}</small>`:'';
+    const hint=[title,i.state==='failed'?'接续失败':status,reason,compactTime,navigation].filter(Boolean).join(' · ');
+    return `<div class="resume-inline-row interaction-row${collection?' collection-row':''}${subagent?' is-subagent':''}"><button class="resume-inline-task control--embedded" ${target?`data-action="open-resume-task" data-value="${esc(target)}"`:'disabled'} aria-label="${esc(hint)}" title="${esc(hint)}"><i class="resume-inline-dot state-${stateClass}" aria-hidden="true"></i><span class="resume-inline-copy"><span class="resume-inline-title">${esc(title)}</span>${detail}</span><span class="resume-inline-time">${esc(compactTime)}</span></button><span class="resume-inline-result ${i.state==='failed'?'is-failed':''}">${result}</span></div>`;
+  }
+
   function resumeHistory(c) {
     const {ui,esc,icon,name,data,actionButton}=c;
     if(ui.inlineLoading['resume-history']==='loading')return '<div class="inline-empty" role="status">正在读取…</div>';
@@ -63,33 +79,17 @@ window.NXSettingsContent = (()=>{
     const sessions=[...(ui.resumeDetails||[])].sort((a,b)=>Number(active.has(b.phase))-Number(active.has(a.phase))||b.updated_at-a.updated_at);
     const records=sessions.flatMap(s=>s.items.map(i=>({s,i})));
     if(!records.length)return '<div class="inline-empty" role="status">暂无接续记录</div>';
-    const pageSize=5,totalPages=Math.max(1,Math.ceil(records.length/pageSize));
+    const pageSize=window.NXComponents.listPageSize,totalPages=Math.max(1,Math.ceil(records.length/pageSize));
     const page=Math.max(1,Math.min(totalPages,Number(ui.resumePage)||1));
     ui.resumePage=page;
-    const rows=records.slice((page-1)*pageSize,page*pageSize).map(({s,i})=>{
-      const target=window.NXResumeDisplay.target(i),subagent=!!i.is_subagent;
-      const rawTitle=i.title||'未命名任务';
-      const title=subagent&&!rawTitle.startsWith('后台子任务：')?'后台子任务：'+rawTitle:rawTitle;
-      const status=({done:'已接续',failed:subagent?'失败':'重试',skipped:'已跳过',acting:'接续中',waiting:'等待中'})[i.state]||'处理中';
-      const reason=window.NXResumeDisplay.reason(i);
-      const navigation=subagent?(target?'打开所属主任务'+(i.parent_title?'：'+i.parent_title:''):'所属主任务未确认，不能独立打开'):target?'打开原任务':'任务编号未确认';
-      const stateClass=({done:'done',failed:'failed',skipped:'skipped',acting:'active',waiting:'waiting'})[i.state]||'pending';
-      const date=new Date(s.updated_at*1000),today=date.toDateString()===new Date().toDateString();
-      const time=(today?'今天 ':'')+date.toLocaleString('zh-CN',today?{hour:'2-digit',minute:'2-digit'}:{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
-      const compactTime=time;
-      const retry=!i.is_subagent&&i.state==='failed'&&window.NX_RESUME_POLICY.retryable.includes(i.reason);
-      const result=i.state==='failed'&&!subagent?actionButton({content:'重试',action:'retry-resume-task',size:'small',tone:'danger',className:'resume-inline-retry',label:'重试接续：'+title,title:retry?'重试接续':(reason+'；此记录暂不可重试，点击任务查看'),attrs:`data-session="${esc(s.id)}" data-value="${esc(i.thread_id)}" ${retry?'':'disabled'}`}):esc(status);
-      const detail=reason&&['waiting','failed'].includes(i.state)?`<small class="resume-inline-reason">${esc(reason)}</small>`:'';
-      const hint=[title,i.state==='failed'?'接续失败':status,reason,compactTime,navigation].filter(Boolean).join(' · ');
-      return `<div class="resume-inline-row interaction-row${subagent?' is-subagent':''}"><button class="resume-inline-task control--embedded" ${target?`data-action="open-resume-task" data-value="${esc(target)}"`:'disabled'} aria-label="${esc(hint)}" title="${esc(hint)}"><i class="resume-inline-dot state-${stateClass}" aria-hidden="true"></i><span class="resume-inline-copy"><span class="resume-inline-title">${esc(title)}</span>${detail}</span><span class="resume-inline-time">${esc(compactTime)}</span></button><span class="resume-inline-result ${i.state==='failed'?'is-failed':''}">${result}</span></div>`;
-    }).join('');
-    const pager=totalPages>1?`<div class="resume-inline-pager" tabindex="-1" aria-label="接续记录分页" style="--resume-page-width:${String(totalPages).length*2+3}ch">${actionButton({content:icon('chevron'),action:'resume-page',size:'small',iconOnly:true,className:'resume-inline-page',label:'上一页',attrs:`data-value="prev" ${page===1?'disabled':''}`})}<span class="resume-inline-page-count" role="status" aria-live="polite" aria-atomic="true">${page} / ${totalPages}</span>${actionButton({content:icon('chevron'),action:'resume-page',size:'small',iconOnly:true,className:'resume-inline-page',label:'下一页',attrs:`data-value="next" ${page===totalPages?'disabled':''}`})}</div>`:'<span></span>';
+    const rows=records.slice((page-1)*pageSize,page*pageSize).map(({s,i})=>resumeRecord(c,s,i)).join('');
+    const pager=window.NXComponents.pagination({page,totalPages,action:'resume-page',label:'接续记录'})||'<span></span>';
     const clear=resumeClearControl(c);
     const tools=totalPages>1||clear?`<div class="resume-inline-tools">${pager}${clear?`<span class="resume-inline-clear-slot">${clear}</span>`:''}</div>`:'';
     return `<div class="resume-inline-list${totalPages>1?' has-pagination':''}" data-motion-pages="resume" data-page="${page}" data-page-count="${totalPages}"><div class="resume-page-content">${rows}</div></div>${tools}`;
   }
 
-  return {disclosure,relay,hotkeys,archives,message,earlyAnchor,resumeHistory,resumeClearControl};
+  return {disclosure,relay,hotkeys,archives,message,earlyAnchor,resumeHistory,resumeClearControl,resumeRecord};
 })();
 window.NXViews.settings = c => {
   const {data,ui,settingsGroup,systemSettings,autoRelaySetting,taskContinuationSetting,notificationSettings,segmented,link}=c;
@@ -99,12 +99,14 @@ window.NXViews.settings = c => {
   const body=settingsGroup('系统',systemSettings(data.settings)+appearance+x.disclosure(c,'notifications','通知',notificationSettings(data.settings)))
     +settingsGroup('接力与接续',x.disclosure(c,'relay','自动接力',autoRelaySetting(data.settings)+x.relay(c),data.settings.auto_relay?`${n} 个账号`:'未开启')
       +x.disclosure(c,'early-anchor','接力预热',x.earlyAnchor(c),data.settings.early_anchor?`${data.accounts.filter(a=>a.plan==='plus'&&(data.settings.early_anchor_accounts||[]).includes(a.email)).length} 个账号`:'未开启')
-      +x.disclosure(c,'message','任务接续',taskContinuationSetting(data.settings)+'<p class="inline-help">接续消息</p>'+x.message(c),data.settings.task_continuation?'已开启':'未开启')
+      +x.disclosure(c,'message','任务接续',taskContinuationSetting(data.settings)+x.message(c),data.settings.task_continuation?'已开启':'未开启')
       +x.disclosure(c,'resume-history','任务接续记录',x.resumeHistory(c),(()=>{const count=(ui.resumeDetails||[]).reduce((n,s)=>n+(s.items?.length||0),0);return count?`${count} 条`:''})()))
-    +settingsGroup('账号',x.disclosure(c,'hotkeys','账号快捷键',x.hotkeys(c),`${(data.hotkeys||[]).filter(h=>h.shortcut).length} 个`)
-      +x.disclosure(c,'archives','已归档账号',x.archives(c),ui.archives?`${ui.archives.length} 个`:''))
+    +settingsGroup(window.NXDataTransfer?'账号与数据':'账号',x.disclosure(c,'hotkeys','账号快捷键',x.hotkeys(c),`${(data.hotkeys||[]).filter(h=>h.shortcut).length} 个`)
+      +x.disclosure(c,'archives','已归档账号',x.archives(c),ui.archives?`${ui.archives.length} 个`:'')
+      +(window.NXDataTransfer?link('','导入与导出','transfer-open'):''))
     +settingsGroup('关于',link('','版本更新','open-update')
-      +link('','联系与支持','purchase-account'));
+      +link('','联系与支持','purchase-account')
+      +(window.NXDataTransfer?link('','卸载 ChatGPTnx','uninstall-open'):''));
   return {title:'设置',body:`<div class="settings-content" style="min-height:${ui.settingsScrollFloor||0}px">${body}</div>`,cls:'settings-body'};
 };
 window.NXViews.purchase = c => ({

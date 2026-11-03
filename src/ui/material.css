@@ -30,22 +30,11 @@
 }
 :root[data-material="glass"] .sheet { background: transparent; }
 :root[data-material="glass"] .footer { background: transparent; }
-:root[data-material="glass"] .settings-list > .toggle-line,
-:root[data-material="glass"] .settings-disclosure { background: rgb(247 249 253 / .34); }
-:root[data-material="glass"] .settings-disclosure > .disclosure-body {
-  background: rgb(53 65 83 / .055);
-  border-bottom-left-radius: var(--radius-card); border-bottom-right-radius: var(--radius-card);
-}
-:root[data-material="glass"] .settings-list .segmented { background: rgb(60 75 97 / .07); }
+:root[data-material="glass"] :is(.settings-list,.quota-overview-toolbar) .segmented { background: rgb(60 75 97 / .07); }
 :root[data-material="glass"] .segmented::before { background: rgb(247 249 253 / .42); }
-:root[data-material="glass"][data-appearance="dark"] .settings-list > .toggle-line,
-:root[data-material="glass"][data-appearance="dark"] .settings-disclosure { background: var(--surface); }
-:root[data-material="glass"][data-appearance="dark"] .settings-disclosure > .disclosure-body { background: rgb(9 15 24 / .10); }
-:root[data-material="glass"][data-appearance="dark"] .settings-list .segmented { background: rgb(185 205 233 / .08); }
+:root[data-material="glass"][data-appearance="dark"] :is(.settings-list,.quota-overview-toolbar) .segmented { background: rgb(185 205 233 / .08); }
 :root[data-material="glass"][data-appearance="dark"] .segmented::before { background: rgb(187 205 229 / .17); }
-:root[data-material="glass"] .quota-overview-toolbar {
-  background: var(--bg); backdrop-filter: blur(16px);
-}
+:root[data-material="glass"] .quota-overview-toolbar { background:transparent; backdrop-filter:none; }
 /* Browser previews have their own backdrop, inside the same document. */
 :root[data-material-preview] body.demo {
   background: radial-gradient(ellipse at 12% 12%, #b4d4f8 0, transparent 52%),

@@ -13,9 +13,15 @@
 .status-bar.success { color: var(--ok); }
 .status-bar > .icon:last-child:not(:first-child) { margin-left: auto; }
 .status-dock { position:absolute; left:16px; right:16px; z-index:12; pointer-events:none; }
-.status-notification { position:relative; height:var(--status-height); border:1px solid var(--status-edge); border-radius:calc(var(--status-height) * var(--control-radius-ratio));
+.status-notification { --status-radius:calc(var(--status-height) * var(--control-radius-ratio));
+  position:relative; height:var(--status-height); border:1px solid var(--status-edge); border-radius:var(--detail-row-radius,var(--status-radius));
   background:var(--status-surface); box-shadow:var(--status-shadow); pointer-events:auto; }
 .status-notification > .status-bar { height:calc(var(--status-height) - 2px); min-height:0; padding:6px 42px 6px 12px; border-radius:inherit; border:0; background:transparent; }
+.status-notification:has(> button.status-bar) { isolation:isolate; }
+.status-notification:has(> button.status-bar)::after { content:''; position:absolute; inset:0; border-radius:inherit; background:var(--ink); opacity:0; pointer-events:none; transition:opacity 160ms var(--ease); }
+.status-notification:has(> button.status-bar:hover:not(:disabled))::after { opacity:var(--control-hover-opacity); }
+.status-notification > button.status-bar::after { display:none; }
+.status-notification > button.status-bar:hover { box-shadow:none; }
 .status-notification .status-dismiss { position:absolute; right:var(--control-clearance); top:50%; transform:translateY(-50%); color:var(--muted); }
 .status-dock.yields-to-focus { visibility:hidden; }
 .dock-scroll-target { position:relative; }

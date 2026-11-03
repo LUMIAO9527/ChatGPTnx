@@ -41,5 +41,5 @@ window.NXViews.onboarding = ({data,ui,config,esc,icon,tool,busy,statusBar,status
     <div class="onboarding-main"><span class="eyebrow">首次设置</span><div class="flow-symbol">${icon(saving?'refresh':failed?'info':ready?'check':'baton',saving?'spinner':'')}</div><h1>${title}</h1><p class="flow-subtitle">${subtitle}</p>
     ${flow}
     ${statusRegion(statusBar({text:failed?'保存未完成 · 未加入账号列表':ready&&!saving?data.pending:status,tone:failed?'error':saving?'progress':ready?'success':'neutral',symbol:failed?'info':ready&&!saving?'user':running?'clock':'external'}))}</div>
-    ${connected&&!bridgeError?`<footer class="onboarding-foot">${actions}</footer>`:''}`;
+    ${connected&&!bridgeError?`<footer class="onboarding-foot">${actions}${window.NXDataTransfer&&!saving?'<button class="control secondary control--small onboarding-import" data-action="transfer-import">从备份导入</button>':''}</footer>`:''}`;
 };

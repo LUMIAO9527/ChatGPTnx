@@ -54,6 +54,7 @@ def main():
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('nx.chatgptnx.app')
     parser = argparse.ArgumentParser(description='ChatGPTnx')
     parser.add_argument('--once', action='store_true', help='query once and print redacted status')
+    parser.add_argument('--uninstall', action='store_true', help='open the application uninstall page')
     parser.add_argument('--home', type=Path, help='application data root; defaults beside executable')
     parser.add_argument('--selfcheck-report', type=Path, help='new diagnostic journal path (refuses to reuse an existing file)')
     parser.add_argument('--locate-task', metavar='TARGET', help='open an existing task by ID only; never send or start the service')
@@ -109,8 +110,12 @@ def main():
                 raise RuntimeError(issue)
             import win32api
             import webview.platforms.winforms
+            from nx.backup import seal,unseal
+            sample={'schema':1,'accounts':[{'email':'runtime-check@invalid.local','credential':None}]}
+            if unseal(seal(sample,'runtime-check-password'),'runtime-check-password')!=sample:
+                raise RuntimeError('backup runtime check failed')
             required = ('panel.html', 'nx.ico', 'switch_account.ps1',
-                        'continue_in_desktop.ps1', 'ChatGPTnx.Update.exe')
+                        'continue_in_desktop.ps1', 'ChatGPTnx.Update.exe', 'uninstall.ps1')
             if not all((resources / name).is_file() for name in required):
                 raise RuntimeError('runtime resources missing')
             result['dependencies_ready'] = True
@@ -124,7 +129,10 @@ def main():
         # print() is invisible in a winexe, so the user gets a MessageBox.
         mutex = acquire_single_instance(0.0 if args.once else 5.0)
         if mutex is None:
-            if args.once:
+            if args.uninstall:
+                from nx.installation import request_uninstall
+                request_uninstall(root)
+            elif args.once:
                 print('ChatGPTnx 已在运行；请通过托盘打开。')
             elif args.location_setup:
                 ctypes.windll.user32.MessageBoxW(
@@ -174,11 +182,15 @@ def main():
                          ensure_ascii=False))
     else:
         from nx.desktop import Desktop
+        if frozen and not args.location_setup:
+            from nx.installation import register_application
+            try:register_application(launcher_executable)
+            except OSError:service.log.warning('application_registration_failed')
         startup_ready = None
         if args.update_ack:
             from nx.updater import startup_ack
             startup_ready = lambda: startup_ack(root, launcher_executable, args.update_ack, args.update_token)
-        Desktop(service, startup_ready=startup_ready).run()
+        Desktop(service, startup_ready=startup_ready,initial_page='uninstall' if args.uninstall else None).run()
     if mutex:
         release_single_instance(mutex)
 

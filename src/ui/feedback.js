@@ -62,18 +62,19 @@ window.NXFeedback = (() => {
     function clear() {for(const entry of entries.values())clock.clearTimeout(entry.timer);entries.clear();paint();}
     return {begin,finish,paint,clear};
   }
-  /* A single out-of-flow dock. On home it covers the third roster avatar;
-     sheets clear persistent footers; footerless pages use the base inset.
+  /* A single out-of-flow dock. Home uses the third roster row's whole box.
+     Other pages clear their actual action footer or use the base inset.
      Only scroll reachability is extended. No content node is inserted in flow. */
   function createDock({root,changed=()=>{}}) {
     const host=document.createElement('div');
     host.className='status-region status-dock';host.hidden=true;
     host.setAttribute('role','region');host.setAttribute('aria-label','状态提示');
-    let surface=null,viewport=null,runway=null,baseRange=0,scheduled=0,holdRunway=false;
+    let surface=null,viewport=null,footerTarget=null,runway=null,baseRange=0,scheduled=0,holdRunway=false;
     const number=(key,fallback)=>parseFloat(getComputedStyle(root).getPropertyValue(key))||fallback;
     const request=()=>{if(!scheduled)scheduled=requestAnimationFrame(()=>{scheduled=0;layout();});};
     const resize=new ResizeObserver(request);resize.observe(root);
     const intersects=(a,b)=>a.bottom>b.top-6&&a.top<b.bottom+6&&a.left<b.right&&a.right>b.left;
+    const fixedDetail=()=>viewport?.classList.contains('detail-body')&&!viewport.classList.contains('reset-expanded')&&!viewport.querySelector('.account-editor details[open]');
     function clearRunway(force=false) {
       if(!runway)return;
       if(!force&&viewport?.scrollTop>baseRange+1){holdRunway=true;return;}
@@ -85,7 +86,7 @@ window.NXFeedback = (() => {
         &&node!==viewport&&intersects(node.getBoundingClientRect(),host.getBoundingClientRect());
       // A fixed footer cannot scroll. Yield while its control owns focus rather
       // than moving the footer or raising the notification to a different slot.
-      const yieldFocus=overlaps&&!viewport?.contains(node);
+      const yieldFocus=overlaps&&(!viewport?.contains(node)||fixedDetail());
       host.classList.toggle('yields-to-focus',!!yieldFocus);
       if(yieldFocus)host.setAttribute('aria-hidden','true');else host.removeAttribute('aria-hidden');
     }
@@ -93,26 +94,32 @@ window.NXFeedback = (() => {
       if(!surface?.isConnected||!host.isConnected)return;
       const bounds=surface.getBoundingClientRect();
       let bottom=number('--status-bottom',12);
+      host.style.left='16px';host.style.right='16px';host.style.removeProperty('--status-height');
       const footer=surface.querySelector(':scope > footer');
+      if(footerTarget!==footer){if(footerTarget)resize.unobserve(footerTarget);footerTarget=footer;if(footerTarget)resize.observe(footerTarget,{box:'border-box'});}
       const footerVisible=footer&&!footer.hidden&&footer.getBoundingClientRect().height>0;
       if(surface.id==='home'&&!surface.classList.contains('is-onboarding')&&footerVisible) {
         bottom=number('--status-home-bottom',52);
-        const avatar=surface.querySelector('.account-list > .row:nth-child(3) .avatar');
-        if(avatar&&viewport) {
-          const r=avatar.getBoundingClientRect();
-          // Use the unscrolled reference slot, not the moving row under it.
-          bottom=bounds.bottom-(r.top+viewport.scrollTop+r.height/2)-number('--status-height',40)/2;
+        host.style.setProperty('--status-height',number('--home-row-height',44)+'px');
+        const row=surface.querySelector('.account-list > .row:nth-child(3)');
+        if(row&&viewport) {
+          const r=row.getBoundingClientRect(),sx=bounds.width/surface.offsetWidth,sy=bounds.height/surface.offsetHeight;
+          // Preserve the third row's unscrolled box, including preview scaling.
+          bottom=(bounds.bottom-r.bottom)/sy-viewport.scrollTop;
+          host.style.left=(r.left-bounds.left)/sx+'px';
+          host.style.right=(bounds.right-r.right)/sx+'px';
+          host.style.setProperty('--status-height',row.offsetHeight+'px');
         }
-        bottom=Math.max(48,Math.min(80,bottom));
       }else if(footerVisible) {
         // Every persistent footer owns its space; footerless pages use the base inset.
-        bottom=bounds.bottom-footer.getBoundingClientRect().top+8;
+        bottom=(bounds.bottom-footer.getBoundingClientRect().top)/(bounds.height/surface.offsetHeight)+8;
       }
       host.style.bottom=bottom+'px';
       revealFocus();
     }
     function reserveScroll() {
       if(!viewport||viewport.querySelector(':scope > .roster-empty'))return;
+      if(fixedDetail()){clearRunway(true);return;}
       const clearance=Math.max(0,viewport.getBoundingClientRect().bottom-host.getBoundingClientRect().top+8);
       if(clearance<1){clearRunway();return;}
       const scroll=viewport.scrollTop;
@@ -126,7 +133,7 @@ window.NXFeedback = (() => {
     }
     function paint(next,html='') {
       if(!next)return;
-      const nextViewport=next.querySelector('.sheet-body,.onboarding-main,.account-list');
+      const nextViewport=next.querySelector('.quota-overview-list')||next.querySelector('.sheet-body,.onboarding-main,.account-list');
       const moved=next!==surface||viewport!==nextViewport;
       const held=holdRunway&&next===surface;
       if(moved){clearRunway(true);surface=next;viewport=nextViewport;}
@@ -135,13 +142,13 @@ window.NXFeedback = (() => {
       if(window.NXDisclosure)window.NXDisclosure.popup(host,html,{reappear:moved});
       else {if(host.innerHTML!==html)host.innerHTML=html;host.hidden=!html;}
       layout();
-      if((html||held)&&(moved||wasHidden||!runway))reserveScroll();
+      if((html||held)&&(moved||wasHidden||!runway||fixedDetail()))reserveScroll();
       if(!html&&!held)clearRunway();
       holdRunway=held;
     }
     root.addEventListener('scroll',event=>{if(event.target===viewport&&host.hidden)clearRunway();},true);
     root.addEventListener('focusin',event=>{
-      if(!host.hidden&&viewport?.contains(event.target)&&event.target!==viewport) {
+      if(!host.hidden&&viewport?.contains(event.target)&&event.target!==viewport&&!fixedDetail()) {
         const node=event.target.getBoundingClientRect(),dock=host.getBoundingClientRect();
         if(intersects(node,dock))viewport.scrollTop+=node.bottom-dock.top+8;
       }

@@ -39,6 +39,21 @@ window.NXComponents = (() => {
     const classes=['control',size==='regular'?'':`control--${size}`,tone==='primary'?'primary':tone==='danger'?'control--danger':'',confirmation?'control--confirmation':'',iconOnly?'control--icon':'',className].filter(Boolean).join(' ');
     return `<button type="button" class="${classes}" data-action="${esc(action)}"${label?` aria-label="${esc(label)}"`:''}${title?` title="${esc(title)}"`:''} ${attrs}>${content}</button>`;
   }
+  const listPageSize=5;
+  function pagination({page,totalPages,key='',label='列表',action='collection-page'}) {
+    if(totalPages<=1)return '';
+    const attrs=`data-key="${esc(key)}"`;
+    return `<div class="resume-inline-pager" tabindex="-1" aria-label="${esc(label)}分页" style="--resume-page-width:${String(totalPages).length*2+3}ch">${actionButton({content:icon('chevron'),action,size:'small',iconOnly:true,className:'resume-inline-page',label:'上一页',attrs:`${attrs} data-value="prev" ${page===1?'disabled':''}`})}<span class="resume-inline-page-count" role="status" aria-live="polite" aria-atomic="true">${page} / ${totalPages}</span>${actionButton({content:icon('chevron'),action,size:'small',iconOnly:true,className:'resume-inline-page',label:'下一页',attrs:`${attrs} data-value="next" ${page===totalPages?'disabled':''}`})}</div>`;
+  }
+  function pagedList(c,key,items,render,{label='列表',empty='暂无条目'}={}) {
+    c.ui.collectionPages??={};
+    const totalPages=Math.max(1,Math.ceil(items.length/listPageSize));
+    const page=Math.max(1,Math.min(totalPages,Number(c.ui.collectionPages[key])||1));
+    c.ui.collectionPages[key]=page;
+    const rows=items.slice((page-1)*listPageSize,page*listPageSize).map(render).join('');
+    const pager=pagination({page,totalPages,key,label});
+    return `<div class="disclosure-list${pager?' has-pagination':''}" data-collection="${esc(key)}" data-item-count="${items.length}"><div class="disclosure-list-pages" data-motion-pages="collection:${esc(key)}" data-page="${page}" data-page-count="${totalPages}"><div class="resume-page-content">${rows||`<div class="inline-empty" role="status">${esc(empty)}</div>`}</div></div>${pager?`<div class="resume-inline-tools">${pager}</div>`:''}</div>`;
+  }
   const tool=(i,action,label,attrs='',iconClass='')=>actionButton({content:icon(i,iconClass),action,label,attrs,iconOnly:true,size:['refresh-one','usage-refresh'].includes(action)?'small':'regular',className:'tool'});
 
   function selectionButton({label,checked,action,email}) {
@@ -126,6 +141,6 @@ window.NXComponents = (() => {
     }).join('');
     return `<span class="roster-quotas" style="--quota-count:${Math.max(1,windows.length)}" aria-label="${esc(windows.length?'剩余额度':'额度暂不可用')}" title="${esc(windows.length?'剩余额度':'额度暂不可用')}">${cells||'<span class="unavailable">额度暂不可用</span>'}</span>`;
   }
-  return {esc, icon, tool, actionButton, selectionButton, switchButton, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
+  return {esc, icon, tool, actionButton, pagination, pagedList, listPageSize, selectionButton, switchButton, segmented, systemSettings, autoRelaySetting, taskContinuationSetting,
           notificationSettings, quotaSummary, quotaColumns, remaining, displayWindows, readableQuota, planLabel, accountName, accountChoice, creditValue, brandMark, avatar, accountIdentity};
 })();
