@@ -111,6 +111,8 @@ def main():
             import win32api
             import webview.platforms.winforms
             from nx.backup import seal,unseal
+            import cryptography
+            result['backup_crypto_version'] = cryptography.__version__
             sample={'schema':1,'accounts':[{'email':'runtime-check@invalid.local','credential':None}]}
             if unseal(seal(sample,'runtime-check-password'),'runtime-check-password')!=sample:
                 raise RuntimeError('backup runtime check failed')

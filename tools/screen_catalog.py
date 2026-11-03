@@ -29,6 +29,8 @@ G='02 · 首页'
 for key,label,sc in [('home','首页 · 常规',None),('home-single','首页 · 一个账号','single-account'),('home-three','首页 · 三个账号','three-accounts'),('home-four','首页 · 四个账号','four-accounts'),('home-many','首页 · 14 个账号','many'),('home-long-names','首页 · 长名称','long-names'),('home-error','首页 · 操作失败','error-home'),('home-stale','首页 · 缓存过期','stale'),('home-expired','首页 · 到点待核验','expired'),('home-no-relay','首页 · 无可用接力账号','no-relay'),('home-desktop-off','首页 · 桌面未运行','chatgpt-off'),('home-exhausted','首页 · 已耗尽且自动接力关闭','week-exhausted-auto-off'),('home-refreshing','首页 · 正在刷新','refreshing'),('home-resuming','首页 · 接续进行中','resume-progress'),('home-waiting','首页 · 等待账号恢复','resume-waiting'),('home-failed','首页 · 接续失败','resume-failed')]:add(G,key,label,scenario=sc)
 
 G='03 · 账号详情'
+add('02 · 首页','home-update-available','首页 · 发现更新',scenario='update-available')
+add('02 · 首页','home-update-dismissed','首页 · 收起更新提醒',scenario='update-available',steps=[click('dismiss-status')])
 add('02 · 首页','home-connection-lost','首页 · 连接中断保留已有内容',steps=[{'simulate':'disconnect-service'}],note='保留已加载账号，只显示一处重新连接提示。')
 for key,label,sc,params in [
  ('detail','详情 · 当前账号',None,{}),('detail-other','详情 · 其他账号',None,{'email':'backup@example.com'}),

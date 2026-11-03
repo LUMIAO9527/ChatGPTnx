@@ -28,7 +28,9 @@ class PackageTests(unittest.TestCase):
                              'tools/build_explorer.py','tools/build_gallery.py',
                              'tests/ui_final_checks.py','tests/quota_columns_checks.cjs','src/ui/preferences.js','src/ui/views/editors.js','tools/test_resume_priority.ps1','tools/test_automatic_resume.ps1','src/nx/resume_policy.py'):
                     self.assertIn(name,names)
-                self.assertFalse(any(n.startswith(('_data/','snapshots/','reference/','.git/','_wip/','docs/')) for n in names))
+                self.assertFalse(any(n.startswith(('_data/','snapshots/','reference/','.git/','_wip/','docs/validation/')) for n in names))
+                self.assertIn('docs/DESIGN.md',names)
+                self.assertIn('docs/images/nx-mark.png',names)
                 self.assertNotIn('accounts.txt',names)
                 self.assertIsNone(archive.testzip())
 

@@ -4,6 +4,7 @@ window.NXDemo = (() => {
   const clone=v=>JSON.parse(JSON.stringify(v));
   let state, usages, archives=[], resumeDetails=[], serial=0, failNext=false, previous=null, generation=0;
   const sec=()=>Math.floor(Date.now()/1000);
+  const nextVersion=()=>{const parts=window.NX_CONFIG.version.split('.').map(Number);parts[2]=(parts[2]||0)+1;return parts.join('.');};
   const loginSaved=()=>{state.login_result={id:'demo-login-'+(++serial),message:'登录已验证并保存',quota_ok:true};};
   function demoRelayOrder() {
     const usable=a=>Number.isFinite(a.fetched_at)&&a.fetched_at>=0&&a.fetched_at<=sec()+60&&window.NXComponents.displayWindows(a).length>0&&window.NXComponents.displayWindows(a).every(w=>w.used<100&&w.resets_at>sec());
@@ -77,7 +78,7 @@ window.NXDemo = (() => {
     if(window.NXDataDemo?.handles(method))return window.NXDataDemo.call(method,...args);
     const [email,force]=args;
     switch(method){
-      case 'check_update':state.update={...state.update,status:'checking',message:'正在检查更新…'};setTimeout(()=>{state.update={...state.update,status:'available',available:true,version:'1.4',message:'发现新版本',notes:'改善登录体验与版本更新。'};},500);return {ok:true,accepted:true};
+      case 'check_update':state.update={...state.update,status:'checking',message:'正在检查更新…'};setTimeout(()=>{state.update={...state.update,status:'available',available:true,version:nextVersion(),message:'发现新版本',notes:'改善登录体验与版本更新。'};},500);return {ok:true,accepted:true};
       case 'download_update':state.update={...state.update,status:'downloading',progress:50,message:'正在下载更新…'};setTimeout(()=>{state.update={...state.update,status:'ready',progress:100,message:'下载已校验，点击重启并更新'};},600);return {ok:true,accepted:true};
       case 'cancel_update_download':state.update={...state.update,status:'error',message:'下载已取消，可重新下载'};return {ok:true};
       case 'install_update':if(state.adding||state.reauth||state.operation)return {ok:false,error:'请完成当前操作后再更新'};state.update={...state.update,status:'installing',message:'正在重启并更新…'};return {ok:true};
@@ -88,9 +89,11 @@ window.NXDemo = (() => {
         const known=new Map(state.hotkeys.map(item=>[item.email,item]));
         state.hotkeys=state.accounts.map((a,i)=>known.get(a.email)||{email:a.email,shortcut:i<9?`ctrl+alt+${i+1}`:null,registered:i<9});
         state.relay_order=demoRelayOrder();
-        state.relay_email=(state.settings.relay_pick&&state.relay_order.includes(state.settings.relay_pick)?state.settings.relay_pick:null)
+        const picked=state.settings.relay_pick;
+        state.relay_email=(picked&&picked!==state.current&&state.accounts.some(a=>a.email===picked)?picked:null)
           ||state.relay_order.find(email=>email!==state.current)||null;
-        state.auto_relay_email=state.settings.auto_relay_excluded.includes(state.current)?null:
+        state.auto_relay_email=state.settings.auto_relay_excluded.includes(state.current)?null:picked?
+          (state.relay_order.includes(picked)&&!state.settings.auto_relay_excluded.includes(picked)?picked:null):
           state.relay_order.find(email=>email!==state.current&&!state.settings.auto_relay_excluded.includes(email))||null;
         if(state.relay_wait&&(state.relay_wait.email===state.current||!state.accounts.some(a=>a.email===state.relay_wait.email)))state.relay_wait=null;
         if(state.relay_wait&&!state.operation&&!state.adding&&!state.reauth&&state.chatgpt_running&&state.relay_order.includes(state.relay_wait.email)){
@@ -232,13 +235,13 @@ window.NXDemo = (() => {
       const updates={
         'update-checking':{status:'checking',message:'正在检查更新…'},
         'update-current':{status:'current',version:window.NX_CONFIG.version,message:'当前已是最新版本'},
-        'update-available':{status:'available',available:true,version:'1.4',message:'发现新版本',notes:'改善自动登录与版本更新体验。'},
-        'update-downloading':{status:'downloading',available:true,version:'1.4',progress:63,message:'正在下载更新…'},
-        'update-ready':{status:'ready',available:true,version:'1.4',progress:100,message:'下载已校验，点击重启并更新'},
+        'update-available':{status:'available',available:true,version:nextVersion(),message:'发现新版本',notes:'改善自动登录与版本更新体验。'},
+        'update-downloading':{status:'downloading',available:true,version:nextVersion(),progress:63,message:'正在下载更新…'},
+        'update-ready':{status:'ready',available:true,version:nextVersion(),progress:100,message:'下载已校验，点击重启并更新'},
         'update-error':{status:'error',message:'连接 GitHub 失败或下载中断，请检查网络后重试。'},
-        'update-blocked':{status:'ready',available:true,version:'1.4',progress:100,message:'下载已校验，点击重启并更新'},
-        'update-source':{status:'available',available:true,version:'1.4',installable:false,message:'发现新版本'},
-        'update-notes':{status:'available',available:true,version:'1.4',notes:'改善自动登录验证。\n统一联系与支持排版。\n支持内置版本更新。\n'.repeat(8),message:'发现新版本'}
+        'update-blocked':{status:'ready',available:true,version:nextVersion(),progress:100,message:'下载已校验，点击重启并更新'},
+        'update-source':{status:'available',available:true,version:nextVersion(),installable:false,message:'发现新版本'},
+        'update-notes':{status:'available',available:true,version:nextVersion(),notes:'改善自动登录验证。\n统一联系与支持排版。\n支持内置版本更新。\n'.repeat(8),message:'发现新版本'}
       };
       if(updates[which])Object.assign(state.update,updates[which]);
       if(which==='update-blocked')state.reauth={email:state.accounts[4].email,previous:state.current,phase:'login'};

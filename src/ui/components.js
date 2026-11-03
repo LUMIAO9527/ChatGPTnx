@@ -39,7 +39,7 @@ window.NXComponents = (() => {
     const classes=['control',size==='regular'?'':`control--${size}`,tone==='primary'?'primary':tone==='danger'?'control--danger':'',confirmation?'control--confirmation':'',iconOnly?'control--icon':'',className].filter(Boolean).join(' ');
     return `<button type="button" class="${classes}" data-action="${esc(action)}"${label?` aria-label="${esc(label)}"`:''}${title?` title="${esc(title)}"`:''} ${attrs}>${content}</button>`;
   }
-  const listPageSize=5;
+  const listPageSize=window.NX_CONFIG.list_page_size;
   function pagination({page,totalPages,key='',label='列表',action='collection-page'}) {
     if(totalPages<=1)return '';
     const attrs=`data-key="${esc(key)}"`;

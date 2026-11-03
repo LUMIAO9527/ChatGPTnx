@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock,patch
@@ -36,10 +37,11 @@ class BackupTests(unittest.TestCase):
         write_credential_bytes(self.first.paths.snapshot(self.email),auth(self.email))
         write_credential_bytes(self.first.paths.snapshots/'removed'/f'{self.other}.test.json',auth(self.other))
         key=account_identity_key(self.first.paths.snapshot(self.email),self.email)
+        self.observed=int(time.time())-200
         self.first.state.update(account_meta={self.email:{'alias':'工作','subscription_date':'2026-12-31'}},
-          usage={self.email:{'ok':True,'source':SOURCE,'identity_key':key,'fetched_at':1900000000,
+          usage={self.email:{'ok':True,'source':SOURCE,'identity_key':key,'fetched_at':self.observed,
                   'summary':{'lifetimeTokens':123},'dailyUsageBuckets':[{'startDate':'2026-11-01','tokens':100}]}},
-          cache={'updated':1900000000,'current':self.email,'accounts':[{'email':self.email,'ok':True,'fetched_at':1900000000,'plan':'plus',
+          cache={'updated':self.observed,'current':self.email,'accounts':[{'email':self.email,'ok':True,'fetched_at':self.observed,'plan':'plus',
              'windows':[{'label':'5h','duration':300,'used':12,'resets_at':2000000000}]}]})
         self.first.state.setting(appearance='dark',resume_message='继续测试',autostart=True)
         self.file=self.root/'test.nxbackup'
@@ -59,7 +61,7 @@ class BackupTests(unittest.TestCase):
         self.assertNotEqual(self.second.paths.snapshot(self.email).read_bytes(),auth(self.email))
         self.assertFalse(self.second.paths.auth.exists())
         self.assertEqual(self.second.state.get('account_meta')[self.email]['alias'],'工作')
-        self.assertEqual(self.second.state.get('usage')[self.email]['fetched_at'],1900000000)
+        self.assertEqual(self.second.state.get('usage')[self.email]['fetched_at'],self.observed)
         self.assertEqual(self.second.state.get('settings')['resume_message'],'继续测试')
         self.assertFalse(self.second.state.get('settings')['autostart'])
         self.assertFalse((self.second.paths.data/JOURNAL).exists())
@@ -83,7 +85,7 @@ class BackupTests(unittest.TestCase):
         self.second.accounts.write([self.email]);write_credential_bytes(self.second.paths.snapshot(self.email),auth(self.email))
         before=self.second.paths.snapshot(self.email).read_bytes();key=account_identity_key(self.second.paths.snapshot(self.email),self.email)
         self.second.state.update(account_meta={self.email:{'alias':'本机昵称'}},usage={self.email:{'ok':True,'source':SOURCE,'identity_key':key,
-            'fetched_at':1900000100,'summary':{'lifetimeTokens':222},'dailyUsageBuckets':[{'startDate':'2026-11-01','tokens':200},{'startDate':'2026-11-02','tokens':22}]}})
+            'fetched_at':self.observed+100,'summary':{'lifetimeTokens':222},'dailyUsageBuckets':[{'startDate':'2026-11-01','tokens':200},{'startDate':'2026-11-02','tokens':22}]}})
         self.export();self.assertTrue(self.unlock()['accounts'][0]['duplicate']);result=self.apply()
         self.assertEqual(result['merged'],1);self.assertEqual(self.second.paths.snapshot(self.email).read_bytes(),before)
         self.assertEqual(self.second.state.get('account_meta')[self.email]['alias'],'本机昵称')

@@ -20,12 +20,15 @@ import urllib.request
 import uuid
 
 from .storage import atomic_bytes
+from .credentials import assert_safe_path
 from .version import APP_VERSION
 
 REPOSITORY = 'LUMIAO9527/ChatGPTnx'
 API = f'https://api.github.com/repos/{REPOSITORY}/releases/latest'
 MAX_DOWNLOAD = 150 * 1024 * 1024
 MAX_METADATA = 1024 * 1024
+CHECK_INTERVAL = 6 * 60 * 60
+CHECK_RETRY = 15 * 60
 ALLOWED_HOSTS = frozenset({'api.github.com', 'github.com',
                          'release-assets.githubusercontent.com', 'objects.githubusercontent.com'})
 
@@ -107,6 +110,9 @@ class UpdateManager:
         self.cancel = threading.Event()
         self.asset = None
         self.batch = None
+        self._monitor_started = False
+        self._last_check_ok = False
+        self._check_interactive = False
         self.state = {'status': 'idle', 'current': current, 'installable': bool(self.installable),
                       'message': '检查是否有新版本', 'progress': 0}
 
@@ -119,23 +125,37 @@ class UpdateManager:
             self.state.update(values)
         self.notify()
 
-    def _start(self, status, job):
+    def _start(self, status, job, *, quiet=False):
         with self.lock:
+            if status == 'checking' and self.state['status'] == 'checking':
+                self._check_interactive |= not quiet
+                return {'ok': True, 'accepted': True}
             if self.state['status'] in ('checking', 'downloading', 'installing'):
                 return {'ok': False, 'error': '更新操作正在进行'}
             self.cancel.clear()
+            previous = dict(self.state)
+            if status == 'checking':
+                self._check_interactive = not quiet
             self.state.update(status=status, progress=0, message='正在检查更新…' if status == 'checking' else '正在下载更新…')
         self.notify()
         def work():
             try:
                 job()
             except Exception as error:
+                if status == 'checking':
+                    self._last_check_ok = False
+                if quiet and not self._check_interactive:
+                    with self.lock:
+                        self.state = previous
+                        self._last_check_ok = False
+                    self.notify()
+                    return
                 message = str(error) if isinstance(error, UpdateError) else '连接 GitHub 失败或下载中断，请重试'
                 self._set(status='error', message=message, progress=0)
         threading.Thread(target=work, daemon=True, name='nx-update-' + status).start()
         return {'ok': True, 'accepted': True}
 
-    def check(self):
+    def check(self, *, background=False):
         def work():
             with self.opener(API) as response:
                 raw = response.read(MAX_METADATA + 1)
@@ -151,11 +171,55 @@ class UpdateManager:
                 asset['available'] = digest_file(self.executable) != asset['sha256']
             with self.lock:
                 self.asset = asset
+                self._last_check_ok = True
             self._set(status='available' if asset['available'] else 'current',
                       version=asset['version'], notes=asset['notes'], size=asset['size'],
                       available=asset['available'], checked_at=int(time.time()),
                       message='发现可用更新' if asset['available'] else '当前已是最新版本')
-        return self._start('checking', work)
+        return self._start('checking', work, quiet=background)
+
+    def start_monitor(self, stop):
+        """Check metadata on startup and every six hours; transfers stay user initiated."""
+        with self.lock:
+            if self._monitor_started or not self.installable:
+                return
+            self._monitor_started = True
+        def monitor():
+            if stop.wait(10):
+                return
+            while not stop.is_set():
+                with self.lock:
+                    idle = self.state['status'] not in ('checking', 'downloading', 'ready', 'installing')
+                if idle:
+                    self.check(background=True)
+                    while not stop.wait(.2) and self.snapshot()['status'] == 'checking':
+                        pass
+                if stop.wait(CHECK_INTERVAL if self._last_check_ok else CHECK_RETRY):
+                    return
+        threading.Thread(target=monitor, daemon=True, name='nx-update-monitor').start()
+
+    def pending_notification(self):
+        with self.lock:
+            asset = dict(self.asset or {})
+        if not self.installable or not asset.get('available'):
+            return None
+        key = asset['version'] + ':' + asset['sha256']
+        try:
+            with assert_safe_path(self.root / '_data' / 'update-notice.json').open('rb') as stream:
+                raw = stream.read(4096)
+            if len(raw) < 4096 and json.loads(raw).get('key') == key:
+                return None
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+        return {'key': key, 'version': asset['version']}
+
+    def mark_notified(self, key):
+        with self.lock:
+            asset = self.asset or {}
+            if not asset.get('available') or key != asset.get('version', '') + ':' + asset.get('sha256', ''):
+                return
+        path = assert_safe_path(self.root / '_data' / 'update-notice.json')
+        atomic_bytes(path, json.dumps({'key': key}).encode('utf-8'), private=True)
 
     def download(self):
         with self.lock:

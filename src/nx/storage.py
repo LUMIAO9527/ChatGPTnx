@@ -120,6 +120,16 @@ def fingerprint(path: Path) -> str | None:
 _credential_cache_lock = threading.RLock()
 _credential_cache: dict[str, tuple[tuple[int, ...] | None, dict, dict]] = {}
 
+def _token_claims(data):
+    try:
+        raw = data.get('tokens', {}).get('id_token', '')
+        piece = raw.split('.')[1]
+        payload = json.loads(base64.urlsafe_b64decode(piece + '=' * (-len(piece) % 4)))
+        return payload if isinstance(payload, dict) else {}
+    except (TypeError, ValueError, IndexError, AttributeError):
+        return {}
+
+
 def _credential_record(path: Path) -> tuple[dict, dict]:
     try:
         stat = path.stat()
@@ -136,17 +146,7 @@ def _credential_record(path: Path) -> tuple[dict, dict]:
     except (OSError, ValueError, UnicodeError):
         data = {}
     data = data if isinstance(data, dict) else {}
-    payload = {}
-    try:
-        token = data.get('tokens') or {}
-        token = token if isinstance(token, dict) else {}
-        raw = token.get('id_token', '')
-        piece = raw.split('.')[1]
-        obj = json.loads(base64.urlsafe_b64decode(piece + '=' * (-len(piece) % 4)))
-        if isinstance(obj, dict):
-            payload = obj
-    except (TypeError, ValueError, IndexError, KeyError, AttributeError):
-        payload = {}
+    payload = _token_claims(data)
     with _credential_cache_lock:
         _credential_cache[key] = (signature, data, payload)
     return data, payload
@@ -166,13 +166,27 @@ def identity(path: Path) -> tuple[str | None, str | None]:
 
 def account_identity_key(path: Path, email: str) -> str:
     """Opaque deduplication key. User+workspace, not workspace alone."""
-    _, payload = _credential_record(path)
+    data, payload = _credential_record(path)
+    return _account_identity_key(data, payload, email)
+
+
+def _account_identity_key(data, payload, email):
     auth = payload.get('https://api.openai.com/auth') or {}
     auth = auth if isinstance(auth, dict) else {}
-    workspace = identity(path)[1]
+    tokens = data.get('tokens') or {}
+    tokens = tokens if isinstance(tokens, dict) else {}
+    workspace = tokens.get('account_id') or data.get('account_id') or auth.get('chatgpt_account_id')
     subject = payload.get('sub')
-    stable = f'{subject}|{workspace}' if subject and workspace else email.casefold()
+    stable = f'{subject}|{workspace}' if isinstance(subject, str) and subject and isinstance(workspace, str) and workspace else email.casefold()
     return hashlib.sha256(stable.encode('utf-8')).hexdigest()
+
+
+def credential_identity_key(raw: bytes, email: str) -> str:
+    """The same identity binding for already-decrypted portable credentials."""
+    data = json.loads(raw.decode('utf-8-sig'))
+    if not isinstance(data, dict):
+        raise ValueError('Invalid credential document')
+    return _account_identity_key(data, _token_claims(data), email)
 
 
 def activity_identity_key(path: Path, email: str) -> str:
@@ -235,7 +249,7 @@ class State:
         original = copy.deepcopy(existing)
         allowed_state = {'settings', 'cache', 'account_meta', 'usage', 'usage_revision',
                          'adding', 'reauth', 'subscriptions', 'hotkeys', 'reset_expiry_notices',
-                         'relay_wait'}
+                         'relay_wait', 'relay_pick'}
         self.value = {key: value for key, value in existing.items() if key in allowed_state}
         saved_settings = existing.get('settings', {})
         saved_settings = saved_settings if isinstance(saved_settings, dict) else {}
@@ -248,6 +262,12 @@ class State:
         self.value.setdefault('usage_revision', 0)
         self.value.setdefault('adding', None)
         self.value.setdefault('reauth', None)
+        picked = self.value.get('relay_pick')
+        try:
+            safe_email(picked)
+        except ValueError:
+            picked = None
+        self.value['relay_pick'] = picked
         waiting = self.value.get('relay_wait')
         if (self.recovery_path or not isinstance(waiting, dict)
                 or not isinstance(waiting.get('id'), str)
@@ -287,11 +307,9 @@ class State:
             flow = self.value[key]
             if flow is not None and not isinstance(flow, dict):
                 self.value[key] = {'phase': 'needs_recovery', 'previous': None}
-        for value in self.value['account_meta'].values():
-            if not isinstance(value.get('alias', ''), str):
-                value['alias'] = ''
-            if not isinstance(value.get('subscription_date'), (str, type(None))):
-                value['subscription_date'] = None
+        from .account_meta import restored
+        self.value['account_meta'] = {email: restored(value)
+                                      for email, value in self.value['account_meta'].items()}
         if self.value['settings'].get('autostart') != autostart_enabled_safe():
             # The registry is the source of truth; sync the mirrored setting.
             self.value['settings']['autostart'] = autostart_enabled_safe()

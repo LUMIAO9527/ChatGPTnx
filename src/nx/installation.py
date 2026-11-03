@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 import uuid
 from .credentials import assert_safe_path,secure_path
 from .storage import atomic_bytes
@@ -46,14 +47,14 @@ def uninstall_plan(service,keep):
     for target in targets:
         if not target.is_relative_to(root):raise ValueError('应用清理目录不合法')
         if target.exists():plain_tree(target)
-    return {'schema':1,'root':str(root),'executable':str(executable),'keep':keep,
+    return {'schema':1,'root':str(root),'executable':str(executable),'keep':keep,'token':uuid.uuid4().hex,
             'sha256':hashlib.sha256(executable.read_bytes()).hexdigest(),
             'targets':[str(t) for t in targets],'pids':[os.getpid()]+([service.update_parent_pid] if service.update_parent_pid else [])}
 
-def start_uninstall(service,keep):
+def start_uninstall(service,keep,*,ready_timeout=15):
     if not getattr(sys,'frozen',False):raise ValueError('请从安装的 ChatGPTnx 程序中卸载')
     if not service.gate.acquire(blocking=False):raise ValueError('请先完成当前操作')
-    desktop=False
+    desktop=False;committed=False;process=None
     try:
         if service.state.get('adding') or service.state.get('reauth') or service.updater.snapshot()['status'] in ('downloading','installing'):
             raise ValueError('请先完成当前的登录或更新')
@@ -69,9 +70,29 @@ def start_uninstall(service,keep):
         atomic_bytes(document,json.dumps(plan,ensure_ascii=False).encode('utf-8'),private=True)
         command=[str(Path(os.environ.get('WINDIR',r'C:\Windows'))/'System32/WindowsPowerShell/v1.0/powershell.exe'),
                  '-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',str(worker),'-Plan',str(document)]
-        subprocess.Popen(command,cwd=str(batch),creationflags=0x08000000,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        process=subprocess.Popen(command,cwd=str(batch),creationflags=0x08000000,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        deadline=time.monotonic()+ready_timeout;prepared=False
+        while time.monotonic()<deadline:
+            if process.poll() is not None:break
+            try:
+                ready=json.loads(assert_safe_path(batch/'prepared.json').read_text(encoding='utf-8-sig'))
+                if ready.get('token')==plan['token'] and ready.get('pid')==process.pid:
+                    prepared=True
+                    break
+            except (OSError,ValueError,TypeError,AttributeError):pass
+            time.sleep(.05)
+        if not prepared or process.poll() is not None:
+            raise ValueError('卸载组件未能就绪，请重试')
+        atomic_bytes(batch/'commit.json',json.dumps({'token':plan['token']}).encode('utf-8'),private=True)
         service.stop.set()
+        committed=True
         return {'ok':True}
     finally:
-        if desktop:service.desktop_gate.release()
-        service.gate.release()
+        if not committed:
+            try:
+                if process is not None and process.poll() is None:
+                    process.terminate()
+                    process.wait(timeout=5)
+            finally:
+                if desktop:service.desktop_gate.release()
+                service.gate.release()

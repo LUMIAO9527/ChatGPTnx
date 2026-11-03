@@ -11,12 +11,12 @@ sys.path.insert(0,str(ROOT/'src'))
 from nx.version import APP_VERSION
 TOP = ('README.md', 'README.en.md', 'USAGE.md', 'LICENSE', '.gitignore', 'accounts.sample.txt',
        'build.cmd', 'setup.cmd', 'start.cmd', 'preview.cmd', 'requirements.txt',
-       'requirements-dev.txt', 'requirements-browser.txt', f'ChatGPTnx-v{APP_VERSION}.html')
+       'requirements-dev.txt', 'requirements-browser.txt', 'docs/DESIGN.md', f'ChatGPTnx-v{APP_VERSION}.html')
 EXTENSIONS = {'.py', '.js', '.cjs', '.css', '.ps1', '.cs', '.ico', '.svg', '.html', '.png'}
 
 def package(output: Path) -> int:
     files = [ROOT/name for name in TOP]
-    for folder in ('src','tests','tools'):
+    for folder in ('src','tests','tools','docs/images'):
         files.extend(p for p in (ROOT/folder).rglob('*') if p.is_file() and p.suffix in EXTENSIONS)
     files = sorted(set(files),key=lambda p:p.relative_to(ROOT).as_posix())
     if any(not p.is_file() for p in files):

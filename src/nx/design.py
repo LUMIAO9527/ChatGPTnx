@@ -6,6 +6,7 @@ PANEL_CONFIG = {
     'mode': 'tray',
     'background': '#ffffff',
     'radius': 16,
+    'list_page_size': 5,
     'sizes': {
         'home': [312, 458],
         'workspace': [312, 458],

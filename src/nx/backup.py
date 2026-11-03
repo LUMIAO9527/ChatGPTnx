@@ -3,9 +3,10 @@ from __future__ import annotations
 import base64
 import copy
 from contextlib import contextmanager
-from datetime import date
 import json
+import math
 from pathlib import Path
+import re
 import secrets
 import time
 import uuid
@@ -17,7 +18,8 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from .credentials import assert_safe_path, credential_store_lock, encode_credential_bytes, read_credential_bytes
 from .settings import valid_setting
-from .storage import atomic_bytes, safe_email, account_identity_key
+from .storage import atomic_bytes, safe_email, account_identity_key, credential_identity_key
+from .account_meta import validate as account_meta
 
 MAGIC=b'NXBACK1\x00'
 MAX_SIZE=32*1024*1024
@@ -62,65 +64,205 @@ def credential(raw,email):
     if raw is None:return None
     if not isinstance(raw,str) or len(raw)>3*1024*1024:raise ValueError('备份账号资料不合法')
     try:
-        decoded=base64.b64decode(raw,validate=True);document=load(decoded)
+        decoded=base64.b64decode(raw,validate=True)
+        if len(decoded)>2*1024*1024:raise ValueError()
+        document=load(decoded)
         if not isinstance(document,dict) or not isinstance(document.get('tokens'),dict):raise ValueError()
         token=document['tokens'].get('id_token','')
         piece=token.split('.')[1]
         claims=load(base64.urlsafe_b64decode(piece+'='*(-len(piece)%4)))
         if not isinstance(claims,dict) or str(claims.get('email','')).casefold()!=email.casefold():raise ValueError()
-        if len(decoded)>2*1024*1024:raise ValueError()
         return decoded
     except (ValueError,TypeError,IndexError,AttributeError,KeyError,UnicodeError):
         raise ValueError('备份账号与登录资料不匹配') from None
 
+def time_value(value):
+    if value is None:
+        return None
+    if (type(value) not in (int, float) or not math.isfinite(value)
+            or not 0 <= value < 253402300800):
+        raise ValueError('备份采集时间不合法')
+    return value
+
+
+def identity_key(value):
+    if value is not None and (not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value)):
+        raise ValueError('备份账号身份不合法')
+    return value
+
+
+def observation(value):
+    value = time_value(value)
+    if value is not None and value > time.time() + 300:
+        raise ValueError('备份采集时间晚于当前时间，请核对系统时间')
+    return value
+
+
+def quota_record(raw, email):
+    """Rebuild the public quota shape; arbitrary imported fields never enter state."""
+    from .quota import label, normalize_usage_credits, normalize_banked_resets
+    from .diagnostics_http import safe_code, safe_fields, message
+    if not isinstance(raw, dict) or type(raw.get('ok')) is not bool:
+        raise ValueError('备份额度格式不合法')
+    windows = raw.get('windows', [])
+    if not isinstance(windows, list) or len(windows) > 2:
+        raise ValueError('备份额度窗口不合法')
+    clean = []
+    for window in windows:
+        if not isinstance(window, dict):
+            raise ValueError('备份额度窗口不合法')
+        used, reset = window.get('used'), time_value(window.get('resets_at'))
+        duration = window.get('duration_mins', window.get('duration'))
+        if (type(used) not in (int, float) or not math.isfinite(used) or not 0 <= used <= 100
+                or reset is None or reset <= 0 or type(duration) not in (int, float)
+                or not math.isfinite(duration) or not 1 <= duration <= 5256000):
+            raise ValueError('备份额度窗口不合法')
+        clean.append({'label': label(duration), 'duration_mins': duration, 'used': used, 'resets_at': reset})
+    if raw['ok'] and not clean:
+        raise ValueError('备份额度窗口不完整')
+    plan = raw.get('plan', 'unknown')
+    if not isinstance(plan, str) or len(plan) > 64 or not plan.isprintable():
+        raise ValueError('备份会员类型不合法')
+    credit = raw.get('credit_info') or {}
+    if not isinstance(credit, dict):
+        raise ValueError('备份 Credits 格式不合法')
+    credits = normalize_usage_credits({'unlimited': credit.get('status') == 'unlimited',
+                                      'balance': credit.get('balance', raw.get('credits'))})
+    bank = raw.get('banked_resets')
+    resets = None
+    if bank is not None:
+        if not isinstance(bank, dict) or not isinstance(bank.get('items'), (list, type(None))):
+            raise ValueError('备份重置次数格式不合法')
+        items = bank.get('items')
+        if items is not None and (len(items) > 50 or any(not isinstance(item, dict) for item in items)):
+            raise ValueError('备份重置次数格式不合法')
+        resets = normalize_banked_resets({'availableCount': bank.get('available_count'), 'credits': None if items is None else [
+            {'id': item.get('id'), 'title': item.get('title'), 'description': item.get('description'),
+             'resetType': item.get('reset_type'), 'status': item.get('status'), 'grantedAt': item.get('granted_at'),
+             **({'expiresAt': item.get('expires_at')} if item.get('expires_known') is True else {})}
+            for item in items]})
+        if resets is None:
+            raise ValueError('备份重置次数格式不合法')
+    result = {'email': email, 'ok': raw['ok'], 'windows': clean, 'plan': plan,
+              'fetched_at': observation(raw.get('fetched_at')), 'credits': credits['balance'],
+              'credit_info': credits, 'banked_resets': resets}
+    if not raw['ok']:
+        code = safe_code(raw.get('error_code'))
+        result.update(error_code=code, err=message(code), **safe_fields(raw))
+    if isinstance(raw.get('query_warning'), dict):
+        warning = raw['query_warning'];code = safe_code(warning.get('error_code'))
+        result['query_warning'] = {**safe_fields(warning), 'error_code': code, 'err': message(code)}
+    return result
+
+
+def subscription_record(raw, key):
+    if not isinstance(raw, dict) or raw.get('verified', False) is not False:
+        raise ValueError('备份会员资料格式不合法')
+    until = time_value(raw.get('date'))
+    return {'status': 'cached_hint' if until else 'not_provided', 'date': until,
+            'date_kind': 'entitlement_hint' if until else None,
+            'source': 'credential_claim' if until else 'not_available', 'verified': False,
+            'observed_at': observation(raw.get('observed_at')), 'checked_at': observation(raw.get('checked_at')),
+            'account_read_ok': raw.get('account_read_ok') is True, 'account_checked_online': False,
+            'error': None, 'billing_date_supported': False, 'identity_key': key}
+
+
 def validate(document):
-    if not isinstance(document,dict) or document.get('schema')!=1 or not isinstance(document.get('accounts'),list):
+    """Validate every row before returning a canonical, credential-separated document."""
+    if (not isinstance(document, dict) or type(document.get('schema')) is not int
+            or document['schema'] != 1 or not isinstance(document.get('accounts'), list)):
         raise ValueError('不支持的 NX 备份格式')
-    if not 1<=len(document['accounts'])<=500:raise ValueError('备份账号数量不合法')
-    seen=set()
-    for item in document['accounts']:
-        if not isinstance(item,dict):raise ValueError('备份账号格式不合法')
-        email=safe_email(item.get('email'));fold=email.casefold()
-        if fold in seen:raise ValueError('备份中有重复账号')
-        seen.add(fold);credential(item.get('credential'),email)
-        if type(item.get('archived',False)) is not bool:raise ValueError('备份归档状态不合法')
-        for key in ('meta','quota','usage','subscription'):
-            if item.get(key) is not None and not isinstance(item[key],dict):raise ValueError('备份资料格式不合法')
-        meta=item.get('meta') or {};alias=meta.get('alias','')
-        if not isinstance(alias,str) or len(alias)>24 or any(ord(c)<32 for c in alias):raise ValueError('备份昵称不合法')
-        if meta.get('subscription_date'):
-            try:date.fromisoformat(meta['subscription_date'])
-            except (ValueError,TypeError):raise ValueError('备份会员日期不合法') from None
-        quota=item.get('quota')
-        if quota:
-            from .quota_policy import sanitize_cached_account
-            item['quota']=sanitize_cached_account({**quota,'email':email})
-        usage=item.get('usage')
-        if usage and usage.get('ok'):
-            from .usage import normalized,SOURCE
-            if usage.get('source')!=SOURCE:raise ValueError('备份用量来源不合法')
-            normalized_usage=normalized(usage,now=usage.get('fetched_at'))
-            item['usage']={**normalized_usage,'identity_key':usage.get('identity_key')}
-    settings=document.get('settings')
-    if settings is not None and (not isinstance(settings,dict) or any(k not in PORTABLE_SETTINGS or not valid_setting(k,v) for k,v in settings.items())):
-        raise ValueError('备份设置不合法')
-    return document
+    if not 1 <= len(document['accounts']) <= 500:
+        raise ValueError('备份账号数量不合法')
+    result = {'schema': 1, 'accounts': []}
+    if 'created_at' in document:
+        result['created_at'] = observation(document['created_at'])
+    seen = set()
+    for raw in document['accounts']:
+        if not isinstance(raw, dict):
+            raise ValueError('备份账号格式不合法')
+        email = safe_email(raw.get('email'));fold = email.casefold()
+        if fold in seen:
+            raise ValueError('备份中有重复账号')
+        seen.add(fold)
+        decoded = credential(raw.get('credential'), email)
+        if type(raw.get('archived', False)) is not bool:
+            raise ValueError('备份归档状态不合法')
+        if raw.get('archived') and decoded is None:
+            raise ValueError('归档账号缺少登录资料，请重新导出')
+        item = {k: raw[k] for k in ('email', 'credential', 'archived') if k in raw}
+        key = identity_key(raw.get('identity_key'))
+        if decoded is not None:
+            actual = credential_identity_key(decoded, email)
+            if key is not None and key != actual:
+                raise ValueError('备份账号与登录身份不匹配')
+            key = actual
+        if key is not None:
+            item['identity_key'] = key
+        for field in ('meta', 'quota', 'usage', 'subscription'):
+            value = raw.get(field)
+            if value is not None and not isinstance(value, dict):
+                raise ValueError('备份资料格式不合法')
+            if field in raw:
+                item[field] = value
+        if raw.get('meta'):
+            item['meta'] = account_meta(raw['meta'])
+        if raw.get('quota'):
+            item['quota'] = quota_record(raw['quota'], email)
+        usage = raw.get('usage')
+        if usage:
+            from .usage import normalized, SOURCE
+            if type(usage.get('ok')) is not bool:
+                raise ValueError('备份用量状态不合法')
+            if usage['ok']:
+                if usage.get('source') != SOURCE:
+                    raise ValueError('备份用量来源不合法')
+                observed = observation(usage.get('fetched_at'))
+                if observed is None:
+                    raise ValueError('备份用量缺少采集时间')
+                usage_key = identity_key(usage.get('identity_key'))
+                if key and usage_key != key:
+                    raise ValueError('备份用量与账号身份不匹配')
+                item['usage'] = {**normalized(usage, now=observed), 'fetched_at': observed, 'identity_key': usage_key}
+            else:
+                item['usage'] = None
+        if raw.get('subscription'):
+            subscription_key = identity_key(raw['subscription'].get('identity_key'))
+            if key and subscription_key != key:
+                raise ValueError('备份会员资料与账号身份不匹配')
+            item['subscription'] = subscription_record(raw['subscription'], subscription_key)
+        result['accounts'].append(item)
+    settings = document.get('settings')
+    if settings is not None:
+        if (not isinstance(settings, dict) or any(k not in PORTABLE_SETTINGS or not valid_setting(k, v)
+                                                for k, v in settings.items())):
+            raise ValueError('备份设置不合法')
+        for field in ('auto_relay_excluded', 'early_anchor_accounts'):
+            if field in settings and (len(settings[field]) > 100 or any(safe_email(e) != e for e in settings[field])):
+                raise ValueError('备份接力账号设置不合法')
+        result['settings'] = copy.deepcopy(settings)
+    return result
 
 def transaction_path(paths,name):
+    if not isinstance(name,str):raise ValueError('恢复记录路径不合法')
     relative=Path(name)
     if relative.is_absolute() or '..' in relative.parts or not (
         name in ('accounts.txt','_data/state.json') or
         len(relative.parts)==2 and relative.parts[0]=='snapshots' and relative.suffix=='.json' or
         len(relative.parts)==3 and relative.parts[:2]==('snapshots','removed') and relative.suffix=='.json'):
         raise ValueError('恢复记录路径不合法')
+    if relative.parts[0]=='snapshots':safe_email(relative.name[:-5])
     return assert_safe_path(paths.root/relative)
 
 def recover(paths):
     journal=paths.data/JOURNAL
     if not journal.exists():return
     document=load(assert_safe_path(journal).read_bytes())
-    if document.get('schema')!=1 or not isinstance(document.get('entries'),list):raise ValueError('导入恢复记录不完整')
+    if (not isinstance(document,dict) or type(document.get('schema')) is not int or document['schema']!=1
+            or not isinstance(document.get('entries'),list) or len(document['entries'])>502):
+        raise ValueError('导入恢复记录不完整')
     entries=[(transaction_path(paths,e['path']),base64.b64decode(e['old'],validate=True) if e['old'] is not None else None) for e in document['entries']]
+    if len({target for target,_ in entries})!=len(entries):raise ValueError('导入恢复记录存在重复路径')
     for target,old in entries:
         if old is None:target.unlink(missing_ok=True)
         else:atomic_bytes(target,old,private=True)
@@ -178,8 +320,14 @@ class Backups:
     def info(self):
         return {'ok':True,'archived_count':len(self.service.accounts.archived())}
 
+    def clear(self):
+        self.encrypted=None;self.document=None;self.name=''
+        return {'ok':True}
+
     def export(self,path,options,password):
         if not isinstance(options,dict):raise ValueError('导出选项不合法')
+        if any(type(options.get(key,False)) is not bool for key in ('archived','usage','preferences')):
+            raise ValueError('导出选项不合法')
         with self.exclusive():
             s=self.service;emails=s.accounts.all();selected=options.get('accounts',[])
             if not isinstance(selected,list) or any(e not in emails for e in selected):raise ValueError('所选账号已变化，请重新选择')
@@ -201,7 +349,7 @@ class Backups:
                 rows.append(item)
             document={'schema':1,'created_at':int(time.time()),'accounts':rows}
             if options.get('preferences'):document['settings']={k:v for k,v in s.state.get('settings').items() if k in PORTABLE_SETTINGS}
-            validate(document);encrypted=seal(document,password)
+            document=validate(document);encrypted=seal(document,password)
             path=assert_safe_path(Path(path))
             if path.suffix.lower()!='.nxbackup':raise ValueError('请选择 .nxbackup 文件')
             atomic_bytes(path,encrypted,private=True)
@@ -224,7 +372,7 @@ class Backups:
         active={e.casefold() for e in self.service.accounts.all()}
         archived={e['email'].casefold() for e in self.service.accounts.archived()}
         self.document=document
-        rows=[{'email':r['email'],'alias':r.get('meta',{}).get('alias',''),'archived':r.get('archived',False),
+        rows=[{'email':r['email'],'alias':(r.get('meta') or {}).get('alias',''),'archived':r.get('archived',False),
                'duplicate':r['email'].casefold() in active|archived,'needsLogin':r.get('credential') is None} for r in document['accounts']]
         return {'ok':True,'accounts':rows,'usage':any(r.get('quota') or r.get('usage') for r in document['accounts']),
                 'preferences':document.get('settings') is not None}
@@ -233,8 +381,11 @@ class Backups:
         if self.document is None:raise ValueError('请先解锁备份')
         if not isinstance(options,dict) or options.get('merge') not in ('merge','skip'):raise ValueError('导入选项不合法')
         selected=options.get('accounts')
-        if not isinstance(selected,list) or not selected or set(selected)-{r['email'] for r in self.document['accounts']}:
+        if (not isinstance(selected,list) or not selected or any(not isinstance(e,str) for e in selected)
+                or set(selected)-{r['email'] for r in self.document['accounts']}):
             raise ValueError('请选择备份中的账号')
+        if any(type(options.get(key,False)) is not bool for key in ('usage','preferences')):
+            raise ValueError('导入选项不合法')
         with self.exclusive():
             s=self.service;paths=s.paths;candidate=copy.deepcopy(s.state.value);emails=s.accounts.all()
             active={e.casefold():e for e in emails};archived={r['email'].casefold():r for r in s.accounts.archived()}
@@ -257,7 +408,9 @@ class Backups:
                 if raw is not None and not target.exists():writes[target]=encode_credential_bytes(raw)
                 if raw is None and not target.exists():needs+=1
                 old=candidate['account_meta'].get(email,{})
-                candidate['account_meta'][email]={k:old.get(k) or (row.get('meta') or {}).get(k) for k in ('alias','subscription_date')}
+                incoming_meta=row.get('meta') or {}
+                candidate['account_meta'][email]={k:old.get(k) or incoming_meta.get(k) for k in ('alias','subscription_date')
+                                                 if old.get(k) or incoming_meta.get(k)}
                 if bound and options.get('usage'):
                     incoming=row.get('quota')
                     if incoming and stamp(incoming)>stamp(quotas.get(email)):quotas[email]={**incoming,'email':email}
@@ -277,7 +430,7 @@ class Backups:
             writes[paths.order]=('\n'.join(comments+emails)+'\n').encode('utf-8')
             writes[s.state.path]=dump(candidate)
             commit(paths,writes);s.state.value=candidate;s.accounts._order_signature=None
-            self.document=None;self.encrypted=None
+            self.clear()
             if getattr(s,'resumer',None):
                 try:
                     settings=candidate['settings']

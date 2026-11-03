@@ -8,7 +8,6 @@ function Plain([string]$path) {
             $item=Get-Item -LiteralPath $current -Force
             if($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw 'redirected_path' }
         }
-        if($current -eq $script:root) { break }
         $parent=[System.IO.Path]::GetDirectoryName($current)
         if($parent -eq $current) { break }
         $current=$parent
@@ -25,10 +24,16 @@ function RemoveOwned([string]$path) {
     }
     Remove-Item -LiteralPath $path -Force
 }
+function Digest([string]$path) {
+    $sha=[System.Security.Cryptography.SHA256]::Create()
+    $stream=[System.IO.File]::OpenRead($path)
+    try { return [System.BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','') }
+    finally { $stream.Dispose();$sha.Dispose() }
+}
 try {
     $stage='validate'
     $document=Get-Content -LiteralPath $Plan -Raw -Encoding UTF8 | ConvertFrom-Json
-    if($document.schema -ne 1 -or $document.keep -isnot [bool]) { throw 'invalid_plan' }
+    if($document.schema -ne 1 -or $document.keep -isnot [bool] -or $document.token -notmatch '^[a-f0-9]{32}$') { throw 'invalid_plan' }
     $script:root=Full $document.root
     if($script:root -eq [System.IO.Path]::GetPathRoot($script:root).TrimEnd('\')) { throw 'invalid_root' }
     $executable=Full $document.executable
@@ -38,19 +43,34 @@ try {
     if($document.targets.Count -ne $allowed.Count) { throw 'invalid_targets' }
     for($i=0;$i -lt $allowed.Count;$i++) { if((Full $document.targets[$i]) -ne (Full $allowed[$i])) { throw 'invalid_target' } }
     $batch=Full (Split-Path -Parent $Plan)
-    if(-not $batch.StartsWith((Join-Path $script:root '_wip\uninstall\'),[System.StringComparison]::OrdinalIgnoreCase)) { throw 'invalid_worker' }
+    if((Split-Path -Parent $batch) -ne (Join-Path $script:root '_wip\uninstall') -or $batch -ne (Full $PSScriptRoot)) { throw 'invalid_worker' }
+    Plain $Plan
     Plain $script:root
+    foreach($target in $allowed) { Plain $target }
+    if((Digest $executable) -ne $document.sha256) { throw 'program_changed' }
+    $stage='prepare'
+    $prepared=@{token=$document.token;pid=$PID} | ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText((Join-Path $batch 'prepared.json'),$prepared,[System.Text.UTF8Encoding]::new($false))
+    $deadline=[DateTime]::UtcNow.AddSeconds(20)
+    $accepted=$false
+    while([DateTime]::UtcNow -lt $deadline) {
+        $commit=Join-Path $batch 'commit.json'
+        if(Test-Path -LiteralPath $commit) {
+            Plain $commit
+            try { $accepted=(Get-Content -LiteralPath $commit -Raw -Encoding UTF8 | ConvertFrom-Json).token -eq $document.token } catch { $accepted=$false }
+            if($accepted) { break }
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    if(-not $accepted) { throw 'handoff_not_confirmed' }
     $stage='wait'
     foreach($processId in $document.pids) {
+        if($processId -isnot [int] -or $processId -le 0 -or $processId -eq $PID) { throw 'invalid_process' }
         $process=Get-Process -Id $processId -ErrorAction SilentlyContinue
         if($process) { $process.WaitForExit(60000) | Out-Null; if(-not $process.HasExited) { throw 'application_still_running' } }
     }
     Plain $executable
-    $sha=[System.Security.Cryptography.SHA256]::Create()
-    $stream=[System.IO.File]::OpenRead($executable)
-    try { $digest=[System.BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-','') }
-    finally { $stream.Dispose();$sha.Dispose() }
-    if($digest -ne $document.sha256) { throw 'program_changed' }
+    if((Digest $executable) -ne $document.sha256) { throw 'program_changed' }
     $stage='files'
     foreach($target in $allowed) { RemoveOwned $target }
     $stage='registration'
@@ -62,7 +82,7 @@ try {
     $run='HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     $command=(Get-ItemProperty -LiteralPath $run -Name ChatGPTnx -ErrorAction SilentlyContinue).ChatGPTnx
     if($command -eq ('"'+$executable+'"')) { Remove-ItemProperty -LiteralPath $run -Name ChatGPTnx -Force }
-    if(-not $document.quiet) {
+    if(-not $document.quiet -and $stage -notin @('validate','prepare')) {
         Add-Type -AssemblyName System.Windows.Forms
         $message=if($document.keep){'ChatGPTnx 已卸载，账号与数据已保留。'}else{'ChatGPTnx 及此设备保存的账号与数据已卸载。'}
         [System.Windows.Forms.MessageBox]::Show($message,'ChatGPTnx') | Out-Null
@@ -77,7 +97,7 @@ try {
     $failure=Join-Path (Split-Path -Parent $Plan) 'result.json'
     $reason=if($_.Exception.Message -match '^[a-z_]+$'){$_.Exception.Message}else{$_.Exception.GetType().Name}
     @{ok=$false;stage=$stage;reason=$reason} | ConvertTo-Json | Set-Content -LiteralPath $failure -Encoding UTF8
-    if(-not $document.quiet) {
+    if(-not $document.quiet -and $stage -notin @('validate','prepare')) {
         Add-Type -AssemblyName System.Windows.Forms
         [System.Windows.Forms.MessageBox]::Show('卸载未完成，请重新打开 ChatGPTnx 后重试。','ChatGPTnx') | Out-Null
     }

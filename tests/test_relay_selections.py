@@ -1,5 +1,6 @@
 """Independent relay choices, verified switches and cancellations; offline only."""
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -38,6 +39,34 @@ class SelectionTests(unittest.TestCase):
         self.select_both()
         self.service.set_relay_pick('b@example.com')
         self.assertEqual(self.choices(), ('b@example.com', 'c@example.com'))
+
+    def test_explicit_pick_controls_home_manual_and_automatic_relay(self):
+        self.assertEqual(self.service.get_data()['relay_email'],'b@example.com')
+        self.service.set_relay_pick('c@example.com')
+        data=self.service.get_data()
+        self.assertEqual((data['relay_email'],data['auto_relay_email']),('c@example.com','c@example.com'))
+        with patch.object(self.service,'_switch',return_value={'ok':True}) as switch:
+            self.service.relay()
+            switch.assert_called_once_with('c@example.com','relay')
+        self.service.state.setting(auto_relay=True)
+        self.exhaust('a@example.com')
+        with patch.object(self.service,'_switch',return_value={'ok':True,'accepted':True}) as switch:
+            self.assertTrue(self.service.auto_relay_if_needed()['accepted'])
+            self.assertEqual(switch.call_args.args[:2],('c@example.com','auto'))
+        with patch.object(self.service,'_switch',return_value={'ok':True,'accepted':True}) as switch:
+            self.assertTrue(self.service.auto_relay_on_usage_limit('a@example.com')['accepted'])
+            self.assertEqual(switch.call_args.args[:2],('c@example.com','auto-limit'))
+
+    def test_stale_or_excluded_pick_never_silently_selects_another_account(self):
+        self.service.set_relay_pick('c@example.com')
+        cache=self.service.state.get('cache')
+        next(a for a in cache['accounts'] if a['email']=='c@example.com')['fetched_at']=int(time.time())-1000
+        self.service.state.update(cache=cache)
+        data=self.service.get_data()
+        self.assertEqual(data['relay_email'],'c@example.com');self.assertIsNone(data['auto_relay_email'])
+        self.refresh();self.service.set_auto_relay_account('c@example.com',False)
+        data=self.service.get_data()
+        self.assertEqual(data['relay_email'],'c@example.com');self.assertIsNone(data['auto_relay_email'])
 
     def test_targeted_cancellation_leaves_the_other_choice(self):
         self.select_both()

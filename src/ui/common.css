@@ -849,7 +849,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .settings-disclosure:has(.disclosure-list) > .disclosure-body { padding:0; background:transparent; }
 .settings-disclosure:has(.disclosure-list) > .disclosure-body > :is(.toggle-line,.inline-help) { padding-inline:12px; }
 .disclosure-list { min-width:0; }
-.disclosure-list.has-pagination > .disclosure-list-pages { min-height:calc(var(--height-row) * 5); }
+.disclosure-list.has-pagination > .disclosure-list-pages { min-height:calc(var(--height-row) * var(--list-page-size)); }
 .disclosure-list-pages[data-page-moving] { position:relative; overflow:hidden; }
 .disclosure-list .collection-row { position:relative; display:flex; align-items:center; width:100%; height:var(--height-row); min-height:var(--height-row); padding:0 12px; border:0; border-radius:0; }
 .disclosure-list .collection-row:hover { z-index:1; background:var(--control-hover-surface); box-shadow:var(--hover-shadow); }
@@ -861,7 +861,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .disclosure-list .reset-credit-copy strong { overflow:hidden; text-overflow:ellipsis; }
 .settings-disclosure[data-disclosure="resume-history"] .disclosure-body { padding:0; border-top:1px solid var(--line); background:transparent; }
 .resume-inline-list { min-width:0; }
-.resume-inline-list.has-pagination { min-height:calc(var(--height-row) * 5); }
+.resume-inline-list.has-pagination { min-height:calc(var(--height-row) * var(--list-page-size)); }
 .resume-inline-list[data-page-moving] { position:relative; overflow:hidden; }
 .resume-page-content { width:100%; }
 .resume-page-ghost { position:absolute; inset:0 0 auto; pointer-events:none; user-select:none; will-change:transform; }

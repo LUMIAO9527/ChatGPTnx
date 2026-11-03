@@ -136,6 +136,61 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.wait()['status'], 'current')
         self.unchanged()
 
+    def test_background_failure_preserves_last_known_update_without_error_notice(self):
+        self.manager.check();self.wait()
+        before=self.manager.snapshot();asset=dict(self.manager.asset)
+        self.manager.opener=Mock(side_effect=OSError('synthetic network failure'))
+        self.manager.check(background=True)
+        self.assertEqual(self.wait(),before);self.assertEqual(self.manager.asset,asset)
+        self.assertFalse(self.manager._last_check_ok)
+
+    def test_manual_check_joins_background_request_and_reports_its_failure(self):
+        import threading
+        entered=threading.Event();release=threading.Event()
+        def opener(url):
+            entered.set();release.wait(2);raise OSError('synthetic failure')
+        self.manager.opener=opener
+        self.manager.check(background=True);self.assertTrue(entered.wait(1))
+        try:self.assertTrue(self.manager.check()['ok'])
+        finally:release.set()
+        self.assertEqual(self.wait()['status'],'error')
+
+    def test_notification_is_deduplicated_across_restarts_by_release_program(self):
+        self.manager.check();self.wait()
+        notice=self.manager.pending_notification();self.assertEqual(notice['version'],'1.4')
+        self.manager.mark_notified('unrelated');self.assertEqual(self.manager.pending_notification(),notice)
+        self.manager.mark_notified(notice['key']);self.assertIsNone(self.manager.pending_notification())
+        restarted=UpdateManager(self.root,self.resources,executable=self.exe,frozen=True,current='1.3')
+        restarted.asset=dict(self.manager.asset);self.assertIsNone(restarted.pending_notification())
+        restarted.asset['sha256']='0'*64
+        self.assertIsNotNone(restarted.pending_notification())
+        self.unchanged()
+
+    def test_monitor_schedule_and_failure_retry_only_read_metadata(self):
+        for success,interval in ((True,21600),(False,900)):
+            self.manager._monitor_started=False
+            stop=Mock();stop.is_set.return_value=False
+            stop.wait.side_effect=[False,False,True]
+            def check(**kwargs):
+                self.assertTrue(kwargs['background']);self.manager._last_check_ok=success
+                return {'ok':True}
+            class InlineThread:
+                def __init__(self,*,target,**kwargs):self.target=target
+                def start(self):self.target()
+            with patch.object(self.manager,'check',side_effect=check) as checking,patch('nx.updater.threading.Thread',InlineThread):
+                self.manager.start_monitor(stop)
+            checking.assert_called_once();self.assertEqual([c.args[0] for c in stop.wait.call_args_list],[10,.2,interval])
+
+    def test_monitor_skips_prepared_installation(self):
+        self.manager.state['status']='ready'
+        stop=Mock();stop.is_set.return_value=False;stop.wait.side_effect=[False,True]
+        class InlineThread:
+            def __init__(self,*,target,**kwargs):self.target=target
+            def start(self):self.target()
+        with patch.object(self.manager,'check') as checking,patch('nx.updater.threading.Thread',InlineThread):
+            self.manager.start_monitor(stop)
+        checking.assert_not_called()
+
     def test_changed_staged_exe_cannot_launch_helper(self):
         self.download()
         (self.manager.batch/'ChatGPTnx.new.exe').write_bytes(b'MZ-corrupt')

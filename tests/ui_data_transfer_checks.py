@@ -16,7 +16,7 @@ from nx.quota import normalize_limits
 from playwright.async_api import async_playwright
 
 async def main(browser,output):
-    checks=[];errors=[];services=[]
+    checks=[];errors=[];services=[];calls=[]
     with tempfile.TemporaryDirectory() as temporary,ExitStack() as cleanup:
         task=Path(temporary);backup=task/'portable.nxbackup';email='portable@example.com'
         def setup(name,seed):
@@ -31,7 +31,7 @@ async def main(browser,output):
                 write_credential_bytes(paths.auth,auth(email))
                 key=account_identity_key(paths.snapshot(email),email)
                 service.state.update(account_meta={email:{'alias':'可移植账号','subscription_date':'2026-12-31'}},cache={'updated':int(time.time()),'current':email,'accounts':[normalize_limits(limits(),email)]},
-                    usage={email:{'ok':True,'source':SOURCE,'identity_key':key,'fetched_at':1900000000,'summary':{'lifetimeTokens':123},'dailyUsageBuckets':[{'startDate':'2026-11-01','tokens':123}]}})
+                    usage={email:{'ok':True,'source':SOURCE,'identity_key':key,'fetched_at':int(time.time())-100,'summary':{'lifetimeTokens':123},'dailyUsageBuckets':[{'startDate':'2026-11-01','tokens':123}]}})
             host=Mock();host.choose_backup_file.return_value={'ok':True,'path':str(backup)}
             return service,Bridge(service,host)
         first,first_bridge=setup('first',True)
@@ -41,7 +41,9 @@ async def main(browser,output):
             async def load(bridge):
                 page=await engine.new_page(viewport={'width':312,'height':458},reduced_motion='reduce')
                 page.on('pageerror',lambda e:errors.append(str(e)))
-                async def native(method,args):return await asyncio.to_thread(getattr(bridge,method),*args)
+                async def native(method,args):
+                    calls.append(method)
+                    return await asyncio.to_thread(getattr(bridge,method),*args)
                 await page.expose_function('nativeCall',native)
                 html=panel(demo=False).replace('window.NX_CONFIG=','window.pywebview={api:new Proxy({},{get:(_,method)=>(...args)=>window.nativeCall(method,args)})};window.NX_CONFIG=',1)
                 await page.set_content(html);await page.evaluate("window.dispatchEvent(new Event('pywebviewready'))")
@@ -53,6 +55,11 @@ async def main(browser,output):
             await page.locator('[data-action="transfer-export"]').click()
             await page.locator('#backup-password').fill('synthetic-password-2026')
             await page.locator('#backup-confirm').fill('synthetic-password-2026')
+            await page.locator('.sheet-head [data-action="back"]').click()
+            await page.locator('[data-action="transfer-export"]').click()
+            checks.append({'name':'leaving-export-clears-password-fields','ok':await page.locator('#backup-password').input_value()=='' and await page.locator('#backup-confirm').input_value()==''})
+            await page.locator('#backup-password').fill('synthetic-password-2026')
+            await page.locator('#backup-confirm').fill('synthetic-password-2026')
             await page.locator('[data-action="export-save"]').click()
             await page.wait_for_function("document.querySelector('.transfer-outcome h3')?.textContent==='备份已导出'")
             checks.append({'name':'production-export-writes-encrypted-file','ok':backup.exists() and b'synthetic-refresh' not in backup.read_bytes() and email.encode() not in backup.read_bytes()})
@@ -61,9 +68,19 @@ async def main(browser,output):
             await page.locator('[data-action="transfer-import"]').click()
             await page.locator('[data-action="import-file"]').click()
             await page.locator('#backup-unlock').fill('incorrect-password')
-            await page.locator('[data-action="import-unlock"]').click()
+            before=calls.count('backup_unlock')
+            await page.locator('[data-action="import-unlock"]').evaluate('(b)=>{b.click();b.click();}')
             await page.wait_for_function("document.querySelector('#transfer-error')?.textContent.includes('密码不正确')")
             checks.append({'name':'wrong-password-stays-on-unlock','ok':await page.locator('#backup-unlock').is_visible() and not second.accounts.all()})
+            checks.append({'name':'repeated-unlock-uses-one-operation','ok':calls.count('backup_unlock')==before+1})
+            await page.locator('.sheet-head [data-action="back"]').click()
+            await page.wait_for_function("document.querySelector('#sheet').hidden||!document.querySelector('#backup-unlock')")
+            for _ in range(30):
+                if second.backups.encrypted is None:break
+                await asyncio.sleep(.02)
+            checks.append({'name':'leaving-import-releases-native-buffer','ok':second.backups.encrypted is None and second.backups.document is None})
+            await page.locator('[data-action="transfer-import"]').click()
+            await page.locator('[data-action="import-file"]').click()
             await page.locator('#backup-unlock').fill('synthetic-password-2026')
             await page.locator('[data-action="import-unlock"]').click()
             await page.locator('[data-action="import-start"]').wait_for()

@@ -3,14 +3,13 @@
 window.NXDataTransfer = (() => {
   const pages=new Set(['data-transfer','data-export','data-import','uninstall']);
   let state=null,context=null,ticket=0;
-  const copy=value=>JSON.parse(JSON.stringify(value));
   const filename=()=>`ChatGPTnx-${new Date().toLocaleDateString('sv-SE')}.nxbackup`;
   function reset(c){
     ticket++;
     state={selected:new Set(c.data.accounts.map(a=>a.email)),usage:true,preferences:true,archived:false,
       password:'',confirm:'',exportStage:'edit',importStage:'choose',file:'',unlock:'',error:'',
       merge:'merge',importSelected:new Set(),keep:true,uninstallStage:'confirm',blocked:false,
-      imported:false,openAccounts:false,loadedAccounts:null,archivedCount:0,exportFilename:'',result:null};
+      imported:false,openAccounts:false,loadedAccounts:null,archivedCount:0,exportFilename:'',result:null,pending:false};
   }
   function init(params,c){reset(c);window.NXDataDemo?.init(params,c,state);}
   function button(c,text,action,options={}){
@@ -23,11 +22,11 @@ window.NXDataTransfer = (() => {
     return `<div class="transfer-option${row?' collection-row':''}"><span class="transfer-copy"><strong>${c.esc(title)}</strong><small>${c.esc(note)}</small></span>${c.selectionButton({label:title,checked,action:'transfer-toggle',email:key})}</div>`;
   }
   function field(c,id,label,value,autocomplete='new-password'){
-    return `<label class="transfer-field" for="${id}"><span>${c.esc(label)}</span><input class="field" type="password" id="${id}" value="${c.esc(value)}" autocomplete="${autocomplete}" maxlength="128" aria-describedby="transfer-error transfer-password-help"></label>`;
+    return `<label class="transfer-field" for="${id}"><span>${c.esc(label)}</span><input class="field" type="password" id="${id}" value="${c.esc(value)}" autocomplete="${autocomplete}" maxlength="256" aria-describedby="transfer-error transfer-password-help"></label>`;
   }
   function error(){return `<p id="transfer-error" class="transfer-error" role="alert" ${state.error?'':'hidden'}>${window.NXComponents.esc(state.error)}</p>`;}
   function count(c){return c.data.accounts.filter(a=>state.selected.has(a.email)).length+(state.archived?state.archivedCount:0);}
-  function validPassword(){return state.password.length>=8&&state.password===state.confirm;}
+  function validPassword(){const size=[...state.password].length;return size>=8&&size<=128&&state.password===state.confirm;}
   function packageRows(c){
     return `<div class="transfer-facts"><div><span>账号资料</span><strong>${count(c)} 个账号</strong></div><div><span>用量与额度</span><strong>${state.usage?'已包含':'未包含'}</strong></div><div><span>通用设置</span><strong>${state.preferences?'已包含':'未包含'}</strong></div></div>`;
   }
@@ -53,7 +52,7 @@ window.NXDataTransfer = (() => {
           ['通用设置','外观、通知与接续消息','preferences',state.preferences]
         ],item=>option(c,...item,true),{label:'随附资料'}),[state.usage?'用量':'',state.preferences?'设置':'',state.archived?'归档':''].filter(Boolean).join('、')||'仅账号')}</div>
         <div class="transfer-passwords">${field(c,'backup-password','备份密码',state.password)}${field(c,'backup-confirm','确认密码',state.confirm)}</div>
-        <p id="transfer-password-help" class="transfer-help">至少 8 位，导入备份时需要此密码。</p>${error()}`;
+        <p id="transfer-password-help" class="transfer-help">8–128 位，导入时需要此密码。</p>${error()}`;
       foot=button(c,'导出加密备份','export-save',{disabled:!count(c)||!validPassword()});
     }
     return {title:'导出数据',body,foot,cls:'transfer-body',footClass:'transfer-footer'};
@@ -111,7 +110,24 @@ window.NXDataTransfer = (() => {
     if(page==='uninstall')return uninstallView(c);
     return {title:'导入与导出',cls:'transfer-body',body:`<p class="transfer-intro">把账号与记录带到另一台电脑，或保存一份备份。</p><div class="settings-list">${c.link('','导出数据','transfer-export')}${c.link('','导入备份','transfer-import')}</div><section class="transfer-scope"><h3>随备份一起迁移</h3><ul><li>账号、昵称与会员信息</li><li>用量历史、最近额度及采集时间</li><li>外观、通知与接续消息</li></ul><p class="transfer-help">导出时可选择账号和资料范围，备份由密码加密。</p></section>`};
   }
-  function busy(page){return page==='data-export'&&state?.exportStage==='working'||page==='data-import'&&state?.importStage==='working'||page==='uninstall'&&state?.uninstallStage==='working';}
+  function busy(page){return pages.has(page)&&!!(state?.pending||page==='data-export'&&state?.exportStage==='working'||page==='data-import'&&state?.importStage==='working'||page==='uninstall'&&state?.uninstallStage==='working');}
+  function clearPasswords(){
+    if(!state)return;
+    state.password=state.confirm=state.unlock='';
+    for(const id of ['backup-password','backup-confirm','backup-unlock']){
+      const input=document.getElementById(id);
+      if(input){input.value='';input.removeAttribute('value');}
+    }
+  }
+  function leave(page,next,c){
+    if(!pages.has(page)||page===next||!state)return;
+    clearPasswords();
+    if(page==='data-import'){
+      ticket++;state.loadedAccounts=null;state.file='';state.importSelected.clear();state.importStage='choose';
+      c.api('backup_clear').catch(()=>{});
+    }
+  }
+  function hidden(page,c){if(busy(page))clearPasswords();else leave(page,null,c);}
   async function perform(c,key,page,method,args=[],done=null){
     const previous=state[key],current=++ticket;
     state[key]='working';state.error='';c.render();
@@ -126,28 +142,31 @@ window.NXDataTransfer = (() => {
     if(c.ui.page===page)c.render();
   }
   async function choose(c){
-    state.error='';
+    const current=++ticket;state.error='';state.pending=true;c.render();
     try{
       const result=await c.api('backup_choose');
+      if(current!==ticket)return;
       if(!result?.ok)throw new Error(result?.error||'无法选择备份');
       if(result.cancelled)return;
       state.file=result.filename;state.unlock='';state.importStage='unlock';state.loadedAccounts=null;
-    }catch(error){state.error=error.message;}
-    c.render();
+    }catch(error){if(current===ticket)state.error=error.message;}
+    finally{if(current===ticket){state.pending=false;c.render();}}
   }
   async function unlock(c){
-    state.error='';
+    const current=++ticket;state.error='';state.pending=true;c.render();
     try{
       const result=await c.api('backup_unlock',state.unlock);
+      if(current!==ticket)return;
       if(!result?.ok)throw new Error(result?.error||'无法解锁备份');
       state.loadedAccounts=result.accounts;state.importSelected=new Set(result.accounts.map(a=>a.email));
       state.usage=result.usage;state.preferences=result.preferences;state.importStage='review';state.unlock='';
-    }catch(error){state.error=error.message;}
-    c.render();
+    }catch(error){if(current===ticket)state.error=error.message;}
+    finally{if(current===ticket){state.pending=false;c.render();}}
   }
   function handle(b,c){
     const action=b.dataset.action;
     if(!/^(transfer-|export-|import-|uninstall-)/.test(action))return false;
+    if(busy(c.ui.page))return true;
     context=c;if(!state)reset(c);
     const key=b.dataset.email;
     switch(action){
@@ -185,5 +204,5 @@ window.NXDataTransfer = (() => {
     if(button)button.disabled=!count(context)||!validPassword();
     const unlock=document.querySelector('[data-action="import-unlock"]');if(unlock)unlock.disabled=!state.unlock;
   });
-  return {init,view,handle,busy};
+  return {init,view,handle,busy,leave,hidden};
 })();

@@ -429,6 +429,7 @@ class Bridge:
         if not chosen.get('ok') or chosen.get('cancelled'):return chosen
         return self._backup_call('select',chosen['path'])
     def backup_unlock(self,password): return self._backup_call('unlock',password)
+    def backup_clear(self): return self._backup_call('clear')
     def backup_import(self,options): return self._backup_call('import_selected',options)
     def backup_export(self,options,password):
         chosen=self._host.choose_backup_file(True)
@@ -1113,6 +1114,9 @@ class Desktop:
     def show_uninstall(self):
         self._show_view('workspace',"window.nxOpenUninstall && window.nxOpenUninstall()")
 
+    def show_update(self):
+        self._show_view('workspace',"window.nxOpenUpdate && window.nxOpenUpdate()")
+
     def watch_application_requests(self):
         from .installation import REQUEST
         request=self.service.paths.data/REQUEST
@@ -1373,6 +1377,7 @@ class Desktop:
                 if self.icon and not self.visible:
                     self.icon.notify(login_result['message'], 'ChatGPTnx')
             settings = data['settings']
+            self._notify_update()
             self.hotkeys.configure([(item['email'], item['shortcut']) for item in data['hotkeys']])
             account = next((a for a in data['accounts'] if a['email'] == data['current']), None)
             title = 'ChatGPTnx'
@@ -1402,6 +1407,17 @@ class Desktop:
                         self.icon.notify('当前账号额度已用完，正在自动接力。', 'ChatGPTnx')
             if data.get('last_error'):
                 self.icon.title = ('ChatGPTnx · 操作未完成 · ' + data['last_error']['message'])[:127]
+
+    def _notify_update(self):
+        if not self.icon:
+            return
+        notice = self.service.updater.pending_notification()
+        if notice:
+            try:
+                if self.icon.notify(f'发现 ChatGPTnx {notice["version"]} 更新，点击查看。', 'ChatGPTnx', action=self.show_update):
+                    self.service.updater.mark_notified(notice['key'])
+            except Exception as error:
+                self.service.log.warning('update_notice_failed type=%s', type(error).__name__)
 
     def _notify_stale_credentials(self, data):
         """Notify auth loss and access denial separately, without guessing bans."""

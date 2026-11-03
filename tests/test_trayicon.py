@@ -131,6 +131,22 @@ class TrayTests(unittest.TestCase):
             self.icon._wndproc(HWND, tray.WM_TRAYCALLBACK, 1 << 16, event)
         self.assertEqual(self.clicked.call_count, 2)
 
+    def test_update_notification_click_uses_its_own_destination(self):
+        self.icon._register_icon('startup')
+        open_update=Mock()
+        self.assertTrue(self.icon.notify('发现更新','ChatGPTnx',action=open_update))
+        self.icon._wndproc(HWND,tray.WM_TRAYCALLBACK,0,0x405)
+        open_update.assert_called_once();self.clicked.assert_not_called()
+        self.icon.notify('普通提示','ChatGPTnx')
+        self.icon._wndproc(HWND,tray.WM_TRAYCALLBACK,0,0x405)
+        self.clicked.assert_called_once()
+
+    def test_expired_notification_does_not_retain_old_destination(self):
+        self.icon._register_icon('startup');open_update=Mock()
+        self.icon.notify('发现更新',action=open_update)
+        self.icon._wndproc(HWND,tray.WM_TRAYCALLBACK,0,0x404)
+        self.assertIsNone(self.icon._notification_action)
+
 
 if __name__ == '__main__':
     unittest.main()

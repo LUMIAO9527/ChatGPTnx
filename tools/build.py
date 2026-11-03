@@ -17,6 +17,7 @@ RESOURCES = ROOT / '_wip' / 'build' / 'resources'
 sys.path.insert(0, str(ROOT / 'src'))
 from nx.design import PANEL_CONFIG as CONFIG
 from nx.version import APP_VERSION
+from nx.account_meta import ALIAS_LIMIT
 from nx.resume_policy import ATTENTION_REASONS, RETRYABLE_REASONS
 from screen_catalog import CASES
 
@@ -28,16 +29,16 @@ def ui_source_digest():
     """One fingerprint for capture and gallery, including injected native policy."""
     sources = sorted((ROOT / 'src/ui').rglob('*')) + [
         ROOT/'tools/screen_catalog.py', ROOT/'src/nx/design.py',
-        ROOT/'src/nx/version.py', ROOT/'src/nx/resume_policy.py',
+        ROOT/'src/nx/version.py', ROOT/'src/nx/resume_policy.py', ROOT/'src/nx/account_meta.py',
         ROOT/'src/assets/nx-mark.svg', ROOT/'src/assets/support-alipay.png', ROOT/'tools/build.py']
     return hashlib.sha256(b''.join(p.read_bytes() for p in sources if p.is_file())).hexdigest()
 
 
 def panel(*, demo=False, proposal=None):
-    cfg = {**CONFIG, 'demo': demo, 'version': APP_VERSION}
+    cfg = {**CONFIG, 'demo': demo, 'version': APP_VERSION, 'limits': {'alias': ALIAS_LIMIT}}
     width,height=CONFIG['sizes']['home']
     if proposal: raise ValueError('Only the maintained product layout is supported')
-    css = f':root{{--panel-width:{width}px;--panel-height:{height}px;}}\n'+ '\n'.join((UI / name).read_text(encoding='utf-8') for name in STYLES)
+    css = f':root{{--panel-width:{width}px;--panel-height:{height}px;--list-page-size:{CONFIG["list_page_size"]};}}\n'+ '\n'.join((UI / name).read_text(encoding='utf-8') for name in STYLES)
     files = (['demo.js', 'data-preview.js'] if demo else []) + list(SCRIPTS) + (['preview.js'] if demo else [])
     js = '\n'.join((UI / f).read_text(encoding='utf-8') for f in files)
     if not demo and ('@example.com' in js or 'function seed(' in js):

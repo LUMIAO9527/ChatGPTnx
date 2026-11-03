@@ -7,7 +7,7 @@
 <p>用 n 个 Plus 账号，接力推进一个长任务。自动切号，继续原任务。</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.5.2" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.5.3" height="20">
 <img src="docs/images/badges/license.svg" alt="源码可查看 · 保留权利" height="20">
 </div>
 
@@ -26,7 +26,7 @@ https://github.com/user-attachments/assets/e1d24f80-0716-4bba-a024-7058e5c0b2e0
 - **凭据保护与诊断**：使用 Windows 当前用户加密保护账号快照，提供可预览、可复制的脱敏诊断摘要。
 - **资料迁移**：在设置中加密导出所选账号、昵称与会员资料，并可附带用量、额度记录和通用设置；在另一台电脑导入备份后继续使用。
 - **安装与卸载**：登记到 Windows“已安装的应用”，从系统或设置进入同一个卸载页，可选择保留账号与数据。
-- **登录与更新**：登录期间面板默认保持可见，检测到完整登录后自动验证并保存；可从设置检查、下载并安装 GitHub 正式更新。
+- **登录与更新**：登录期间面板默认保持可见，检测到完整登录后自动验证并保存；自动检查 GitHub 正式更新并通知，点击后进入更新页下载和安装。
 - **轻量化**：常驻 Windows 托盘，面板用完即收起，支持通知、快捷键、深浅外观及可切换的磨砂玻璃与纯色材质。
 
 ### 持续任务能力
@@ -59,11 +59,11 @@ ChatGPTnx 的核心，是让多个 Plus 账号接力推进同一个长任务。�
 
 ## 下载与运行
 
-当前版本为 **v1.5.2**。完整页面与状态可用根目录的 `ChatGPTnx-v1.5.2.html` 离线查看。
+当前版本为 **v1.5.3**。完整页面与状态可用根目录的 `ChatGPTnx-v1.5.3.html` 离线查看。
 
-v1.5.2 统一首页、详情页和展开列表的布局与圆角，修正悬浮提示的位置，并支持账号与用量资料的加密迁移及系统卸载入口。切号后会重新核验接续连接，更新后未正常启动时会自动重启一次。
+v1.5.3 让手动指定的“下一棒”同时用于首页和自动接力，重启后继续保留；新增自动更新提醒，并加强资料迁移校验和卸载交接。
 
-公开发布版可从 [v1.5.2 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.5.2) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.5.2-source.zip`，完整演示可下载 `ChatGPTnx-v1.5.2.html`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用、Microsoft .NET Framework 4.6.2 或更高版本，以及 Microsoft Edge WebView2 Runtime。
+公开发布版可从 [v1.5.3 Release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.5.3) 下载 `ChatGPTnx.exe`；源码可下载 `ChatGPTnx-v1.5.3-source.zip`，完整演示可下载 `ChatGPTnx-v1.5.3.html`。需要 Windows 10 / 11 64 位、已安装并登录的 ChatGPT 桌面应用、Microsoft .NET Framework 4.6.2 或更高版本，以及 Microsoft Edge WebView2 Runtime。
 
 1. 首次启动会直接打开面板选择程序文件夹（推荐 `D:\ChatGPTnx`，选择前不会在原位置写入文件），之后从托盘打开面板。
 2. 点击“添加账号”，在 ChatGPT 完成登录；程序自动验证并保存。验证暂未完成时，可在面板点击“重试验证”。
@@ -75,11 +75,13 @@ v1.5.2 统一首页、详情页和展开列表的布局与圆角，修正悬浮�
 
 ## 演示与调试
 
-双击根目录的 [ChatGPTnx-v1.5.2.html](ChatGPTnx-v1.5.2.html)，或运行 `preview.cmd`。一个文件覆盖全部页面和关键状态，支持搜索、浅深色、模拟登录、更新状态以及调试报告导出。演示默认按可用空间放大并居中，也可切换到 100% 真实尺寸检查。所有数据均为合成数据，不访问本机账号，也不执行真实切号、下载或安装。
+双击根目录的 [ChatGPTnx-v1.5.3.html](ChatGPTnx-v1.5.3.html)，或运行 `preview.cmd`。一个文件覆盖全部页面和关键状态，支持搜索、浅深色、模拟登录、更新状态以及调试报告导出。演示默认按可用空间放大并居中，也可切换到 100% 真实尺寸检查。所有数据均为合成数据，不访问本机账号，也不执行真实切号、下载或安装。
 
 演示台提供全部界面检查与转场中间帧检查，方便复查布局变化、快速返回、原地展开、浮动提示、数据刷新和长更新说明。正式面板以统一规则衔接信息卡片、主按钮或头像；没有公共内容时采用正文整体过渡。
 
 维护时运行 `python tools/build.py` 和 `python tools/build_explorer.py`；`build.cmd` 也会同步生成总 HTML。构建玻璃宿主需要 Windows 10 / 11 SDK，发布程序已内置该组件。它直接嵌入正式 UI 组件，后续修改无需另写预览页面。Windows 原生窗口行为仍需在本机验证。
+
+组件尺寸、展开与分页、状态提示和流程规则见[面板与状态设计](docs/DESIGN.md)。
 
 ## 数据与隐私
 

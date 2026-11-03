@@ -4,7 +4,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 import copy
 import hashlib
-from datetime import date
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -19,7 +18,6 @@ import tempfile
 import threading
 import time
 import uuid
-import unicodedata
 from .storage import (Accounts, Paths, State, atomic_bytes, credential_metadata, identity,
                       account_identity_key, activity_identity_key, claims, fingerprint)
 from .credentials import (CredentialProtectionError, read_credential_bytes, write_credential_bytes,
@@ -180,7 +178,6 @@ class Service:
         self.last_error = None
         self.last_result = None
         self.recent_results = []
-        self.relay_pick = None  # one-shot UI choice; deliberately never persisted
         self._relay_wait_refresh_after = 0.0
         self._relay_wait_attempt_after = 0.0
         self.auto_relay_attempt = None
@@ -339,6 +336,14 @@ class Service:
         threading.Thread(target=work, daemon=True, name='nx-' + kind).start()
         return {'ok': True, 'accepted': True, 'operation_id': ident, 'source': source}
 
+    @property
+    def relay_pick(self):
+        return self.state.get('relay_pick')
+
+    @relay_pick.setter
+    def relay_pick(self, email):
+        self.state.update(relay_pick=email)
+
     def get_data(self):
         cache = self.state.get('cache')
         meta = self.state.get('account_meta', {})
@@ -385,13 +390,18 @@ class Service:
         add_state = self.state.get('adding')
         add_login_status = self._add_login_status(add_state, emails)
         settings = self.state.get('settings')
-        settings['relay_pick'] = self.relay_pick if self.relay_pick in emails else None
+        picked = self.relay_pick
+        if picked and (picked not in emails or picked == current_email):
+            self.relay_pick = picked = None
+        settings['relay_pick'] = picked
         excluded = set(settings.get('auto_relay_excluded') or [])
         ranked_all = relay_candidates(accounts, None)
         ranked = [a for a in ranked_all if a['email'] != current_email]
         ranked_auto = [a for a in ranked if a['email'] not in excluded]
-        recommended = next((a for a in ranked if a['email'] == settings['relay_pick']),
-                           ranked[0] if ranked else None)
+        recommended = next((a for a in accounts if a['email'] == picked), None) if picked else (
+            ranked[0] if ranked else None)
+        automatic = next((a for a in ranked_auto if a['email'] == picked), None) if picked else (
+            ranked_auto[0] if ranked_auto else None)
         return {'version': APP_VERSION, 'updated': cache.get('updated'), 'accounts': accounts,
                 'monitor_health': self.diagnostics.snapshot()['monitor'],
                 'current': current_email, 'operation': op,
@@ -410,7 +420,7 @@ class Service:
                              'registered': self.hotkey_status.get(email)} for email in emails],
                 'settings': settings, 'relay_wait': self.state.get('relay_wait'),
                 'relay_email': recommended.get('email') if recommended else None,
-                'auto_relay_email': ranked_auto[0]['email'] if ranked_auto and current_email not in excluded else None,
+                'auto_relay_email': automatic['email'] if automatic and current_email not in excluded else None,
                 'relay_order': [a['email'] for a in ranked_all],
                 'chatgpt_running': app_running,
                 'pending': pending, 'location': self._location_state(),
@@ -1765,24 +1775,11 @@ class Service:
     def update_account_meta(self, email, changes):
         if email not in self.accounts.all():
             return {'ok': False, 'error': '账号不存在'}
-        if not isinstance(changes, dict) or not changes or set(changes) - {'alias', 'subscription_date'}:
-            return {'ok': False, 'error': '账号信息字段不合法'}
-        patch = dict(changes)
-        if 'alias' in patch:
-            alias = patch['alias']
-            if not isinstance(alias, str) or len(alias.strip()) > 24 or any(unicodedata.category(c).startswith('C') for c in alias):
-                return {'ok': False, 'error': '昵称最多 24 个可显示字符'}
-            patch['alias'] = alias.strip()
-        if 'subscription_date' in patch:
-            value = patch['subscription_date']
-            if value not in (None, ''):
-                if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
-                    return {'ok': False, 'error': '日期格式应为 YYYY-MM-DD'}
-                try:
-                    date.fromisoformat(value)
-                except ValueError:
-                    return {'ok': False, 'error': '请输入有效的到期日期'}
-            patch['subscription_date'] = value or None
+        from .account_meta import validate
+        try:
+            patch = validate(changes)
+        except ValueError as error:
+            return {'ok': False, 'error': str(error)}
         # State.change locks read/merge/write and publishes only after disk success.
         saved = self.state.change('account_meta', lambda meta: {**meta, email: {
             **meta.get(email, {}), **patch}})
@@ -1808,6 +1805,7 @@ class Service:
 
     def start_poll(self):
         self.resumer.start()
+        self.updater.start_monitor(self.stop)
         def watch_work():
             delay = 2
             while not self.stop.wait(delay):

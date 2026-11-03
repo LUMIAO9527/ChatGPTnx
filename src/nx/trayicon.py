@@ -82,6 +82,7 @@ class TrayIcon:
         self._lock = threading.Lock()
         self._ready = threading.Event()
         self._wndproc_keepalive = None
+        self._notification_action = None
         self._thread = threading.Thread(target=self._loop, daemon=True, name='nx-tray')
 
     @property
@@ -97,15 +98,18 @@ class TrayIcon:
             with self._lock:
                 self._shell.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
 
-    def notify(self, message, title='ChatGPTnx'):
+    def notify(self, message, title='ChatGPTnx', *, action=None):
         data = self._base_nid()
         if not data:
-            return
+            return False
         data.uFlags = NIF_INFO | NIF_SHOWTIP
         data.szInfoTitle = str(title)[:63]
         data.szInfo = str(message)[:255]
         with self._lock:
-            self._shell.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data))
+            accepted = bool(self._shell.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(data)))
+            if accepted:
+                self._notification_action = action
+            return accepted
 
     def run_detached(self):
         self._thread.start()
@@ -181,7 +185,12 @@ class TrayIcon:
             return 0
         if message == WM_TRAYCALLBACK:
             event = lparam & 0xFFFF
-            if event == WM_LBUTTONUP:
+            if event == 0x405:  # NIN_BALLOONUSERCLICK
+                action, self._notification_action = self._notification_action, None
+                (action or self._default_action)()
+            elif event in (0x403, 0x404):  # NIN_BALLOONHIDE, NIN_BALLOONTIMEOUT
+                self._notification_action = None
+            elif event == WM_LBUTTONUP:
                 self._default_action()
             elif event in (WM_RBUTTONUP, WM_CONTEXTMENU):
                 self._show_menu(hwnd)

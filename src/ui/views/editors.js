@@ -7,7 +7,7 @@ window.NXEditors = (() => {
   }
   function account(c,a) {
     const key='meta:'+a.email,draft=c.ui.metaDrafts.get(a.email)||{};
-    const body=row({id:'alias',label:'昵称',value:draft.alias??a.alias??'',action:'save-alias',email:a.email,max:48})
+    const body=row({id:'alias',label:'昵称',value:draft.alias??a.alias??'',action:'save-alias',email:a.email,max:window.NX_CONFIG.limits.alias*2})
       +row({id:'manual-date',label:'会员期限',type:'date',value:draft.subscription_date??a.manual_subscription_date??'',action:'save-expiry',email:a.email})
       +'<span id="form-error" class="field-feedback" role="alert"></span>';
     return `<div class="account-editor">${window.NXSettingsContent.disclosure(c,key,'昵称与会员期限',body,a.alias||'未设置',{className:'detail-disclosure detail-item',summaryClass:'detail-line'})}</div>`;

@@ -141,6 +141,7 @@ def verify_product(work, executable, environment):
         assert result.returncode == 0, 'product_start_failed'
         check = wait_json(report, timeout=2)
         assert check['version'] == APP_VERSION and check['dependencies_ready'] is True
+        assert check.get('backup_crypto_version') == '50.0.2', 'patched_backup_dependency_missing'
         assert Path(check['launcher']) == target
         runtime = Path(check['runtime'])
         assert app / '_wip/runtime' in runtime.parents and runtime != old
@@ -152,7 +153,8 @@ def verify_product(work, executable, environment):
                   info['FileVersionLS'] >> 16, info['FileVersionLS'] & 65535)
         assert actual == tuple(map(int, APP_VERSION.split('.'))) + (0,)
         record = {'case': 'release-payload', 'version': APP_VERSION,
-                  'dependencies_ready': True, 'fresh_runtime': True, 'temporary_files_cleaned': True}
+                  'dependencies_ready': True, 'backup_crypto_version': check['backup_crypto_version'],
+                  'fresh_runtime': True, 'temporary_files_cleaned': True}
         write(work / 'product-results.json', record)
         print(json.dumps(record), flush=True)
         return record

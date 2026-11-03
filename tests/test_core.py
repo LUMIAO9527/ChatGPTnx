@@ -662,12 +662,14 @@ class TransactionTests(Fixture):
         self.assertFalse(self.service.set_preferences({'resume_message':'x'*201})['ok'])
         self.assertTrue(self.service.set_preferences({'resume_message':'请接着完成上个任务'})['ok'])
         self.assertEqual(self.service.get_data()['settings']['resume_message'],'请接着完成上个任务')
-    def test_relay_pick_is_one_shot_and_never_persisted(self):
+    def test_relay_pick_is_one_shot_and_survives_restart(self):
         self.assertTrue(self.service.set_relay_pick('b@example.com')['ok'])
         self.assertEqual(self.service.get_data()['settings']['relay_pick'],'b@example.com')
         self.assertNotIn('relay_pick',self.service.state.get('settings'))
+        self.assertEqual(State(self.paths).get('relay_pick'),'b@example.com')
         result=self.service.switch('b@example.com');self.assertTrue(result['accepted'])
         self.wait();self.assertIsNone(self.service.get_data()['settings']['relay_pick'])
+        self.assertIsNone(State(self.paths).get('relay_pick'))
     def test_relay_pick_rejects_current_account(self):
         self.assertFalse(self.service.set_relay_pick('a@example.com')['ok'])
     def exhaust_next(self, windows=(0,)):

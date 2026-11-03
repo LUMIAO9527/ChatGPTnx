@@ -36,9 +36,10 @@ window.NXDataDemo=(()=>{
     if(flow==='uninstall-working')state.uninstallStage='working';
     if(flow==='uninstall-done')state.uninstallStage='done';
   }
-  const handles=method=>['backup_info','backup_choose','backup_unlock','backup_export','backup_import','uninstall_app'].includes(method);
+  const handles=method=>['backup_info','backup_choose','backup_unlock','backup_clear','backup_export','backup_import','uninstall_app'].includes(method);
   async function call(method,...args){
     const c=context;
+    if(method==='backup_clear')return {ok:true};
     if(method==='backup_info')return {ok:true,archived_count:1};
     if(method==='backup_choose')return {ok:true,filename:filename()};
     if(method==='backup_unlock')return args[0]==='nx-demo-2026'?{ok:true,accounts:fixture(c),usage:true,preferences:true}:{ok:false,error:'密码不正确，请重新输入。'};

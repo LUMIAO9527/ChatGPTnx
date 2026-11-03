@@ -207,6 +207,8 @@
     const c=current();
     if(!data.settings.auto_relay&&valid(c)&&c.windows.some(w=>w.used>=100))
       return statusBar({text:'额度已耗尽 · 自动接力未开启',action:'settings',symbol:'info'});
+    if(data.update?.available&&!['downloading','installing'].includes(data.update.status)&&ui.page!=='update')
+      return statusBar({text:`发现 ${data.update.version} 更新 · 点击查看`,action:'open-update',symbol:'download'});
     return '';
   }
   const resumeContent=()=>window.NXViews.resume(viewContext());
@@ -263,11 +265,13 @@
     return `<header class="sheet-head">${tool('back','back','返回')}<h2 id="sheet-title" tabindex="-1">${esc(title)}</h2>${actions}${config.demo?'<span class="demo-tag">演示</span>':''}</header>`;
   }
   function show(page, target=null, push=true, saved=null) {
+    if(window.NXDataTransfer?.busy(ui.page))return;
     resetConfirmation=null;ui.resumeClearConfirm=false;
     const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message','resume-clear':'resume-history'};
     const initial=page;
     if(Object.hasOwn(aliases,page))page='settings';
     if(page==='edit')page='detail';
+    window.NXDataTransfer?.leave(ui.page,page,{api});
     window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','confirm','remove','reauth'].includes(page)?target:null,{from:ui.page||'home',to:page});
     const returningToSettings = page==='settings' && saved?.page==='settings';
     if(page==='settings' && !returningToSettings){ui.disclosures.clear();ui.collectionPages={};}
@@ -288,6 +292,8 @@
     window.NXMotion?.paint(sheet);
   }
   function closeSheet(animate=true) {
+    if(window.NXDataTransfer?.busy(ui.page))return;
+    window.NXDataTransfer?.leave(ui.page,null,{api});
     if(ui.page&&animate)window.NXMotion?.begin(sheet, -1,null,{from:ui.page,to:'home'});
     else window.NXMotion?.stop();
     resetConfirmation=null;ui.resumeClearConfirm=false;
@@ -469,7 +475,7 @@
     const id=field==='alias'?'alias':'manual-date',node=$('#'+id);
     if(!node)return;
     const value=field==='alias'?node.value.trim():node.value;
-    if(field==='alias'&&([...value].length>24||/\p{C}/u.test(value))){fieldError('#'+id,'昵称最多 24 个可显示字符');return;}
+    if(field==='alias'&&([...value].length>config.limits.alias||/\p{C}/u.test(value))){fieldError('#'+id,`昵称最多 ${config.limits.alias} 个可显示字符`);return;}
     if(field==='subscription_date'&&!node.validity.valid){fieldError('#'+id,'请输入有效的到期日期');return;}
     await saveInline(source,{id,key:email+':'+id,method:'update_account_meta',args:[email,{[field]:value|| (field==='alias'?'':null)}],value,
       commit:result=>{const a=data.accounts.find(a=>a.email===email);if(a){if(field==='alias')a.alias=result.meta.alias;else a.manual_subscription_date=result.meta.subscription_date;}},
@@ -936,8 +942,9 @@
   }
   systemAppearance.addEventListener('change',()=>applyAppearance(data.settings.appearance));
   window.nxOpenUninstall=()=>{panelVisible=true;window.NXDataTransfer.handle({dataset:{action:"uninstall-open"}},{...viewContext(),show,back,render:()=>renderSheet()});poll();};
+  window.nxOpenUpdate=()=>{panelVisible=true;show('update');poll();};
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
-  window.nxHidden=()=>{window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
+  window.nxHidden=()=>{window.NXDataTransfer?.hidden(ui.page,{api});window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
   window.addEventListener('pywebviewready',poll);
   window.addEventListener('resize',()=>{window.NXMotion?.stop();if(config.demo)setSize(ui.page?'workspace':'home');});
   setInterval(()=>{
