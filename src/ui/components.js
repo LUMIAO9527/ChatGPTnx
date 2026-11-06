@@ -13,7 +13,7 @@ window.NXComponents = (() => {
     expand:'M3 7V3h4M11 3h4v4M15 11v4h-4M7 15H3v-4', stack:'M9 2l7 4-7 4-7-4 7-4M2 9l7 4 7-4M2 12l7 4 7-4',
     external:'M10 3h5v5M15 3L8 10M7 4H3v11h11v-4', clock:'M9 5v4l3 2M16 9A7 7 0 1 1 2 9a7 7 0 0 1 14 0',
     keyboard:'M2 5h14v9H2zM4 8h1M7 8h1M10 8h1M13 8h1M4 11h7M13 11h1',
-    settings:'M9 6.5A2.5 2.5 0 1 1 9 11.5 2.5 2.5 0 0 1 9 6.5ZM9 2v2M9 14v2M2 9h2M14 9h2M4 4l1.4 1.4M12.6 12.6 14 14M14 4l-1.4 1.4M5.4 12.6 4 14'
+    settings:'M8.31 2.03L9.69 2.03L10.60 3.74L11.59 4.15L13.44 3.59L14.41 4.56L13.85 6.41L14.26 7.40L15.97 8.31L15.97 9.69L14.26 10.60L13.85 11.59L14.41 13.44L13.44 14.41L11.59 13.85L10.60 14.26L9.69 15.97L8.31 15.97L7.40 14.26L6.41 13.85L4.56 14.41L3.59 13.44L4.15 11.59L3.74 10.60L2.03 9.69L2.03 8.31L3.74 7.40L4.15 6.41L3.59 4.56L4.56 3.59L6.41 4.15L7.40 3.74ZM11.25 9A2.25 2.25 0 1 1 6.75 9A2.25 2.25 0 0 1 11.25 9Z'
   };
   /* GitHub mark: Primer Octicons, Copyright (c) GitHub, Inc. MIT License.
      Permission is hereby granted, free of charge, to any person obtaining a copy

@@ -67,6 +67,26 @@ class TrayTests(unittest.TestCase):
         self.icon._wndproc(HWND, tray.WM_TRAYCALLBACK, 1 << 16, tray.WM_LBUTTONUP)
         self.clicked.assert_called_once_with()
 
+    def test_system_theme_change_loads_the_matching_icon_and_releases_the_old_handle(self):
+        self.icon._theme_icons = {'light': 'light.ico', 'dark': 'dark.ico'}
+        self.icon._loaded_icon_path = 'light.ico'
+        with patch.object(tray, 'taskbar_theme', return_value='light'), \
+                patch.object(tray, '_load_hicon', return_value=HICON+1) as load:
+            self.icon._wndproc(HWND, tray.WM_SETTINGCHANGE, 0, 0)
+        load.assert_called_once_with('dark.ico', 16)
+        self.assertEqual(self.icon._hicon, HICON+1)
+        self.user.DestroyIcon.assert_called_once_with(HICON)
+        self.assertEqual(self.records[-2][5], HICON+1)
+
+    def test_failed_theme_icon_load_keeps_the_previous_working_icon(self):
+        self.icon._theme_icons = {'light': 'light.ico', 'dark': 'missing.ico'}
+        self.icon._loaded_icon_path = 'light.ico'
+        with patch.object(tray, 'taskbar_theme', return_value='light'), \
+                patch.object(tray, '_load_hicon', side_effect=FileNotFoundError):
+            self.icon._wndproc(HWND, tray.WM_THEMECHANGED, 0, 0)
+        self.assertEqual(self.icon._hicon, HICON)
+        self.user.DestroyIcon.assert_not_called()
+
     def test_temporarily_unavailable_shell_retries_and_cancels_timer_on_success(self):
         self.available = False
         self.assertFalse(self.icon._register_icon('taskbar'))

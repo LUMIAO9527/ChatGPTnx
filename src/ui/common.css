@@ -27,7 +27,12 @@ body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-sh
 .header { display: flex; align-items: center; gap: 5px; flex: 0 0 34px; min-height: 34px; }
 .brand { display: flex; align-items: center; gap: 9px; margin-right: auto; font-size: var(--font-emphasis); font-weight: 650; letter-spacing: -.35px; }
 .mark { font-size: var(--font-brand-mark); font-weight: 750; letter-spacing: -1.5px; display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; background: var(--ink); color: var(--inverse); }
+  width: 30px; height: 30px; background: transparent; color: var(--inverse); }
+.mark > svg { width:100%; height:100%; display:block; flex-shrink:0; }
+.mark rect { fill:var(--brand-tile); stroke:var(--brand-edge); stroke-width:.7; }
+.mark g { stroke:var(--brand-ink); }
+:root { --brand-tile:#171717; --brand-ink:#fff; --brand-edge:transparent; }
+:root[data-appearance="dark"] { --brand-tile:#fff; --brand-ink:#171717; --brand-edge:#d9d9d9; }
 /* NX-CONTROLS-BEGIN
    A single skin for the product and its offline demonstration console.
    Action radius = short-side size * 3/8. Content and focus need >=4px.
@@ -167,7 +172,7 @@ button.control--embedded:focus-visible { outline-offset:-2px; }
 .sheet-foot.update-footer { height: 35px; min-height: 35px; padding: 0 26px 18px; border: 0; display: block; text-align: center; }
 .update-identity { display: flex; flex-direction: column; align-items: center; }
 .update-identity > .update-mark { width: 40px; height: 40px; border-radius: 13px; flex-shrink: 0; }
-.update-mark svg { width: 30px; height: 30px; }
+.update-mark svg { width: 100%; height: 100%; }
 .update-brand { font-size: 20px; font-weight: 650; letter-spacing: -.4px; line-height: 27px; margin-top: 9px; }
 .update-version { font-size: 11px; line-height: 18px; color: var(--muted); margin-top: 2px; }
 .update-state { width: 100%; min-height: 0; display: flex; flex-direction: column; gap: 4px; }

@@ -1,23 +1,27 @@
-"""Regenerate the committed Windows icon from the same SVG used in the UI.
-Optional asset-authoring dependencies: Pillow and cairosvg; normal app builds
-copy the committed nx.ico and do not require either dependency.
-"""
+"""Render the canonical n× geometry in both platform icon palettes."""
 from pathlib import Path
-import io
-import re
-ROOT=Path(__file__).resolve().parents[1]
+import shutil
+import subprocess
+ROOT = Path(__file__).resolve().parents[1]
 
 def build(output=None):
-    import cairosvg
     from PIL import Image
-    source=(ROOT/'src/assets/nx-mark.svg').read_text(encoding='utf-8')
-    source=re.sub(r' aria-hidden="true"','',source)
-    source=source.replace('stroke="currentColor"','stroke="#ffffff"')
-    source=source.replace('<path ', '<rect x="0" y="0" width="32" height="32" rx="10" fill="#171717"/><path ',1)
-    png=cairosvg.svg2png(bytestring=source.encode(),output_width=256,output_height=256)
-    image=Image.open(io.BytesIO(png)).convert('RGBA')
-    output=Path(output or ROOT/'src/assets/nx.ico')
-    image.save(output,format='ICO',sizes=[(n,n) for n in (16,20,24,32,40,48,64,128,256)])
-    return output
+    folder = ROOT / '_wip/icon-render'
+    folder.mkdir(parents=True, exist_ok=True)
+    for theme in ('dark', 'light'):
+        raster = folder / f'nx-{theme}.png'
+        subprocess.run(['powershell.exe', '-NoProfile', '-Sta', '-ExecutionPolicy', 'Bypass',
+            '-File', str(ROOT/'tools/render_mark.ps1'), '-Source', str(ROOT/'src/assets/nx-mark.svg'),
+            '-Output', str(raster), '-Theme', theme], check=True)
+        with Image.open(raster) as rendered:
+            image = rendered.convert('RGBA')
+        image.save(ROOT/f'src/assets/nx-{theme}.ico', format='ICO',
+                   sizes=[(n,n) for n in (16,20,24,32,40,48,64,128,256)])
+        image.resize((256,256), Image.Resampling.LANCZOS).save(ROOT/f'docs/images/nx-mark-{theme}.png')
+    result = Path(output or ROOT/'src/assets/nx.ico')
+    shutil.copy2(ROOT/'src/assets/nx-dark.ico', result)
+    shutil.copy2(ROOT/'docs/images/nx-mark-dark.png', ROOT/'docs/images/nx-mark.png')
+    return result
 
-if __name__=='__main__': print(build())
+if __name__ == '__main__':
+    print(build())

@@ -1,11 +1,11 @@
 /* One native backdrop under the whole panel; controls keep their text opaque. */
 :root[data-material="glass"] {
-  --bg: rgb(247 249 253 / .58); --surface: rgb(255 255 255 / .61);
-  --surface-2: rgb(207 214 227 / .38); --line: rgb(81 96 119 / .13);
+  --bg: rgb(247 249 253 / .58); --surface: rgb(255 255 255 / .30);
+  --surface-2: rgb(207 214 227 / .25); --line: rgb(81 96 119 / .16);
   --muted: #515c6c; --glass-edge: rgb(255 255 255 / .77);
-  --glass-card-edge: rgb(255 255 255 / .72);
+  --glass-card-edge: rgb(255 255 255 / .52);
   --glass-card-shadow: 0 3px 14px rgb(26 42 65 / .045);
-  --status-surface: rgb(248 250 255 / .97); --status-edge: rgb(109 126 153 / .22);
+  --status-surface: rgb(248 250 255 / .80); --status-edge: rgb(109 126 153 / .22);
   --shadow-window: 0 22px 65px rgb(17 31 53 / .18), 0 2px 10px rgb(17 31 53 / .08);
 }
 :root[data-material="glass"][data-appearance="dark"] {

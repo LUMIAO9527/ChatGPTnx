@@ -116,7 +116,7 @@ def main():
             sample={'schema':1,'accounts':[{'email':'runtime-check@invalid.local','credential':None}]}
             if unseal(seal(sample,'runtime-check-password'),'runtime-check-password')!=sample:
                 raise RuntimeError('backup runtime check failed')
-            required = ('panel.html', 'nx.ico', 'switch_account.ps1',
+            required = ('panel.html', 'nx.ico', 'nx-light.ico', 'nx-dark.ico', 'switch_account.ps1',
                         'continue_in_desktop.ps1', 'ChatGPTnx.Update.exe', 'uninstall.ps1')
             if not all((resources / name).is_file() for name in required):
                 raise RuntimeError('runtime resources missing')

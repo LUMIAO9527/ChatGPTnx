@@ -101,6 +101,8 @@ def build():
     (RESOURCES / 'demo.html').write_text(panel(demo=True), encoding='utf-8')
     (RESOURCES / 'version.txt').write_text(windows_version(), encoding='utf-8')
     (RESOURCES / 'nx.ico').write_bytes((ROOT / 'src' / 'assets' / 'nx.ico').read_bytes())
+    for theme in ('light', 'dark'):
+        (RESOURCES / f'nx-{theme}.ico').write_bytes((ROOT/'src/assets'/f'nx-{theme}.ico').read_bytes())
     (RESOURCES / 'switch_account.ps1').write_bytes((ROOT / 'src' / 'switch_account.ps1').read_bytes())
     (RESOURCES / 'continue_in_desktop.ps1').write_bytes((ROOT / 'src' / 'continue_in_desktop.ps1').read_bytes())
     (RESOURCES / 'uninstall.ps1').write_bytes((ROOT / 'src' / 'uninstall.ps1').read_bytes())

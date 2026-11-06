@@ -29,6 +29,8 @@ if errorlevel 1 (
   --paths "%CD%\src" ^
   --add-data "%BUILD_ROOT%\resources\panel.html;." ^
   --add-data "%BUILD_ROOT%\resources\nx.ico;." ^
+  --add-data "%BUILD_ROOT%\resources\nx-light.ico;." ^
+  --add-data "%BUILD_ROOT%\resources\nx-dark.ico;." ^
   --add-data "%BUILD_ROOT%\resources\switch_account.ps1;." ^
   --add-data "%BUILD_ROOT%\resources\continue_in_desktop.ps1;." ^
   --add-data "%BUILD_ROOT%\resources\uninstall.ps1;." ^
