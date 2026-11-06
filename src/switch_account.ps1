@@ -453,14 +453,17 @@ $workspaceTransaction = $null
 try {
     if ($hadAuth) {
         $null = Read-Identity $AuthFile  # refuse destructive operations if unreadable
-        Write-ProtectedCredential (Read-CredentialBytes $AuthFile) $backup
+        if (-not $RestoreProjects) { Write-ProtectedCredential (Read-CredentialBytes $AuthFile) $backup }
     }
     Stop-App
     $appStopped = $true
     # Refresh snapshot only after the desktop process has stopped writing.
     if (Test-Path -LiteralPath $AuthFile) {
-        $null = Save-Snapshot
-        Write-ProtectedCredential (Read-CredentialBytes $AuthFile) $backup
+        if ($RestoreProjects) { $null = Read-Identity $AuthFile }
+        else {
+            $null = Save-Snapshot
+            Write-ProtectedCredential (Read-CredentialBytes $AuthFile) $backup
+        }
         $hadAuth = $true
     }
     if ($Park) {

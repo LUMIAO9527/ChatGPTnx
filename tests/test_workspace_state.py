@@ -236,6 +236,8 @@ if($script:starts -ne 1){throw 'Unexpected restart count'}
         self.assertEqual(result['local-projects'], workspace()['local-projects'])
         self.assertEqual(result['thread-project-assignments'], workspace()['thread-project-assignments'])
         self.assertEqual(result['electron-account-renderer-state-v1']['owner'], NEW)
+        self.assertEqual(list(self.snapshots.glob('*.json')), [])
+        self.assertEqual(list((self.snapshots/'recovery').glob('auth-recovery-*.json')), [])
 
     def test_repair_dry_run_does_not_create_files_or_stop_the_desktop(self):
         original = json.dumps(document(False)).encode()
