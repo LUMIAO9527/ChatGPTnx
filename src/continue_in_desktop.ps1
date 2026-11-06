@@ -235,9 +235,7 @@ function Wait-ResumeReady([int]$TimeoutMs=6000) {
         $document = Find-Target
         $key = if ($null -ne $document) { Runtime-Key $document } else { '' }
         if ($key -and $key -eq $last) { $stable++ } elseif ($key) { $last = $key; $stable = 1 } else { $stable = 0 }
-        if ($stable -ge 2) {
-            return [pscustomobject]@{Document=$document; Key=$key}
-        }
+        if ($stable -ge 2) { return }
         Start-Sleep -Milliseconds 150
     } while ([DateTime]::UtcNow -lt $deadline)
     Skip 'target_not_visible'
@@ -301,45 +299,46 @@ function Invoke-NativeClick($point) {
     if ($sent -ne 3) { Skip 'native_continue' }
     Write-Output 'clicked:native_continue'
 }
-function Resume-Task($document) {
-    $document = Assert-Target
-    $originalKey = Runtime-Key $document
-    if (-not $originalKey) { Skip 'target_changed' }
-    # The button can render just after the task document.
+function Resume-Task {
+    # Activating Chromium can rebuild the accessibility tree for the same task.
+    # Capture the document and button after focus, using the original pinned window.
+    if (-not $DryRun) { Focus-ResumeWindow }
+    Wait-ResumeReady
     $deadline = [DateTime]::UtcNow.AddMilliseconds(1500)
+    $failure = 'native_continue_unavailable'
     do {
-        $buttons = @(Native-Continue $document)
-        if ($buttons.Count -gt 0) { break }
-        if ([DateTime]::UtcNow -ge $deadline) { break }
-        Start-Sleep -Milliseconds 250
         $document = Assert-Target
-        if ((Runtime-Key $document) -ne $originalKey) { Skip 'target_changed' }
+        $documentKey = Runtime-Key $document
+        if (-not $documentKey) { Skip 'target_changed' }
+        $buttons = @(Native-Continue $document)
+        if ($buttons.Count -gt 1) { Skip 'native_continue_ambiguous' }
+        if ($buttons.Count -eq 1) {
+            $failure = 'native_continue_not_ready'
+            if ($buttons[0].Current.IsEnabled) {
+                $buttonKey = Runtime-Key $buttons[0]
+                if (-not $buttonKey) { Skip 'target_changed' }
+                $verified = Assert-Target
+                $verifiedButtons = @(Native-Continue $verified)
+                if ($verifiedButtons.Count -gt 1) { Skip 'native_continue_ambiguous' }
+                if ((Runtime-Key $verified) -ne $documentKey -or $verifiedButtons.Count -ne 1 -or
+                    (Runtime-Key $verifiedButtons[0]) -ne $buttonKey) {
+                    # The pinned window still shows the exact task. Read fresh
+                    # controls within the same deadline before issuing any input.
+                    $failure = 'target_changed'
+                } elseif ($verifiedButtons[0].Current.IsEnabled) {
+                    if ($DryRun) { Write-Output 'ready:native_continue'; return }
+                    $point = Native-ClickPoint $verified $verifiedButtons[0]
+                    Invoke-NativeClick $point
+                    return
+                }
+            }
+        }
+        if ([DateTime]::UtcNow -ge $deadline) { break }
+        Start-Sleep -Milliseconds 150
     } while ($true)
-    if ($buttons.Count -gt 1) { Skip 'native_continue_ambiguous' }
-    if ($buttons.Count -eq 1) {
-        if (-not $buttons[0].Current.IsEnabled) { Skip 'native_continue_not_ready' }
-        if ($DryRun) { Write-Output 'ready:native_continue'; return }
-        Focus-ResumeWindow
-        $current = Assert-Target
-        if ((Runtime-Key $current) -ne $originalKey) { Skip 'target_changed' }
-        $buttonKey = Runtime-Key $buttons[0]
-        if (-not $buttonKey) { Skip 'target_changed' }
-        $currentButtons = @(Native-Continue $current)
-        if ($currentButtons.Count -ne 1 -or
-            (Runtime-Key $currentButtons[0]) -ne $buttonKey) { Skip 'target_changed' }
-        if (-not $currentButtons[0].Current.IsEnabled) { Skip 'native_continue_not_ready' }
-        $verified = Assert-Target
-        if ((Runtime-Key $verified) -ne $originalKey) { Skip 'target_changed' }
-        $verifiedButtons = @(Native-Continue $verified)
-        if ($verifiedButtons.Count -ne 1 -or
-            (Runtime-Key $verifiedButtons[0]) -ne $buttonKey) { Skip 'target_changed' }
-        if (-not $verifiedButtons[0].Current.IsEnabled) { Skip 'native_continue_not_ready' }
-        $point = Native-ClickPoint $verified $verifiedButtons[0]
-        Invoke-NativeClick $point
-        return
-    }
-    Skip 'native_continue_unavailable'
+    Skip $failure
 }
+
 try {
     if (-not $NavigateOnly -and $Action -ne 'interrupted') { Skip 'bridge_required' }
     Assert-Account
@@ -389,7 +388,6 @@ try {
         if (-not $DryRun) { $null = [NXResumeWindow]::SetForegroundWindow($script:pin.Hwnd) }
         Write-Output 'opened:existing_task'; exit 0
     }
-    $ready = Wait-ResumeReady
-    Resume-Task $ready.Document
+    Resume-Task
     exit 0
 } catch { Skip 'desktop_error' }
