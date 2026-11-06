@@ -1,4 +1,4 @@
-﻿# Local credential transactions only. No remote session revocation.
+# Local credential transactions only. No remote session revocation.
 # All dry runs are read-only. All target matches are exact.
 param(
     [string]$To,
@@ -246,15 +246,12 @@ function Merge-WorkspaceMap($Destination, $Source, [string]$Key) {
     }
     return $dest
 }
-function Workspace-Identity($Workspace) {
-    # Compare the actual local folders and task memberships, not dictionary
-    # ordering or account-specific sidebar preferences.
+function Workspace-ProjectIdentity($Workspace) {
+    # Folder identity is separate from membership: later snapshots can contain
+    # additional local threads without describing a different workspace.
     $parts = @()
     foreach ($id in ($Workspace.globals['local-projects'].Keys | Sort-Object)) {
         $parts += @('project', $id, @($Workspace.globals['local-projects'][$id].rootPaths)) | ConvertTo-Json -Depth 20 -Compress
-    }
-    foreach ($id in ($Workspace.globals['thread-project-assignments'].Keys | Sort-Object)) {
-        $parts += @('thread', $id, $Workspace.globals['thread-project-assignments'][$id].projectId) | ConvertTo-Json -Compress
     }
     return ($parts -join "`n")
 }
@@ -274,11 +271,17 @@ function Workspace-Update($Document, [string]$TargetOwner) {
             if ($found) { $candidates += ,$found }
         }
         if (-not $candidates.Count) { return $null }
-        $source = $candidates[0]
-        $identity = Workspace-Identity $source
+        # Prefer the most complete snapshot, then combine compatible memberships.
+        # A normal new conversation must not make the previous account ambiguous.
+        $source = @($candidates | Sort-Object { $_.globals['thread-project-assignments'].Count } -Descending)[0]
+        $identity = Workspace-ProjectIdentity $source
         foreach ($candidate in $candidates) {
-            if ((Workspace-Identity $candidate) -cne $identity) {
+            if ((Workspace-ProjectIdentity $candidate) -cne $identity) {
                 throw 'Multiple inactive local project layouts; select the original account before switching'
+            }
+            foreach ($key in @('thread-project-assignments', 'thread-project-membership-host-ids',
+                                'app-server-project-id-by-legacy-project-id-by-host')) {
+                $source.globals[$key] = Merge-WorkspaceMap $source.globals[$key] $candidate.globals[$key] $key
             }
         }
     }
@@ -325,6 +328,13 @@ function Workspace-Update($Document, [string]$TargetOwner) {
         $doc['electron-account-renderer-state-v1'] = $scope
     }
     return $doc
+}
+function Assert-WorkspaceTransfer([string]$Credential) {
+    $path = Join-Path (Split-Path -Parent $AuthFile) '.codex-global-state.json'
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    Assert-SafePath $path
+    $doc = $Utf8.GetString([IO.File]::ReadAllBytes($path)).TrimStart([char]0xFEFF) | ConvertFrom-Json
+    $null = Workspace-Update $doc (Read-Identity $Credential).RendererOwner
 }
 function Replace-WorkspaceBytes([byte[]]$Bytes, [string]$Path, [byte[]]$Expected) {
     Assert-SafePath $Path
@@ -429,6 +439,9 @@ if ($DryRun) {
     Write-Output 'Dry run: validated arguments; no files, processes, or credentials changed.'
     exit 0
 }
+# Fail a genuine layout conflict while the current account and desktop are intact.
+# Preserve-LocalWorkspace repeats this check after exit to cover concurrent changes.
+if ($To -or $RestoreProjects) { Assert-WorkspaceTransfer $target }
 Assert-SafePath $SnapshotDir
 Assert-SafePath $AuthFile
 [IO.Directory]::CreateDirectory($SnapshotDir) | Out-Null

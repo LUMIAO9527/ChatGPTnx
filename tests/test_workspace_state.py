@@ -181,6 +181,82 @@ $ast.FindAll({param($a) $a -is [Management.Automation.Language.FunctionDefinitio
         self.assertFalse(migration['threadAssignmentsReadMigrated'])
         self.assertIn(THREAD, migration['pendingThreadAssignmentIds'])
 
+    def test_inactive_snapshot_with_new_threads_recovers_all_memberships(self):
+        doc = document(False)
+        newer = workspace()
+        extra = '33333333-3333-4333-8333-333333333333'
+        newer['thread-project-assignments'][extra] = {'projectKind': 'local', 'projectId': PROJECT}
+        doc['electron-account-renderer-state-v1']['inactive']['b'*64] = {
+            'globals': newer, 'atoms': {'private-draft': 'newer-private'}}
+        result = self.transform(doc)
+        self.assertEqual(result['thread-project-assignments'], newer['thread-project-assignments'])
+        self.assertEqual(result['electron-persisted-atom-state']['private-draft'],
+                         doc['electron-persisted-atom-state']['private-draft'])
+        self.assertEqual(result['electron-account-renderer-state-v1'], doc['electron-account-renderer-state-v1'])
+        migration = result['app-server-projects-migration-by-host'][HOST]
+        self.assertFalse(migration['threadAssignmentsMigrated'])
+        self.assertFalse(migration['threadAssignmentsReadMigrated'])
+        self.assertEqual(set(migration['pendingThreadAssignmentIds']), {THREAD, extra})
+
+    def test_compatible_snapshots_merge_complementary_threads_in_either_order(self):
+        extra = '33333333-3333-4333-8333-333333333333'
+        for reverse in (False, True):
+            with self.subTest(reverse=reverse):
+                doc = document(False)
+                other = workspace()
+                other['thread-project-assignments'] = {extra: {'projectKind': 'local', 'projectId': PROJECT}}
+                doc['electron-account-renderer-state-v1']['inactive']['b'*64] = {'globals': other, 'atoms': {}}
+                if reverse:
+                    doc['electron-account-renderer-state-v1']['inactive'] = dict(
+                        reversed(list(doc['electron-account-renderer-state-v1']['inactive'].items())))
+                result = self.transform(doc)
+                self.assertEqual(set(result['thread-project-assignments']), {THREAD, extra})
+                self.assertEqual(set(result['app-server-projects-migration-by-host'][HOST]['pendingThreadAssignmentIds']),
+                                 {THREAD, extra})
+
+    def test_same_thread_in_conflicting_projects_is_rejected(self):
+        doc = document(False)
+        other_project = '44444444-4444-4444-8444-444444444444'
+        original = doc['electron-account-renderer-state-v1']['inactive'][OLD]['globals']
+        original['local-projects'][other_project] = {'id': other_project, 'name': 'Other', 'rootPaths': ['D:\\fixture\\other']}
+        conflicting = copy.deepcopy(original)
+        conflicting['thread-project-assignments'][THREAD]['projectId'] = other_project
+        doc['electron-account-renderer-state-v1']['inactive']['b'*64] = {'globals': conflicting, 'atoms': {}}
+        self.state.write_text(json.dumps(doc), encoding='utf-8')
+        before = self.state.read_bytes()
+        self.invoke(f"$doc=Get-Content '{self.state}' -Raw|ConvertFrom-Json; Workspace-Update $doc '{NEW}'", success=False)
+        self.assertEqual(self.state.read_bytes(), before)
+
+    def test_conflicting_server_identity_is_rejected(self):
+        doc = document(False)
+        other = workspace()
+        other['app-server-project-id-by-legacy-project-id-by-host'][HOST][PROJECT] = 'different-server-project'
+        doc['electron-account-renderer-state-v1']['inactive']['b'*64] = {'globals': other, 'atoms': {}}
+        self.state.write_text(json.dumps(doc), encoding='utf-8')
+        self.invoke(f"$doc=Get-Content '{self.state}' -Raw|ConvertFrom-Json; Workspace-Update $doc '{NEW}'", success=False)
+
+    def test_conflict_preflight_leaves_desktop_and_credentials_untouched(self):
+        doc = document(False)
+        other = workspace()
+        other['local-projects'][PROJECT]['rootPaths'] = ['D:\\other-layout']
+        doc['electron-account-renderer-state-v1']['inactive']['b'*64] = {'globals': other, 'atoms': {}}
+        self.state.write_text(json.dumps(doc), encoding='utf-8')
+        original, auth_before = self.state.read_bytes(), self.auth.read_bytes()
+        self.invoke(r"""
+$To=$null;$RestoreProjects=$true;$List=$false;$DryRun=$false;$Snapshot=$false;$Park=$false
+function Stop-App { throw 'Preflight stopped the desktop' }
+$full=[IO.File]::ReadAllText($env:NX_TEST_SCRIPT)
+try { Invoke-Expression $full.Substring($full.IndexOf('if ($RestoreProjects -and')) }
+catch {
+    if($_.Exception.Message -like '*Preflight stopped*'){throw 'Desktop was stopped before validation'}
+    if($_.Exception.Message -notlike '*Multiple inactive local project layouts*'){throw}
+    throw 'Expected layout conflict before mutation'
+}
+""", success=False)
+        self.assertEqual(self.auth.read_bytes(), auth_before)
+        self.assertEqual(self.state.read_bytes(), original)
+        self.assertFalse(self.snapshots.exists())
+
     def test_state_backup_is_encrypted_and_can_restore_exact_original_bytes(self):
         original = json.dumps(document(), indent=3).encode()+b'\r\n'
         self.state.write_bytes(original)
