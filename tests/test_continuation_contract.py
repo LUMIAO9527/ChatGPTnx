@@ -81,7 +81,7 @@ class ContinuationContractTests(unittest.TestCase):
         c.switched(ident)
         return ident
 
-    def pipe(self, *, acknowledgement=True):
+    def pipe(self, *, acknowledgement=True, status='failed'):
         pipe = Mock()
         def request(method, params, **kw):
             tool = params['tool']
@@ -89,7 +89,7 @@ class ContinuationContractTests(unittest.TestCase):
                 self.assertEqual(params['arguments']['threadId'], TASK)
                 self.assertFalse(params['arguments']['includeOutputs'])
                 return reply({'thread': {'id': TASK, 'kind': 'codex', 'status': {'type': 'idle'}},
-                              'turns': [{'id': TURN, 'status': 'failed'}]})
+                              'turns': [{'id': TURN, 'status': status}]})
             self.assertEqual(tool, 'send_message_to_thread')
             self.assertTrue(kw['side_effect'])
             self.assertEqual(params['threadId'], SOURCE)
@@ -367,17 +367,36 @@ class ContinuationContractTests(unittest.TestCase):
             'codexErrorInfo': 'other', 'message': 'unauthorized 401'}}, TURN),
             (None, ('failed', 'unrelated_failure')))
 
-    def test_interrupted_task_uses_bridge_only_when_native_button_is_missing(self):
+    def test_blocked_native_continue_sends_once_to_the_exact_interrupted_turn(self):
         with sqlite3.connect(self.paths.home/'thread_history_1.sqlite') as db:
             db.execute("UPDATE thread_turns SET status='interrupted'")
         db.close()
-        with patch('nx.desktop_location.locate_task', return_value=('located', 'task_opened_by_id')), \
-             patch('nx.app_bridge.resume_existing', return_value=('done', 'new_turn_observed')) as send, patch('nx.desktop_resume._invoke',
-                return_value=Mock(stdout='skip:native_continue_unavailable', returncode=2)) as native:
+        pipe = self.pipe(status='interrupted')
+        message_request = pipe.request.side_effect
+        actions = []
+
+        def request(method, params, **kwargs):
+            tool = params['tool']
+            actions.append(tool)
+            if tool == 'navigate_to_codex_page':
+                self.assertEqual(params['arguments']['threadId'], TASK)
+                return reply({'navigated': True})
+            return message_request(method, params, **kwargs)
+
+        def native_attempt(command):
+            actions.append('native')
+            return Mock(stdout='native_stage:foreground_unavailable\nskip:native_continue_not_ready',
+                        returncode=2)
+
+        pipe.request.side_effect = request
+        with patch('nx.app_bridge.discover', return_value=pipe), \
+             patch('nx.desktop_resume._invoke', side_effect=native_attempt):
             result = attempt_continuation(self.paths.home, self.paths.desktop_resume_ps1,
-                                          self.item, self.stop, self.log)
+                                          self.item, self.fast_stop, self.log)
         self.assertEqual(result, ('done', 'new_turn_observed'))
-        self.assertTrue(send.call_args.kwargs['interrupted']); native.assert_called_once()
+        self.assertEqual(self.item['observed_turn_id'], NEW)
+        self.assertEqual(actions, ['read_thread', 'navigate_to_codex_page', 'native',
+                                   'read_thread', 'send_message_to_thread'])
 
     def test_bridge_unavailable_never_falls_back_to_native(self):
         with patch('nx.app_bridge.discover', side_effect=app_bridge.BridgeUnavailable()), \

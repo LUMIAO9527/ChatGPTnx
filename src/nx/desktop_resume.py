@@ -242,7 +242,7 @@ def continuation_route(record, turn_id):
 
 
 def attempt_continuation(home, script, item, stop, log):
-    """Dispatch by ID and state; never run both actions for one queued turn."""
+    """Dispatch at most one continuation action for the exact queued turn."""
     thread_id, turn_id = item.get('thread_id'), item.get('turn_id')
     if stop.is_set():
         return 'failed', 'shutting_down'
@@ -305,11 +305,12 @@ def _resume_interrupted(home, script, item, stop, log, *, stale_index):
         outcome = (result.stdout or '').strip().splitlines()[-1:]
         raw_label = outcome[0] if outcome else ''
         allowed = {'clicked:native_continue', 'uncertain:native_continue', 'uncertain:desktop_error'}
-        allowed.update('skip:' + r for r in (
-            'native_continue_unavailable', 'native_continue_not_ready', 'native_continue_ambiguous',
+        native_misses = {'native_continue_unavailable', 'native_continue_not_ready'}
+        allowed.update('skip:' + r for r in native_misses | {
+            'native_continue_ambiguous',
             'account_changed', 'account_guard_unavailable', 'continuation_disabled', 'bridge_required',
             'task_already_running', 'target_not_visible', 'target_changed', 'desktop_not_running',
-            'desktop_window_ambiguous', 'desktop_location_unreadable', 'desktop_error'))
+            'desktop_window_ambiguous', 'desktop_location_unreadable', 'desktop_error'})
         label = raw_label if raw_label in allowed else 'unrecognized_response'
         log.info('desktop_resume_result action=interrupted result=%s code=%d',
                  label, result.returncode)
@@ -318,16 +319,17 @@ def _resume_interrupted(home, script, item, stop, log, *, stale_index):
                 from .app_bridge import observe_native_start
                 return observe_native_start(home, item, stop, expected_auth=before)
             return observe_start(home, item, stop, expected_auth=before, allow_same_turn=True)
-        if label == 'skip:task_already_running':
-            return 'skipped', 'task_already_running'
-        if label == 'skip:native_continue_unavailable' and result.returncode == 2 and item.get('settings_file'):
-            # The desktop can show an interrupted task without a Continue button.
-            # UIA has made no submission; recheck the exact turn and account in
-            # the bridge before sending the configured continuation message once.
-            from .app_bridge import resume_existing
-            return resume_existing(home, item, stop, log, interrupted=True)
         if label.startswith('skip:') and result.returncode == 2:
-            return 'failed', label[5:]
+            reason = label[5:]
+            if reason == 'task_already_running':
+                return 'skipped', reason
+            if reason in native_misses and item.get('settings_file'):
+                # No native action was dispatched. The bridge rechecks the
+                # account and exact idle turn before sending one message.
+                from .app_bridge import resume_existing
+                log.info('desktop_resume_fallback reason=%s', reason)
+                return resume_existing(home, item, stop, log, interrupted=True)
+            return 'failed', reason
         return 'failed', 'action_outcome_unknown'
     except subprocess.TimeoutExpired:
         log.warning('desktop_resume_error type=TimeoutExpired')
@@ -339,8 +341,14 @@ def _resume_interrupted(home, script, item, stop, log, *, stale_index):
 
 
 def _log_location_evidence(result, log):
-    """Persist counts only: no titles, composer contents, or account data."""
+    """Persist window counts and fixed action labels."""
     for line in (result.stdout or '').splitlines():
+        if line.startswith('native_stage:'):
+            stage = line[len('native_stage:'):]
+            if stage in {'pointer_dispatched', 'control_dispatched', 'foreground_unavailable',
+                         'click_point_unavailable', 'input_rejected', 'button_not_enabled'}:
+                log.info('desktop_resume_native stage=%s', stage)
+            continue
         if not line.startswith('location:'):
             continue
         try:

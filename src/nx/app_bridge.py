@@ -241,7 +241,7 @@ def dispatch_message(pipe, source, target, prompt, *, call_id):
 
 
 def resume_existing(home, item, stop, log, *, interrupted=False):
-    """Send once for an eligible failed turn or interruption with no Continue."""
+    """Send once for an eligible failed turn or an interruption before native dispatch."""
     import hashlib
     from pathlib import Path
     from .desktop_resume import latest_turn, continuation_guard, observe_start, THREAD_ID

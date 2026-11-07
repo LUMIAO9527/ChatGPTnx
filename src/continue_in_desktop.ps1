@@ -250,7 +250,7 @@ function Assert-Target {
 function Native-Continue($document) {
     # Only actions owned by this task document; never infer ownership from an
     # editor's position or choose a generic Start button in the surrounding UI.
-    $names = @('继续','继续生成','继续回答','继续响应','继续对话',
+    $names = @('继续','繼續','继续生成','继续回答','继续响应','继续对话',
         'Continue','Continue generating','Continue response','Continue conversation','Resume')
     return @(Find-Controls $document $names $buttonType $true)
 }
@@ -261,29 +261,37 @@ function Focus-ResumeWindow {
     do {
         Assert-Account
         if ($null -eq (Pinned-Window)) { Skip 'target_changed' }
-        if ([NXResumeWindow]::GetForegroundWindow() -eq $script:pin.Hwnd) { return }
+        if ([NXResumeWindow]::GetForegroundWindow() -eq $script:pin.Hwnd) { return $true }
         Start-Sleep -Milliseconds 100
     } while ([DateTime]::UtcNow -lt $deadline)
-    Skip 'native_continue_not_ready'
+    return $false
 }
 function Native-ClickPoint($document, $button) {
     $point = [System.Windows.Point]::new(0,0)
     try {
-        if (-not $button.TryGetClickablePoint([ref]$point) -or
-            -not $button.Current.BoundingRectangle.Contains($point) -or
-            -not $document.Current.BoundingRectangle.Contains($point)) { Skip 'native_continue_not_ready' }
+        $bounds = $button.Current.BoundingRectangle
+        if ($bounds.IsEmpty) { return $null }
+        if (-not $button.TryGetClickablePoint([ref]$point)) {
+            # A Chromium provider may expose bounds without a clickable point.
+            # The same hit test must confirm the center before using it.
+            $point = [System.Windows.Point]::new($bounds.X + $bounds.Width / 2,
+                                                 $bounds.Y + $bounds.Height / 2)
+        }
+        $point = [System.Windows.Point]::new([Math]::Round($point.X), [Math]::Round($point.Y))
+        if (-not $bounds.Contains($point) -or
+            -not $document.Current.BoundingRectangle.Contains($point)) { return $null }
         $key = Runtime-Key $button
         $hit = $element::FromPoint($point)
         # Chromium may expose a child icon at the point. Its owning button
         # must be the exact control that was revalidated in this task.
         for ($depth=0; $null -ne $hit -and $depth -lt 16; $depth++) {
             if ($key -and (Runtime-Key $hit) -eq $key) {
-                return [pscustomobject]@{X=[int][Math]::Round($point.X); Y=[int][Math]::Round($point.Y)}
+                return [pscustomobject]@{X=[int]$point.X; Y=[int]$point.Y}
             }
             $hit = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($hit)
         }
-    } catch { Skip 'native_continue_not_ready' }
-    Skip 'native_continue_not_ready'
+    } catch { return $null }
+    return $null
 }
 function Send-ContinueClick($point) {
     return [NXResumeWindow]::Click($script:pin.Hwnd, $point.X, $point.Y)
@@ -294,18 +302,28 @@ function Invoke-NativeClick($point) {
     $sent = Send-ContinueClick $point
     if ($sent -eq 0) {
         $script:actionStarted = $false
-        Skip 'native_continue_not_ready'
+        return $false
     }
     if ($sent -ne 3) { Skip 'native_continue' }
-    Write-Output 'clicked:native_continue'
+    return $true
+}
+function Invoke-NativeControl($button) {
+    $invoke = $null
+    if (-not $button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,
+                                          [ref]$invoke)) { return $false }
+    Assert-Account
+    $script:actionStarted = $true
+    $invoke.Invoke()
+    return $true
 }
 function Resume-Task {
     # Activating Chromium can rebuild the accessibility tree for the same task.
     # Capture the document and button after focus, using the original pinned window.
-    if (-not $DryRun) { Focus-ResumeWindow }
+    $focused = -not $DryRun -and (Focus-ResumeWindow)
     Wait-ResumeReady
     $deadline = [DateTime]::UtcNow.AddMilliseconds(1500)
     $failure = 'native_continue_unavailable'
+    $blocked = 'foreground_unavailable'
     do {
         $document = Assert-Target
         $documentKey = Runtime-Key $document
@@ -327,15 +345,33 @@ function Resume-Task {
                     $failure = 'target_changed'
                 } elseif ($verifiedButtons[0].Current.IsEnabled) {
                     if ($DryRun) { Write-Output 'ready:native_continue'; return }
-                    $point = Native-ClickPoint $verified $verifiedButtons[0]
-                    Invoke-NativeClick $point
-                    return
+                    if ($focused) {
+                        $point = Native-ClickPoint $verified $verifiedButtons[0]
+                        if ($null -ne $point -and (Invoke-NativeClick $point)) {
+                            Write-Output 'native_stage:pointer_dispatched'
+                            Write-Output 'clicked:native_continue'
+                            return
+                        }
+                        $blocked = if ($null -eq $point) { 'click_point_unavailable' } else { 'input_rejected' }
+                        # Re-read the task and button before trying the native
+                        # control action. No mouse input was dispatched.
+                        $focused = $false
+                        continue
+                    }
+                    if (Invoke-NativeControl $verifiedButtons[0]) {
+                        Write-Output 'native_stage:control_dispatched'
+                        Write-Output 'clicked:native_continue'
+                        return
+                    }
+                    Write-Output ('native_stage:' + $blocked)
+                    Skip 'native_continue_not_ready'
                 }
             }
         }
         if ([DateTime]::UtcNow -ge $deadline) { break }
         Start-Sleep -Milliseconds 150
     } while ($true)
+    if ($failure -eq 'native_continue_not_ready') { Write-Output 'native_stage:button_not_enabled' }
     Skip $failure
 }
 
