@@ -499,7 +499,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .account-usage-row .usage-number { margin-left: auto; text-align: right; font-size: var(--font-subtitle); font-weight: 550; white-space: nowrap; }
 .account-usage-row small { display: block; margin-top: 3px; color: var(--muted); font-size: var(--font-small); font-weight: 400; }
 
-.detail-body { padding: 4px 16px 6px; display: flex; flex-direction: column; gap: 3px; }
+.detail-body { padding: 4px 16px 6px; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; overscroll-behavior: contain; }
 .detail-body > * { flex: 0 0 auto; }
 .detail-overview { margin-bottom: 7px; }
 .detail-profile { display: flex; align-items: center; gap: 8px; border: 1px solid transparent; }
@@ -529,6 +529,30 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .detail-compact .detail-disclosure { --disclosure-radius:var(--detail-row-radius); }
 .detail-compact .detail-disclosure[open] { height:auto; }
 .detail-compact .detail-reset:has(> .reset-summary[aria-expanded="true"]) { height:auto; }
+/* Account vault row: same geometry as the reset row, three lines when open. */
+.detail-compact .detail-vault { position:relative; padding:0; }
+.detail-compact .detail-vault:has(> .vault-summary[aria-expanded="true"]),
+.detail-compact .detail-vault.is-open { height:auto; }
+.detail-compact .vault-summary { padding:0 10px; height:var(--detail-row-size); }
+.vault-details { position:relative; display:grid; gap:2px; padding:0 10px 8px; }
+.vault-line { display:flex; align-items:center; gap:8px; padding:5px 0; border-top:1px solid var(--line); font-size:var(--font-small); }
+.vault-line:first-child { border-top:0; }
+.vault-label { color:var(--muted); flex:0 0 40px; }
+.vault-line strong { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:550; }
+.vault-line .control { flex:0 0 auto; }
+.vault-remain { color:var(--muted); font-variant-numeric:tabular-nums; }
+.vault-remain.danger, .vault-line strong.danger, .vault-summary .right strong.danger { color:var(--danger); }
+.vault-foot { padding-top:6px; }
+.vault-body { display:grid; gap:10px; padding:0 2px; }
+.vault-list { display:grid; gap:6px; }
+.vault-card { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:var(--detail-row-radius); background:var(--surface); }
+.vault-card-copy { display:grid; min-width:0; flex:1; }
+.vault-card-copy strong { font-weight:550; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vault-card-copy small { color:var(--muted); font-size:var(--font-small); font-variant-numeric:tabular-nums; }
+.vault-import { display:grid; gap:8px; }
+.vault-import textarea { width:100%; resize:vertical; min-height:64px; }
+.vault-import-actions { display:flex; }
+.vault-import-actions .control { flex:1; }
 .detail-compact .account-editor .detail-line { padding-inline:12px; }
 .detail-compact .account-editor .disclosure-body { position:relative; padding:0 12px; }
 .detail-compact .account-editor .inline-field { height:var(--detail-row-size); }
@@ -755,7 +779,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .detail-actions .secondary { --control-padding:6px; --control-icon-size:16px; gap:4px; }
 .detail-body .link-row { min-height:var(--detail-row-size); margin:0; padding:6px 10px; }
 .sheet-body.detail-body { padding-bottom:2px; overflow-y:hidden; }
-.sheet-body.detail-body:is(.reset-expanded,:has(.account-editor details[open])) { padding-bottom:6px; overflow-y:auto; }
+.sheet-body.detail-body:is(.reset-expanded,.vault-expanded,:has(.account-editor details[open])) { padding-bottom:6px; overflow-y:auto; }
 .detail-archive { display:grid; gap:1px; }
 .detail-compact .danger-row { height:var(--detail-row-size); min-height:var(--detail-row-size); padding:6px 10px; border-radius:var(--detail-row-radius); background:transparent; }
 .detail-expiry-note { height:13px; min-height:13px; flex-basis:13px; line-height:13px; }
@@ -940,3 +964,27 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 }
 
 #app .status-dismiss { --nx-rest-transform: translateY(-50%); }
+
+/* Account credentials use the panel's existing scroll body and controls. */
+.sheet-body.vault-body { display:block; }
+.vault-content,.vault-form { display:grid; gap:12px; align-content:start; }
+.vault-field { display:grid; gap:5px; min-width:0; }
+.vault-field > span { color:var(--muted); }
+.vault-field .field { width:100%; min-width:0; }
+.vault-field textarea { resize:vertical; }
+.vault-card-edit { text-align:left; border:0; background:transparent; padding:0; color:inherit; cursor:pointer; }
+.vault-card-edit strong { display:block; font-size:var(--font-body); }
+.vault-form-actions { display:flex; flex-wrap:wrap; gap:6px; }
+.vault-current-code,.vault-enroll-code { display:flex; align-items:center; gap:8px; padding:10px; border-radius:var(--radius-ui); background:var(--surface); }
+.vault-current-code strong,.vault-enroll-code strong { flex:1; }
+.vault-enroll-code strong { font-size:24px; letter-spacing:2px; }
+.vault-steps { margin:0; padding-left:18px; display:grid; gap:10px; line-height:1.65; }
+.vault-confirm { display:flex; align-items:flex-start; gap:8px; line-height:1.6; }
+.vault-cleanup-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; }
+.vault-cleanup-row > span { display:grid; gap:4px; }
+.vault-cleanup-row small { color:var(--muted); }
+.vault-entry-actions,.authenticator-list { display:grid; gap:8px; min-width:0; }
+.authenticator-paste { display:grid; gap:8px; }
+.authenticator-paste > summary { padding:8px 0; color:var(--muted); cursor:pointer; }
+.authenticator-paste > textarea { width:100%; margin:8px 0; resize:vertical; }
+.authenticator-list .vault-field > span { overflow-wrap:anywhere; }

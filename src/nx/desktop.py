@@ -390,7 +390,7 @@ class Bridge:
     def switch(self, email): return self._service.switch(email)
     def relay(self, email=None): return self._service.relay(email)
     def remove(self, email): return self._service.remove(email)
-    def add_start(self): return self._service.add_start()
+    def add_start(self, email=None): return self._service.add_start(email)
     def adopt_current(self): return self._service.adopt_current()
     def choose_program_folder(self): return self._host.choose_program_folder()
     def keep_current_location(self): return self._service.keep_current_location()
@@ -400,6 +400,23 @@ class Bridge:
     def reauth_start(self, email): return self._service.reauth_start(email)
     def reauth_cancel(self): return self._service.reauth_cancel()
     def reauth_finish(self): return self._service.reauth_finish()
+    def vault_secret(self, payload): return self._service.vault_secret(payload)
+    def vault_import(self, payload): return self._service.vault_import(payload)
+    def vault_forget(self, payload): return self._service.vault_forget(payload)
+    def vault_save(self, payload): return self._service.vault_save(payload)
+    def vault_open_exchange(self, payload): return self._service.vault_open_exchange(payload)
+    def authenticator_preview(self, payload): return self._service.authenticator_preview(payload)
+    def authenticator_commit(self, payload): return self._service.authenticator_commit(payload)
+    def authenticator_cancel(self): return self._service.authenticator_cancel()
+    def authenticator_choose(self):
+        chosen = self._host.choose_authenticator_images()
+        if not chosen.get('ok') or chosen.get('cancelled'):
+            return chosen
+        return self._service.authenticator_preview({'paths': chosen['paths']})
+    def mfa_preview(self, payload): return self._service.mfa_preview(payload)
+    def mfa_commit(self, payload): return self._service.mfa_commit(payload)
+    def mfa_cancel(self, payload): return self._service.mfa_cancel(payload)
+    def clear_desktop_store(self, payload): return self._service.clear_desktop_store(payload)
     def check_update(self): return self._service.check_update()
     def open_github(self):
         try:
@@ -600,6 +617,20 @@ class Desktop:
             return {'ok': False, 'error': '无法打开文件夹选择'}
         path = result[0] if result else None
         return {'ok': True, 'path': str(path) if path else None}
+
+    def choose_authenticator_images(self):
+        self.native_dialog = True
+        try:
+            import webview
+            result = self.window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True,
+                file_types=('二维码图片 (*.png;*.jpg;*.jpeg;*.webp;*.bmp)',))
+            if not result:
+                return {'ok': True, 'cancelled': True}
+            return {'ok': True, 'paths': [result] if isinstance(result, str) else list(result)}
+        except Exception:
+            return {'ok': False, 'error': '无法打开二维码图片选择'}
+        finally:
+            self.native_dialog = False
 
     def choose_backup_file(self,save):
         self.native_dialog=True

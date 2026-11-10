@@ -2,10 +2,10 @@
    the real content stays attached only until its closing animation ends. */
 'use strict';
 window.NXDisclosure=(()=>{
-  const selector='.settings-disclosure,.detail-reset,.resume-session,.update-release';
+  const selector='.settings-disclosure,.detail-reset,.detail-vault,.resume-session,.update-release';
   const models=new Map(),popups=new Map();let frameId=0,changing=false;
   const enabled=()=>window.NXMotion?.enabled()&&typeof Element.prototype.animate==='function';
-  const bodyOf=node=>node.querySelector('.disclosure-body,.reset-credit-details,.resume-tasks,#update-notes-body');
+  const bodyOf=node=>node.querySelector('.disclosure-body,.reset-credit-details,.vault-details,.resume-tasks,#update-notes-body');
   const headOf=node=>node.querySelector('summary,[aria-expanded]');
   const desired=node=>models.get(node)?.open??(node.tagName==='DETAILS'?node.open:headOf(node)?.getAttribute('aria-expanded')==='true');
   const remember=(model,node,property,value)=>{

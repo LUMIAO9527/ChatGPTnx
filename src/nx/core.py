@@ -167,6 +167,15 @@ class Service:
         with credential_store_lock(paths.snapshots):
             recover(paths)
         self.paths, self.accounts, self.state = paths, Accounts(paths), State(paths)
+        from .account_vault import Vault, VaultError
+        try:
+            self.vault = Vault(paths.data / 'vault.json')
+            self.vault_error = ''
+        except (VaultError, OSError) as error:
+            # A damaged vault must not stop the program; it simply disables the
+            # sign-in shortcuts until the file is dealt with.
+            self.vault = None
+            self.vault_error = str(error)
         self.executable = executable
         self.location_setup = bool(location_setup)
         self.location_root = Path(location_root) if location_root else paths.root
@@ -190,6 +199,11 @@ class Service:
         self._login_observation = None
         self._login_cancel = threading.Event()
         self._login_commit = threading.RLock()
+        self._fill_gate = threading.Lock()
+        self._fill_state = {}
+        self._fill_workflow = None
+        self._mfa_pending = {}
+        self._authenticator_pending = None
         self.query = query or Query(paths, lambda: self.state.get('settings'))
         self.runner = runner or self._powershell
         self.log = logging.getLogger('chatgptnx.' + str(id(self)))
@@ -425,7 +439,253 @@ class Service:
                 'chatgpt_running': app_running,
                 'pending': pending, 'location': self._location_state(),
                 'usage_revision': self.state.get('usage_revision', 0),
+                'vault': self.vault_public(),
+                'vault_error': self.vault_error,
+                'mfa_pending': self.mfa_public(),
                 'resume': self.resumer.summary()}
+
+    # ---- account vault -------------------------------------------------
+    def vault_public(self):
+        """Roster for the panel: no password, no secret, only a live code."""
+        if self.vault is None:
+            return []
+        from . import mfa_migration
+        rows = []
+        for item in self.vault.public():
+            row = dict(item)
+            row['code'] = ''
+            row['remain'] = 0
+            entry = self.vault.get(item['email'])
+            if entry is not None and entry.secret:
+                try:
+                    row['code'], row['remain'] = mfa_migration.current_code(entry.secret)
+                except Exception:
+                    row['code'], row['remain'] = '', 0
+            rows.append(row)
+        return rows
+
+    def vault_secret(self, payload):
+        payload = payload if isinstance(payload, dict) else {}
+        if self.vault is None:
+            return {'ok': False, 'error': self.vault_error or '账号库不可用'}
+        entry = self.vault.get(payload.get('email'))
+        if entry is None:
+            return {'ok': False, 'error': '没有这个账号的记录'}
+        field = payload.get('field') or 'password'
+        if field not in ('password', 'secret', 'exchange_code', 'exchange_url', 'recovery_codes'):
+            return {'ok': False, 'error': '没有这一项资料'}
+        value = getattr(entry, field)
+        if not value:
+            return {'ok': False, 'error': '没有保存这一项'}
+        return {'ok': True, 'value': value}
+
+    def vault_import(self, payload):
+        from .account_vault import parse_line, VaultError
+        from .totp import TotpError
+        payload = payload if isinstance(payload, dict) else {}
+        if self.vault is None:
+            return {'ok': False, 'error': self.vault_error or '账号库不可用'}
+        records, errors = [], []
+        for number, line in enumerate(str(payload.get('text') or '').splitlines(), 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(parse_line(line))
+            except (VaultError, TotpError):
+                errors.append(number)
+        if not records:
+            return {'ok': False, 'error': '没有可导入的账号，请检查填写格式', 'lines': errors}
+        try:
+            self.vault.put_many(records)
+        except (OSError, ValueError):
+            return {'ok': False, 'error': '账号库保存失败，请重试'}
+        self.notify()
+        return {'ok': True, 'added': len(records), 'skipped': len(errors), 'lines': errors}
+
+    def vault_save(self, payload):
+        from .account_vault import material_fields
+        payload = payload if isinstance(payload, dict) else {}
+        if self.vault is None:
+            return {'ok': False, 'error': self.vault_error or '账号库不可用'}
+        try:
+            fields = material_fields(payload.get('material') or '', payload.get('exchange_url') or '')
+            if payload.get('password'):
+                fields['password'] = payload['password']
+            if payload.get('recovery_codes'):
+                fields['recovery_codes'] = payload['recovery_codes']
+            self.vault.put(payload.get('email'), **fields)
+        except (OSError, ValueError):
+            return {'ok': False, 'error': '请检查邮箱、2FA 资料和兑换链接，或重试保存'}
+        self.notify()
+        return {'ok': True}
+
+    def authenticator_preview(self, payload):
+        from .authenticator_import import parse_uri, read_images, combine, ImportError
+        import re
+        payload = payload if isinstance(payload, dict) else {}
+        if self.vault is None:
+            return {'ok': False, 'error': self.vault_error or '账号库不可用'}
+        try:
+            if payload.get('paths'):
+                accounts = read_images(payload['paths'])
+            else:
+                accounts = combine([parse_uri(payload.get('text') or '')])
+        except ImportError as error:
+            return {'ok': False, 'error': str(error)}
+        except Exception:
+            return {'ok': False, 'error': '二维码读取未完成，请重新选择图片'}
+        roster = {email.lower(): email for email in self.accounts.all()}
+        labels = {}
+        for entry in self.vault.public():
+            roster[entry['email'].lower()] = entry['email']
+            if entry['label']:
+                labels.setdefault(entry['label'].casefold(), []).append(entry['email'])
+        rows = []
+        for index, entry in enumerate(accounts):
+            names = re.findall(r'[^\s:<>]+@[^\s:<>]+', entry.name)
+            matched = roster.get(names[-1].lower()) if names else None
+            if not matched:
+                named = entry.name.rsplit(':', 1)[-1].strip().casefold()
+                choices = labels.get(named, [])
+                matched = choices[0] if len(choices) == 1 else None
+            old = self.vault.get(matched)
+            rows.append({'id': str(index), 'name': entry.name, 'issuer': entry.issuer,
+                         'email': matched or '', 'replaces': bool(old and old.secret)})
+        token = uuid.uuid4().hex
+        with self.lock:
+            self._authenticator_pending = {'token': token, 'accounts': accounts,
+                                            'expires_at': time.time() + 900}
+        return {'ok': True, 'token': token, 'rows': rows,
+                'emails': sorted(roster.values(), key=str.casefold)}
+
+    def authenticator_commit(self, payload):
+        payload = payload if isinstance(payload, dict) else {}
+        if self.vault is None:
+            return {'ok': False, 'error': self.vault_error or '账号库不可用'}
+        with self.lock:
+            pending = self._authenticator_pending
+            if (not pending or pending['expires_at'] <= time.time()
+                    or pending['token'] != payload.get('token')):
+                return {'ok': False, 'error': '请重新选择验证器导出图片'}
+            selections = payload.get('selections')
+            if not isinstance(selections, list) or not selections:
+                return {'ok': False, 'error': '请至少选择一个账号'}
+            records, seen, used = [], set(), set()
+            try:
+                for item in selections:
+                    index = int(item['id'])
+                    email = str(item['email']).strip()
+                    if (str(index) != str(item['id']) or not 0 <= index < len(pending['accounts'])
+                            or index in used or email.lower() in seen):
+                        raise ValueError()
+                    used.add(index)
+                    seen.add(email.lower())
+                    records.append({'email': email, 'secret': pending['accounts'][index].secret,
+                                    'secret_source': 'imported', 'migrated_at': 0})
+                self.vault.put_many(records)
+            except (ValueError, TypeError, KeyError, OSError):
+                return {'ok': False, 'error': '请检查账号对应关系后重试，每个邮箱只能选择一次'}
+            self._authenticator_pending = None
+        self.notify()
+        return {'ok': True, 'imported': len(records)}
+
+    def authenticator_cancel(self):
+        with self.lock:
+            self._authenticator_pending = None
+        return {'ok': True}
+
+    def vault_open_exchange(self, payload):
+        from .account_vault import _url
+        payload = payload if isinstance(payload, dict) else {}
+        entry = self.vault.get(payload.get('email')) if self.vault else None
+        if not entry or not entry.exchange_url:
+            return {'ok': False, 'error': '没有保存兑换链接'}
+        try:
+            import webbrowser
+            opened = webbrowser.open(_url(entry.exchange_url))
+        except Exception:
+            opened = False
+        return {'ok': bool(opened), **({} if opened else {'error': '未能打开兑换链接，请复制后打开'})}
+
+    def mfa_public(self):
+        from .mfa_migration import current_code
+        now = time.time()
+        with self.lock:
+            self._mfa_pending = {email: item for email, item in self._mfa_pending.items()
+                                 if item['expires_at'] > now}
+            return [{'email': email, 'token': item['token'], 'expires_at': item['expires_at'],
+                     'code': current_code(item['secret'], at=now)[0],
+                     'remain': current_code(item['secret'], at=now)[1]}
+                    for email, item in self._mfa_pending.items()]
+
+    def mfa_preview(self, payload):
+        from .totp import normalize_secret, TotpError
+        payload = payload if isinstance(payload, dict) else {}
+        email = str(payload.get('email') or '').strip()
+        if self.vault is None:
+            return {'ok': False, 'error': self.vault_error or '账号库不可用'}
+        if email.lower() != str(self.accounts.current() or '').lower():
+            return {'ok': False, 'error': '请先切换到这个账号，再打开安全设置'}
+        try:
+            secret = normalize_secret(payload.get('secret'))
+        except TotpError as error:
+            return {'ok': False, 'error': str(error)}
+        with self.lock:
+            self._mfa_pending[email.lower()] = {'token': uuid.uuid4().hex,
+                'secret': secret, 'expires_at': time.time() + 900}
+        return {'ok': True, **next(item for item in self.mfa_public() if item['email'] == email.lower())}
+
+    def mfa_commit(self, payload):
+        payload = payload if isinstance(payload, dict) else {}
+        email = str(payload.get('email') or '').strip().lower()
+        with self.lock:
+            item = self._mfa_pending.get(email)
+            if not item or item['expires_at'] <= time.time() or item['token'] != payload.get('token'):
+                return {'ok': False, 'error': '请重新录入设置页给出的密钥'}
+            if payload.get('confirmed') is not True:
+                return {'ok': False, 'error': '请先在 ChatGPT 完成验证码确认'}
+            if email != str(self.accounts.current() or '').lower() or self.desktop_transitioning():
+                return {'ok': False, 'error': '当前账号已变化，请切回后继续'}
+            try:
+                self.vault.put(email, secret=item['secret'], secret_source='enrolled',
+                    migrated_at=time.time(), exchange_code='', exchange_url='',
+                    recovery_codes=str(payload.get('recovery_codes') or ''))
+            except (OSError, ValueError):
+                return {'ok': False, 'error': '保存未完成，请重试'}
+            del self._mfa_pending[email]
+        self.notify()
+        return {'ok': True}
+
+    def mfa_cancel(self, payload):
+        with self.lock:
+            self._mfa_pending.pop(str((payload or {}).get('email') or '').lower(), None)
+        return {'ok': True}
+
+    def vault_forget(self, payload):
+        payload = payload if isinstance(payload, dict) else {}
+        if self.vault is None:
+            return {'ok': False, 'error': self.vault_error or '账号库不可用'}
+        removed = self.vault.forget(payload.get('email'))
+        self.notify()
+        return {'ok': True, 'removed': bool(removed)}
+
+    def clear_desktop_store(self, payload):
+        """Remove the Chromium storage that keeps a stale device identity."""
+        payload = payload if isinstance(payload, dict) else {}
+        if self.operation or self.state.get('adding') or self.state.get('reauth'):
+            return {'ok': False, 'error': '请先完成当前操作'}
+        from . import desktop_store
+        groups = payload.get('groups')
+        if not isinstance(groups, list) or not groups or any(g not in desktop_store.GROUPS for g in groups):
+            return {'ok': False, 'error': '请选择清理范围'}
+        def work():
+            self.phase('正在清理桌面登录数据')
+            result = desktop_store.clear(groups=tuple(groups), restart=True)
+            if not result['ok'] or result['skipped']:
+                raise RuntimeError(result.get('error') or '部分登录数据未能清理，请重试')
+            self._record_current()
+        return self.begin('clear_desktop_store', None, lambda: self._serialize_desktop(work))
 
     def get_diagnostics(self):
         """Preview only: creates no file and never reads credential/log bodies."""
@@ -491,7 +751,7 @@ class Service:
         return bool(self.state.get('adding') or self.state.get('reauth') or
                     operation and operation['kind'] in
                     ('switch', 'add_start', 'add_cancel', 'add_finish', 'adopt',
-                     'reauth_start', 'reauth_cancel', 'reauth_finish'))
+                     'reauth_start', 'reauth_cancel', 'reauth_finish', 'clear_desktop_store'))
 
     def _serialize_desktop(self, work):
         with self.desktop_gate:
@@ -507,6 +767,8 @@ class Service:
             return 'waiting'
         if email == pending.get('previous'):
             return 'unchanged'
+        if pending.get('target') and email.lower() != pending['target'].lower():
+            return 'wrong'
         if email in (emails if emails is not None else self.accounts.all()):
             return 'existing'
         return 'ready'
@@ -558,8 +820,9 @@ class Service:
             if not observed or observed['key'] != key:
                 self._login_observation = observed = {
                     'key': key, 'since': now, 'attempts': 0, 'next': now, 'blocked': False}
-                self.login_progress = {'kind': kind, 'status': status,
-                                       'message': self._login_message(status)}
+                if status != 'waiting' or self._fill_workflow != pending.get('id'):
+                    self.login_progress = {'kind': kind, 'status': status,
+                                           'message': self._login_message(status)}
                 self.notify()
             if (status != 'ready' or self.operation or observed['blocked'] or self.stop.is_set() or self._login_cancel.is_set()
                     or now - observed['since'] < 2 or now < observed['next'] or observed['attempts'] >= 3):
@@ -569,6 +832,48 @@ class Service:
         result = self.reauth_finish(automatic=True) if kind == 'reauth' else self.add_finish(automatic=True)
         return bool(result.get('accepted'))
 
+    def tick_login_fill(self):
+        """Advance only the selected account in an explicit login workflow."""
+        from . import login_driver
+        kind, pending = self._login_pending()
+        if (not pending or pending.get('phase') != 'login' or self.operation
+                or self._login_cancel.is_set() or self.stop.is_set()
+                or self._login_status(kind, pending) != 'waiting' or self.vault is None):
+            return None
+        target = pending.get('email') if kind == 'reauth' else pending.get('target')
+        entry = self.vault.get(target)
+        if entry is None or not self._fill_gate.acquire(blocking=False):
+            return None
+        try:
+            if not self.desktop_gate.acquire(blocking=False):
+                return None
+            try:
+                if self._login_pending() != (kind, pending) or self.operation or self._login_cancel.is_set():
+                    return None
+                workflow = pending.get('id')
+                if self._fill_workflow != workflow:
+                    self._fill_workflow, self._fill_state = workflow, {}
+                if self._fill_state.get('stop'):
+                    return None
+                result = login_driver.advance(self.paths.resources / 'login_fill.ps1', entry, self._fill_state)
+                if self._login_pending() != (kind, pending) or self._login_cancel.is_set():
+                    return None
+                if result['action'] == 'stop':
+                    self.vault.record_login(entry.email, result.get('result', 'stopped'))
+                    message = result['message']
+                else:
+                    message = {'email': '已填入邮箱，等待下一步', 'password': '已填入密码，等待下一步',
+                               'otp': '已填入 2FA 验证码，等待登录完成'}.get(result.get('step'), '正在识别登录页面')
+                with self.lock:
+                    self.login_progress = {'kind': kind, 'status': 'manual' if result['action'] == 'stop' else 'filling',
+                                           'message': message}
+                self.notify()
+                return result
+            finally:
+                self.desktop_gate.release()
+        finally:
+            self._fill_gate.release()
+
     def _complete_login(self, kind, pending, expected, digest, cancel):
         key = 'reauth' if kind == 'reauth' else 'adding'
         def unchanged():
@@ -577,6 +882,9 @@ class Service:
                     or fingerprint(self.paths.auth) != digest):
                 raise RuntimeError('登录操作已取消或账号发生变化；尚未保存')
         unchanged()
+        target = pending.get('target') if kind == 'adding' else pending.get('email')
+        if target and target.lower() != str(expected[0] or '').lower():
+            raise RuntimeError('登录的账号与所选账号不一致，请确认后重试')
         verified_bytes = read_credential_bytes(self.paths.auth)
         if hashlib.sha256(verified_bytes).hexdigest() != digest:
             raise RuntimeError('登录凭据正在变化，请稍后重试')
@@ -634,6 +942,11 @@ class Service:
             checked.update(email=expected[0], **credential_metadata(self.paths.auth))
             self._store_quota(checked)
         self._record_current()
+        if self.vault is not None and self.vault.get(expected[0]):
+            try:
+                self.vault.record_login(expected[0], 'ok')
+            except OSError:
+                self.log.warning('vault_login_result_save_failed')
         with self.lock:
             self.login_progress = None
             self.login_result = {'id': uuid.uuid4().hex, 'kind': kind,
@@ -1107,18 +1420,23 @@ class Service:
                           lambda: self._serialize_desktop(work), allow_reauth=True,
                           interruptible=True, cancel_event=cancel, source='login-auto' if automatic else 'manual')
 
-    def add_start(self):
+    def add_start(self, email=None):
+        target = str(email or '').strip()
+        if target and (self.vault is None or self.vault.get(target) is None):
+            return {'ok': False, 'error': '请先保存这个账号的登录资料'}
+        if target and any(target.lower() == value.lower() for value in self.accounts.all()):
+            return self.reauth_start(next(value for value in self.accounts.all() if value.lower() == target.lower()))
         if self.state.get('adding'):
             return {'ok': False, 'error': '已在添加流程中'}
         previous = identity(self.paths.auth)[0]
         self._login_cancel.clear()
         workflow_id = uuid.uuid4().hex
         def work():
-            self.state.update(adding={'id': workflow_id, 'previous': previous, 'phase': 'parking'})
+            self.state.update(adding={'id': workflow_id, 'target': target, 'previous': previous, 'phase': 'parking'})
             self.phase('保存当前账号 · 打开登录窗口')
             try:
                 self.runner('-Park')
-                self.state.update(adding={'id': workflow_id, 'previous': previous, 'phase': 'login'})
+                self.state.update(adding={'id': workflow_id, 'target': target, 'previous': previous, 'phase': 'login'})
                 self._record_current()
             except Exception:
                 self.state.update(adding={'previous': previous, 'phase': 'needs_recovery'})
@@ -1832,6 +2150,16 @@ class Service:
                     self.log.warning('login_watch_failed')
                     self.stop.wait(2)
         threading.Thread(target=watch_login, name='nx-login-watch', daemon=True).start()
+
+        def watch_login_fill():
+            while not self.stop.wait(2):
+                try:
+                    self.tick_login_fill()
+                except Exception:
+                    self._fill_state['stop'] = 'stopped'
+                    self.login_progress = {'status': 'manual', 'message': '自动填入已停止，请继续手动登录'}
+                    self.notify()
+        threading.Thread(target=watch_login_fill, name='nx-login-fill', daemon=True).start()
 
         def watch_usage_limit():
             from .limit_watch import UsageLimitWatcher

@@ -22,7 +22,7 @@ from nx.resume_policy import ATTENTION_REASONS, RETRYABLE_REASONS
 from screen_catalog import CASES
 
 STYLES = ('tokens.css', 'common.css', 'feedback.css', 'material.css')
-SCRIPTS = ('material.js', 'usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'views/data-transfer.js', 'motion.js', 'range-motion.js', 'local-motion.js', 'disclosure.js', 'app.js')
+SCRIPTS = ('material.js', 'usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'views/data-transfer.js', 'motion.js', 'range-motion.js', 'local-motion.js', 'disclosure.js', 'vault.js', 'app.js')
 
 
 def ui_source_digest():
@@ -105,6 +105,8 @@ def build():
         (RESOURCES / f'nx-{theme}.ico').write_bytes((ROOT/'src/assets'/f'nx-{theme}.ico').read_bytes())
     (RESOURCES / 'switch_account.ps1').write_bytes((ROOT / 'src' / 'switch_account.ps1').read_bytes())
     (RESOURCES / 'continue_in_desktop.ps1').write_bytes((ROOT / 'src' / 'continue_in_desktop.ps1').read_bytes())
+    (RESOURCES / 'login_fill.ps1').write_bytes((ROOT / 'src' / 'login_fill.ps1').read_bytes())
+    (RESOURCES / 'login_surface.ps1').write_bytes((ROOT / 'src' / 'login_surface.ps1').read_bytes())
     (RESOURCES / 'uninstall.ps1').write_bytes((ROOT / 'src' / 'uninstall.ps1').read_bytes())
     helper = build_update_helper()
     from build_backdrop import build_backdrop

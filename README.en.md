@@ -7,7 +7,7 @@
 <p>Keep a long task moving across the accounts you own. Switch accounts when quota runs out, then attempt to continue the original task.</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.7.3" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.8.0" height="20">
 <img src="docs/images/badges/license.svg" alt="Source available to inspect; rights reserved" height="20">
 </div>
 
@@ -29,6 +29,7 @@ https://github.com/user-attachments/assets/e1d24f80-0716-4bba-a024-7058e5c0b2e0
 - **Portable backups:** Export selected accounts and membership details in a password-encrypted backup, with optional usage, quota history, and general settings, then import them on another computer.
 - **Installation and removal:** Register in Windows Installed apps and open the same uninstall page from Windows or Settings, with a choice to retain account data.
 - **Sign-in and updates:** Keep the panel visible during sign-in, automatically verify and save completed sign-ins, and check for official GitHub updates from Settings.
+- **Passwords and 2FA:** Encrypt sign-in material, import Google Authenticator export images, show current codes, and fill recognized sign-in forms one step at a time.
 - **Lightweight desktop controls:** Keep the app in the Windows tray, with notifications, keyboard shortcuts, and light and dark themes.
 
 ### Keeping long tasks moving
@@ -61,7 +62,7 @@ The quota overview and usage statistics help you see which account is available 
 
 ## Download and run
 
-The current version is **v1.7.3**. Open `ChatGPTnx-v1.7.3.html` at the project root for all current pages and states.
+The source and local build are **v1.8.0**. Open `ChatGPTnx-v1.8.0.html` at the project root for all current pages and states. The public download link below still points to v1.7.3.
 
 After an account switch, ChatGPTnx tries the original chat's Continue button first. If it confirms that no button action was sent, it sends the configured continuation message.
 
@@ -88,8 +89,16 @@ The source is available to inspect. Use and redistribution are governed by the [
 
 ## Unified offline demo and debugging
 
-Open `ChatGPTnx-v1.7.3.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space. Select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
+Open `ChatGPTnx-v1.8.0.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space. Select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
 
 The console can check all light/dark scenarios and record intermediate navigation frames, including interrupted returns, inline disclosures, floating notices, passive refreshes, and long release notes. A shared rule prioritizes information-card backgrounds, then main buttons or account avatars; unrelated pages use a grouped body transition.
 
 Regenerate it with `python tools/build_explorer.py` after editing the UI; `build.cmd` also generates it. Building the glass host requires the Windows 10 / 11 SDK; the released application includes this component. Native Windows behavior requires separate acceptance.
+
+## Passwords and 2FA
+
+Open Settings → Account data → Account vault to add sign-in material. Bulk import accepts one `email----password----2FA material----optional redemption URL` record per line and preserves redemption codes and URLs separately.
+
+Choose Import phone authenticator, select every QR image in one Google Authenticator export batch, review the account mapping, and import. The phone and NX can both generate codes. Account details provide copy controls and a password reveal that hides itself after three seconds.
+
+For a replacement authenticator, use the new key issued by ChatGPT's security settings. NX shows the matching code; complete enrollment in ChatGPT, then confirm and save the key and recovery codes in NX. Phone, email-code, and human checks remain user steps while normal completed-sign-in detection continues.

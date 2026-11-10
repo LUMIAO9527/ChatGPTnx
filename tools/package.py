@@ -9,7 +9,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src'))
 from nx.version import APP_VERSION
-TOP = ('README.md', 'README.en.md', 'USAGE.md', 'LICENSE', '.gitignore', 'accounts.sample.txt',
+TOP = ('README.md', 'README.en.md', 'USAGE.md', 'CHANGELOG.md', 'LICENSE', '.gitignore', 'accounts.sample.txt',
        'build.cmd', 'setup.cmd', 'start.cmd', 'preview.cmd', 'requirements.txt',
        'requirements-dev.txt', 'requirements-browser.txt', 'docs/DESIGN.md', f'ChatGPTnx-v{APP_VERSION}.html')
 EXTENSIONS = {'.py', '.js', '.cjs', '.css', '.ps1', '.cs', '.ico', '.svg', '.html', '.png'}

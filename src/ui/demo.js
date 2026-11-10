@@ -41,7 +41,13 @@ window.NXDemo = (() => {
       settings:{appearance:'system',window_material:'glass',autostart:false,auto_relay:false,auto_relay_excluded:[],
         early_anchor:false,early_anchor_accounts:accounts.filter(a=>a.plan==='plus').map(a=>a.email),
         task_continuation:true,resume_message:'继续',notify_credential:true,
-        notify_low:false,notify_reset_expiry:true,relay_pick:null}};
+        notify_low:false,notify_reset_expiry:true,relay_pick:null},
+      vault:[
+        {email:accounts[0].email,has_password:true,has_secret:true,code:'482913',remain:23,last_result:'ok'},
+        {email:accounts[1].email,has_password:true,has_secret:true,code:'731044',remain:11,last_result:'phone'},
+        {email:accounts[3].email,has_password:false,has_secret:true,code:'265908',remain:27,last_result:'email_code'}
+      ]};
+    state.mfa_pending=[];state.vault_error='';
     usages={};const totals=[18420680,26480300,60241200,9421800,5483200];
     accounts.forEach((a,i)=>{
       if(i===4){usages[a.email]={ok:false,err:'该账号暂时无法查询用量',attempted_at:n,identity_key:a.identity_key};return;}
@@ -86,6 +92,8 @@ window.NXDemo = (() => {
       case 'retry_query':return operation('refresh',email,()=>{const a=state.accounts.find(a=>a.email===email);if(a){a.ok=true;a.error_code=null;a.paused=false;a.retry_at=null;delete a.query_warning;a.fetched_at=sec();}});
       case 'get_data':{
         if(state.demo_connection_error)throw new Error('演示：本地服务暂时不可用');
+        for(const [index,entry] of state.vault.entries())if(entry.has_secret){entry.remain=30-sec()%30;entry.code=String(100000+(Math.floor(sec()/30)+index*15371)%900000);}
+        for(const entry of state.mfa_pending){entry.remain=30-sec()%30;entry.code=String(100000+Math.floor(sec()/30)%900000);}
         const known=new Map(state.hotkeys.map(item=>[item.email,item]));
         state.hotkeys=state.accounts.map((a,i)=>known.get(a.email)||{email:a.email,shortcut:i<9?`ctrl+alt+${i+1}`:null,registered:i<9});
         state.relay_order=demoRelayOrder();
@@ -102,6 +110,64 @@ window.NXDemo = (() => {
           state.operation.source='recovery';
         }
         return clone(state);}
+      case 'vault_secret':{
+        const payload=email&&typeof email==='object'?email:{},entry=state.vault.find(v=>v.email===payload.email);
+        if(!entry)return {ok:false,error:'没有保存这项资料'};
+        const values={password:entry.has_password?'demo-password':'',exchange_code:'demo-redemption',exchange_url:'https://example.com/redeem',recovery_codes:'DEMO-RECOVERY'};
+        return values[payload.field]?{ok:true,value:values[payload.field]}:{ok:false,error:'没有保存这项资料'};
+      }
+      case 'vault_open_exchange':return {ok:true};
+      case 'authenticator_choose':
+      case 'authenticator_preview':return {ok:true,token:'demo-transfer',emails:state.accounts.map(a=>a.email),rows:[{id:'0',name:'OpenAI:work-01@example.com',issuer:'OpenAI',email:'work-01@example.com',replaces:true},{id:'1',name:'OpenAI:work-02@example.com',issuer:'OpenAI',email:'work-02@example.com',replaces:true}]};
+      case 'authenticator_commit':{
+        const p=email||{};if(p.token!=='demo-transfer'||!p.selections?.length)return {ok:false,error:'请至少选择一个账号'};
+        for(const row of p.selections){let entry=state.vault.find(e=>e.email===row.email);if(!entry){entry={email:row.email};state.vault.push(entry);}Object.assign(entry,{has_secret:true,secret_source:'imported',code:'482913',remain:23});}
+        return {ok:true,imported:p.selections.length};}
+      case 'authenticator_cancel':return {ok:true};
+      case 'vault_import':{
+        const payload=email&&typeof email==='object'?email:{};
+        const lines=String(payload.text||'').split(/\r?\n/).filter(line=>line.trim());
+        let added=0;
+        for(const line of lines){
+          const parts=line.split(/\s*-{4,}\s*|\s*\|\s*|\t+/).map(part=>part.trim());
+          if(parts.length<2||!parts[0].includes('@'))continue;
+          state.vault=state.vault.filter(v=>v.email.toLowerCase()!==parts[0].toLowerCase());
+          state.vault.push({email:parts[0],has_password:!!parts[1],has_secret:!!parts[2],
+            code:String(Math.floor(Math.random()*900000)+100000),remain:30,last_result:'ok'});
+          added++;
+        }
+        return {ok:true,added,skipped:lines.length-added,lines:[]};
+      }
+      case 'vault_save':{
+        const p=email||{};if(!p.email?.includes('@'))return {ok:false,error:'邮箱格式不正确'};
+        let entry=state.vault.find(v=>v.email.toLowerCase()===p.email.toLowerCase());
+        if(!entry){entry={email:p.email,has_password:false,has_secret:false,last_result:''};state.vault.push(entry);}
+        if(p.password)entry.has_password=true;
+        if(p.material){entry.has_secret=/^[A-Z2-7\s-]{16,}$/i.test(p.material)||p.material.startsWith('otpauth://');entry.has_exchange=!entry.has_secret;}
+        if(p.exchange_url)entry.has_exchange=true;
+        if(p.recovery_codes)entry.has_recovery=true;
+        if(entry.has_secret){entry.code='482913';entry.remain=23;}return {ok:true};}
+      case 'mfa_preview':{
+        const p=email||{};
+        if(p.email!==state.current)return {ok:false,error:'请先切换到这个账号'};
+        if(!/^[A-Z2-7\s-]{16,}$/i.test(p.secret||''))return {ok:false,error:'2FA 密钥格式不正确'};
+        const item={email:p.email,token:'demo-mfa-'+(++serial),code:'138402',remain:23,expires_at:sec()+900};
+        state.mfa_pending=[item];return {ok:true,...item};}
+      case 'mfa_commit':{
+        const p=email||{},item=state.mfa_pending.find(v=>v.token===p.token&&v.email===p.email);
+        if(!item||!p.confirmed||p.email!==state.current)return {ok:false,error:'请先完成设置页验证'};
+        let entry=state.vault.find(v=>v.email===p.email);
+        if(!entry){entry={email:p.email};state.vault.push(entry);}
+        Object.assign(entry,{has_secret:true,secret_source:'enrolled',migrated_at:sec(),has_exchange:false,has_recovery:!!p.recovery_codes,code:'138402',remain:23});
+        state.mfa_pending=[];return {ok:true};}
+      case 'mfa_cancel':state.mfa_pending=state.mfa_pending.filter(v=>v.email!==email?.email);return {ok:true};
+      case 'clear_desktop_store':return operation('clear_desktop_store',null,()=>{});
+      case 'vault_forget':{
+        const payload=email&&typeof email==='object'?email:{};
+        const before=state.vault.length;
+        state.vault=state.vault.filter(v=>v.email!==payload.email);
+        return {ok:true,removed:before-state.vault.length};
+      }
       case 'dismiss_error':if(state.last_error?.id===email)state.last_error=null;return {ok:true};
       case 'clear_resume_history':resumeDetails=resumeDetails.filter(s=>['switching','resuming','waiting_account'].includes(s.phase));if(state.resume&&!['switching','resuming','waiting_account'].includes(state.resume.phase))state.resume=null;return {ok:true};
       case 'get_resume_details':return clone(resumeDetails);
@@ -137,7 +203,7 @@ window.NXDemo = (() => {
       case 'remove':return operation('remove',email,()=>{if(email===state.current)throw new Error('请先切换，再归档当前账号');const a=state.accounts.find(a=>a.email===email);if(!a)throw new Error('账号不存在');archives.push({key:'archived-'+serial,email,archived_at:sec(),account:a});state.accounts=state.accounts.filter(a=>a.email!==email);});
       case 'get_archives':return clone(archives);
       case 'restore':return operation('restore',null,()=>{const a=archives.find(a=>a.key===email);if(a){state.accounts.push(a.account);archives=archives.filter(x=>x.key!==email);}});
-      case 'add_start':return operation('add_start',null,()=>{previous=state.current;state.current=null;state.adding=true;state.add_state={previous,phase:'login'};state.add_login_status='waiting';});
+      case 'add_start':return operation('add_start',null,()=>{previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:email||'',phase:'login'};state.add_login_status='waiting';});
       case 'adopt_current':{
         if(!state.pending)return {ok:false,error:'桌面端尚未登录；请先在 ChatGPT 桌面端完成登录'};
         const who=state.pending;return operation('adopt',null,()=>{state.pending=null;
@@ -304,8 +370,8 @@ window.NXDemo = (() => {
     if(which==='expired')state.accounts[0].windows[1].resets_at=sec()-1;
     if(which==='fail-switch')failNext=true;
     if(which==='empty'){state.accounts=[];state.current=null;usages={};state.pending='fresh-login@example.com';}
-    if(which==='adding-home'){previous=state.current;state.current=null;state.adding=true;state.add_state={previous,phase:'login'};state.add_login_status='waiting';}
-    if(which==='adding-ready'){previous=state.current;state.current=null;state.adding=true;state.add_state={previous,phase:'login'};state.add_login_status='ready';}
+    if(which==='adding-home'){previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:email||'',phase:'login'};state.add_login_status='waiting';}
+    if(which==='adding-ready'){previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:email||'',phase:'login'};state.add_login_status='ready';}
     if(which==='relay-week-priority'){
       state.current=state.accounts[0].email;
       state.accounts[1]={...state.accounts[1],alias:'上方账号',ok:true,windows:[{label:'5h',duration_mins:300,used:0,resets_at:sec()+18000},{label:'周',duration_mins:10080,used:88,resets_at:sec()+604800}]};
@@ -392,7 +458,7 @@ window.NXDemo = (() => {
     if(which==='notify-low')state.settings.notify_low=true;
     if(which==='hotkey-conflict')state.hotkeys[0].registered=false;
     if(which==='adding-unchanged'||which==='adding-existing'||which==='adding-opening'||which==='adding-saving'||which==='adding-cancelling'){
-      previous=state.current;state.current=null;state.adding=true;state.add_state={previous,phase:'login'};
+      previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:email||'',phase:'login'};
       state.add_login_status=which==='adding-existing'?'existing':which==='adding-unchanged'?'unchanged':'waiting';
       if(which==='adding-opening')state.operation={kind:'add_start',phase:'正在打开登录窗口'};
       if(which==='adding-saving'){state.add_login_status='ready';state.operation={kind:'add_finish',phase:'正在保存新账号'};}

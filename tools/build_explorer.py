@@ -13,6 +13,10 @@ def build_explorer(output: Path):
     width,height=CONFIG['sizes']['home']
     html=template.replace('__VERSION__',APP_VERSION).replace('__GEOMETRY__',f'{width} × {height}').replace('__PANEL_WIDTH__',str(width)).replace('__PANEL_HEIGHT__',str(height)).replace('__PANEL_RADIUS__',str(CONFIG['radius'])).replace('__SOURCE_DIGEST__',ui_source_digest()).replace('__CATALOG__',js(CASES)).replace('__NATIVE__',js(NATIVE_SURFACES)).replace('__DEMO__',js(panel(demo=True)))
     output.parent.mkdir(parents=True,exist_ok=True);output.write_text(html,encoding='utf-8')
+    if output.resolve() == ROOT / f'ChatGPTnx-v{APP_VERSION}.html':
+        (ROOT/'preview.cmd').write_text(
+            '@echo off\nsetlocal\nstart "" "%~dp0'+output.name+'"\n',
+            encoding='utf-8', newline='\r\n')
     print('Built offline UI explorer:',output)
     return html
 

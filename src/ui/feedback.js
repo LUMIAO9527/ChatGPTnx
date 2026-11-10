@@ -74,7 +74,7 @@ window.NXFeedback = (() => {
     const request=()=>{if(!scheduled)scheduled=requestAnimationFrame(()=>{scheduled=0;layout();});};
     const resize=new ResizeObserver(request);resize.observe(root);
     const intersects=(a,b)=>a.bottom>b.top-6&&a.top<b.bottom+6&&a.left<b.right&&a.right>b.left;
-    const fixedDetail=()=>viewport?.classList.contains('detail-body')&&!viewport.classList.contains('reset-expanded')&&!viewport.querySelector('.account-editor details[open]');
+    const fixedDetail=()=>viewport?.classList.contains('detail-body')&&!viewport.classList.contains('reset-expanded')&&!viewport.classList.contains('vault-expanded')&&!viewport.querySelector('.account-editor details[open]');
     function clearRunway(force=false) {
       if(!runway)return;
       if(!force&&viewport?.scrollTop>baseRange+1){holdRunway=true;return;}

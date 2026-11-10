@@ -23,12 +23,14 @@
     if(body&&body.scrollWidth>body.clientWidth+1)problems.push('正文横向溢出');
     if(info.page==='detail'&&body){
       const rows=[...body.querySelectorAll('.detail-item')].map(n=>n.matches('.control-container')?n.querySelector('.control-header'):n);
-      const archive=body.querySelector('.danger-row'),note=body.querySelector('.detail-expiry-note'),editor=body.querySelector('.account-editor details[open]'),reset=body.classList.contains('reset-expanded');
+      const archive=body.querySelector('.danger-row'),note=body.querySelector('.detail-expiry-note'),editor=body.querySelector('.account-editor details[open]'),reset=body.classList.contains('reset-expanded'),vaultOpen=!!body.querySelector('.detail-vault.is-open');
       if(!archive||!note||note.previousElementSibling!==archive||getComputedStyle(note).position!=='static')problems.push('账号详情归档和日期未随正文排列');
       if(rows.length!==4)problems.push('账号详情缺少信息行');
       const controls=archive?[...rows,archive]:rows;
       if(new Set(controls.map(n=>n.getBoundingClientRect().height)).size>1||new Set(controls.map(n=>getComputedStyle(n).borderTopLeftRadius)).size>1)problems.push('账号详情信息行尺寸不一致');
-      if(!reset&&!editor){
+      // An expanded disclosure is allowed to push the body past its height, the
+      // same way the reset list and the nickname editor already are.
+      if(!reset&&!editor&&!vaultOpen){
         if(body.scrollTop||body.scrollHeight>body.clientHeight+1)problems.push('账号详情产生滚动');
         if(controls.slice(1).some((n,i)=>Math.abs(n.getBoundingClientRect().top-controls[i].getBoundingClientRect().bottom-6)>.5))problems.push('账号详情行间距不一致');
         if(archive&&archive.getBoundingClientRect().bottom>body.getBoundingClientRect().bottom+.5)problems.push('账号详情归档行溢出正文');

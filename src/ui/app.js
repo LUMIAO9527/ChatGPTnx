@@ -21,7 +21,7 @@
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[], location:window.NX_SETUP||null};
   let workflowResume = false;
   let lastLoginResult = '';
-  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
+  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), vaultExpanded:new Set(), vaultReveal:null, vaultDraft:'', vaultEditor:null, vaultForget:null, mfa:null, storeGroups:new Set(['cookies','storage','cache']), storeConfirm:false, disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
   let connected = false, bridgeError = '', acting = false, nativeDialog = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
   const app = $('#app');
   app.innerHTML = '<main id="home"></main><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden></section><div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>';
@@ -266,7 +266,11 @@
   }
   function show(page, target=null, push=true, saved=null) {
     if(window.NXDataTransfer?.busy(ui.page))return;
-    resetConfirmation=null;ui.resumeClearConfirm=false;
+    resetConfirmation=null;ui.resumeClearConfirm=false;ui.vaultForget=null;
+    if(ui.page==='mfa'&&page!=='mfa'){api('mfa_cancel',{email:ui.email}).catch(()=>{});ui.mfa=null;}
+    if(ui.page==='authenticator'&&page!=='authenticator'){api('authenticator_cancel').catch(()=>{});ui.authTransfer=null;ui.authText='';}
+    if(page!=='vault-edit')ui.vaultEditor=null;
+    if(page!=='detail'){ui.vaultReveal=null;ui.vaultExpanded.clear();}
     const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message','resume-clear':'resume-history'};
     const initial=page;
     if(Object.hasOwn(aliases,page))page='settings';
@@ -275,7 +279,7 @@
     window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','confirm','remove','reauth'].includes(page)?target:null,{from:ui.page||'home',to:page});
     const returningToSettings = page==='settings' && saved?.page==='settings';
     if(page==='settings' && !returningToSettings){ui.disclosures.clear();ui.collectionPages={};}
-    if(page==='detail'){ui.disclosures.clear();ui.resetExpanded.clear();ui.collectionPages['reset:'+target]=1;}
+    if(page==='detail'){ui.disclosures.clear();ui.resetExpanded.clear();ui.vaultExpanded.clear();ui.vaultReveal=null;ui.collectionPages['reset:'+target]=1;}
     if(page==='resume'){ui.resumeExpanded.clear();ui.resumeCollapsed.clear();}
     if(Object.hasOwn(aliases,initial)&&aliases[initial])selectSettingDisclosure(aliases[initial]);
     if(initial==='edit')ui.disclosures.add('meta:'+target);
@@ -293,12 +297,13 @@
   }
   function closeSheet(animate=true) {
     if(window.NXDataTransfer?.busy(ui.page))return;
+    if(ui.page==='authenticator'){api('authenticator_cancel').catch(()=>{});ui.authTransfer=null;ui.authText='';}
     window.NXDataTransfer?.leave(ui.page,null,{api});
     if(ui.page&&animate)window.NXMotion?.begin(sheet, -1,null,{from:ui.page,to:'home'});
     else window.NXMotion?.stop();
     resetConfirmation=null;ui.resumeClearConfirm=false;
     feedback.clear();clearNotification();navigation.invalidate();ui.recording=null;
-    ui.page=null;ui.email=null;ui.history=[];sheet.hidden=true;home.inert=false;
+    if(ui.page==='mfa')api('mfa_cancel',{email:ui.email}).catch(()=>{});ui.mfa=null;ui.vaultEditor=null;ui.vaultReveal=null;ui.vaultExpanded.clear();ui.vaultDraft='';ui.page=null;ui.email=null;ui.history=[];sheet.hidden=true;home.inert=false;
     setSize('home');renderHome();
     restoreFocus(home,previousFocusKey);
     if(!home.contains(document.activeElement))home.querySelector('button')?.focus({preventScroll:true});
@@ -335,7 +340,7 @@
     }
     if(a.query_warning?.scope==='reset_credits'&&a.query_warning.paused) entries.push(`<div class="reset-credit collection-row"><span title="重置详情查询已暂停，主额度查询正常">详情查询已暂停</span><button class="control secondary control--small" data-action="retry-query" data-email="${esc(a.email)}">恢复查询</button></div>`);
     const content=expanded?window.NXComponents.pagedList(viewContext(),'reset:'+a.email,entries,markup=>markup,{label:'重置次数',empty}):'';
-    return `<div class="detail-reset detail-item control-container" data-disclosure="reset:${esc(a.email)}"><button class="detail-line detail-action reset-summary control-header" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}" aria-controls="reset-credit-details"><span>重置次数</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}</strong>${icon('chevron')}</span></button>${expanded?`<div id="reset-credit-details" class="reset-credit-details" role="region" aria-label="重置次数详情">${content}</div>`:''}</div>`;
+    return `<div class="detail-reset detail-item control-container" data-disclosure="reset:${esc(a.email)}"><button class="detail-line detail-action reset-summary control-header" data-action="toggle-reset-credits" data-email="${esc(a.email)}" aria-expanded="${expanded}" aria-controls="reset-credit-details"><span>重置 · Credits</span><span class="right"><strong>${count===null?'暂不可用':`${count} 次`}${creditValue(a)&&creditValue(a)!=='—'?` · ${esc(creditValue(a))}`:''}</strong>${icon('chevron')}</span></button>${expanded?`<div id="reset-credit-details" class="reset-credit-details" role="region" aria-label="重置次数详情">${content}</div>`:''}</div>`;
   }
   function scopeUsage() {
     if (!ui.usage) return null;
@@ -376,6 +381,18 @@
         title=ui.scope==='all'?'用量总览':'个人用量';body=usageContent();cls='usage-body usage-report '+(ui.scope==='all'?'all-usage':'personal-usage');foot='';break;
       case 'quota-overview':
         title='额度总览';body=quotaOverviewContent();cls='quota-overview-body';break;
+      case 'vault':
+        title='账号库';body=window.NXVault.page(viewContext());cls='vault-body';break;
+      case 'authenticator':
+        title='导入手机验证器';body=window.NXVault.authenticator(viewContext());cls='vault-form-body';
+        foot=`<button class="control control--large secondary" data-action="back">返回</button>${ui.authTransfer?'<button class="control control--large primary" data-action="authenticator-commit">导入所选账号</button>':''}`;break;
+      case 'vault-edit':
+        title='登录资料';body=window.NXVault.editor(viewContext());cls='vault-form-body';foot=`<button class="control control--large secondary" data-action="back">返回</button><button class="control control--large primary" data-action="vault-save">保存</button>`;break;
+      case 'mfa':
+        title='更换验证器';body=window.NXVault.mfa(viewContext());cls='vault-form-body';
+        foot=`<button class="control control--large secondary" data-action="back">返回</button>${data.current?.toLowerCase()===ui.email?.toLowerCase()?`<button class="control control--large primary" data-action="${ui.mfa?.token?'mfa-commit':'mfa-preview'}" ${ui.mfa?.token&&!ui.mfa?.confirmed?'disabled':''}>${ui.mfa?.token?'保存新密钥':'生成验证码'}</button>`:''}`;break;
+      case 'desktop-store':
+        title='清理登录数据';body=window.NXVault.cleanup(viewContext());cls='vault-form-body';foot=`<button class="control control--large secondary" data-action="back">返回</button><button class="control control--large primary ${ui.storeConfirm?'control--confirmation':''}" data-action="store-clear" ${!ui.storeGroups.size||busy()?'disabled':''}>${ui.storeConfirm?'确认清理':'清理所选内容'}</button>`;break;
       case 'detail': {
         if(!a){closeSheet();return;}
         title='账号详情';const m=a.membership||{},isCurrent=a.email===data.current;
@@ -389,8 +406,8 @@
           `<div class="detail-actions is-current"><button class="control control--large primary current-status" data-action="home" aria-label="当前使用，返回首页">${icon('check')}当前使用</button></div>`:
           `<div class="detail-actions"><button class="control control--large primary" data-action="pick" ${attr} ${!waiting&&!picked&&(busy()||data.adding||data.reauth)?'disabled':''} aria-pressed="${waiting||picked}" title="${exhausted&&!waiting?'额度恢复并核验后自动接力':pickLabel}">${icon(pickIcon)}${pickLabel}</button><button class="control control--large secondary" data-action="switch" ${attr} ${busy()||data.adding?'disabled':''}>切换到此账号 ${icon('arrow')}</button></div>`;
         const archive=isCurrent?`<button class="danger-row unavailable" disabled title="切换到其他账号后可归档">${icon('archive')}归档账号</button>`:`<button class="danger-row" data-action="remove" ${attr}>${icon('archive')}归档账号</button>`;
-        body=`${accountCard(a,true,isCurrent?'正在使用':'')}${actionArea}<div class="detail-compact"><button class="link-row detail-item detail-usage" data-action="usage-account" ${attr}>${icon('chart')}<span>个人用量</span>${icon('chevron')}</button>${window.NXEditors.account(viewContext(),a)}${resetCredits(a)}${detail('Credits',creditValue(a))}<div class="detail-archive">${archive}<div class="detail-expiry-note">${esc(expiryNote)}</div></div></div>`;
-        cls=`detail-body ${isCurrent?'is-current':''} has-credits${ui.resetExpanded.has(a.email)?' reset-expanded':''}`;break;}
+        body=`${accountCard(a,true,isCurrent?'正在使用':'')}${actionArea}<div class="detail-compact"><button class="link-row detail-item detail-usage" data-action="usage-account" ${attr}>${icon('chart')}<span>个人用量</span>${icon('chevron')}</button>${window.NXEditors.account(viewContext(),a)}${resetCredits(a)}${window.NXVault.row(viewContext(),a)}<div class="detail-archive">${archive}<div class="detail-expiry-note">${esc(expiryNote)}</div></div></div>`;
+        cls=`detail-body ${isCurrent?'is-current':''} has-credits${ui.resetExpanded.has(a.email)?' reset-expanded':''}${ui.vaultExpanded.has(a.email)?' vault-expanded':''}`;break;}
       case 'confirm': {
         const quota=quotaSummary(a);
         title=ui.switchKind==='relay'?'账号接力':'切换账号';body=`<div class="confirm-mark">${icon('baton')}</div><h3 class="confirm-title">${ui.switchKind==='relay'?'下一棒，交给':'切换到'}<br>${esc(name(a))}</h3><p class="note">将重启 ChatGPT 桌面端。</p><button class="confirm-account" data-action="detail" ${attr} aria-label="查看 ${esc(name(a))} 的账号详情">${avatar(a)}<span class="confirm-account-copy"><span class="identity-title"><strong title="${esc(name(a))}">${esc(name(a))}</strong><span class="badge">${esc(plan(a?.plan))}</span></span><span class="confirm-account-quota">${quota}</span></span><span class="confirm-account-more">详情 ${icon('chevron')}</span></button>${data.operation?statusRegion(statusBar({text:data.operation.phase,tone:'progress',className:'operation-notice'})):''}`;
@@ -413,7 +430,7 @@
           const copy=!data.adding?'将重启桌面端，打开登录窗口。':'完成登录后自动验证并保存；取消会恢复原账号。';
           const state=data.operation?data.operation.phase:data.login_progress?.message|| (ready?'已检测到登录，准备自动验证':status==='unchanged'?'仍是添加前的账号，请登录新账号':status==='existing'?'这个账号已经在清单里':status==='waiting'?'等待登录新账号':'等待打开登录窗口');
           const steps=`<ol class="add-progress"><li class="${ready?'done':'current'}">在 ChatGPT 桌面端登录新账号</li><li class="${ready?'current':''}">自动验证并保存</li></ol>`;
-          body=`<div class="confirm-mark">${icon(ready?'check':'plus')}</div><h3 class="confirm-title">${heading}</h3><p class="note">${copy}</p>${steps}${statusRegion(statusBar({text:state,tone:data.operation?'progress':ready?'success':'neutral',symbol:ready?'check':'clock',className:'flow-status'}))}`;
+          body=`<div class="confirm-mark">${icon(ready?'check':'plus')}</div><h3 class="confirm-title">${heading}</h3><p class="note">${copy}</p>${!data.adding?'<button class="control control--large secondary" data-action="vault-page">从账号库登录</button>':''}${steps}${statusRegion(statusBar({text:state,tone:data.operation?'progress':ready?'success':'neutral',symbol:ready?'check':'clock',className:'flow-status'}))}`;
           foot=data.adding?`<button class="control control--large secondary" data-action="cancel-add">取消并恢复</button><button class="control control--large primary" data-action="finish-add" ${disabled()||!ready?'disabled':''}>重试验证</button>`:`<button class="control control--large secondary" data-action="back">返回</button><button class="control control--large primary control--confirmation" data-action="start-add" ${disabled()}>打开登录窗口</button>`;break;
         }
       case 'reauth': {
@@ -488,7 +505,7 @@
     set_preferences:'正在保存…',set_account_meta:'正在保存…',set_auto_relay_account:'正在保存…',
     set_relay_pick:'正在设置…',cancel_relay_pick:'正在取消…',consume_reset:'正在重置…',set_account_hotkey:'正在保存…',adopt_current:'正在保存…',
     add_start:'正在打开…',add_finish:'正在保存…',add_cancel:'正在恢复…',
-    reauth_start:'正在打开…',reauth_finish:'正在验证…',reauth_cancel:'正在恢复…',
+    clear_desktop_store:'正在清理…',reauth_start:'正在打开…',reauth_finish:'正在验证…',reauth_cancel:'正在恢复…',
     switch:'正在切换…',relay:'正在接力…',remove:'正在归档…',restore:'正在恢复…',
     clear_resume_history:'正在清理…',open_resume_task:'正在定位…',retry_resume_task:'正在排队…',copy_text:'正在复制…'
   };
@@ -498,7 +515,7 @@
     const ticket=navigation.ticket();
     if(['set_preferences','set_account_meta'].includes(method)){const error=$('#form-error');if(error)error.textContent='';}
     acting=true;
-    const dockAction=new Set(['launch_chatgpt','adopt_current','add_start','add_finish','add_cancel','reauth_start','reauth_finish','reauth_cancel','switch','relay','consume_reset','remove','restore','open_resume_task']);
+    const dockAction=new Set(['launch_chatgpt','adopt_current','add_start','add_finish','add_cancel','reauth_start','reauth_finish','reauth_cancel','switch','relay','consume_reset','remove','restore','open_resume_task','clear_desktop_store']);
     const usesDock=dockAction.has(method),operation={text:actionLabels[method]||'处理中…',ticket};
     if(usesDock)controlOperation=operation;
     const token=usesDock?null:feedback.begin(source,actionLabels[method]||'处理中…');render();
@@ -772,7 +789,78 @@
       case 'retry-resume-task':await run('retry_resume_task',b.dataset.session,val);break;
       case 'home':closeSheet();break;
       case 'detail':show('detail',target);break;
-      case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.disclosures.delete('meta:'+target);}renderSheet();});break;
+      case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.vaultExpanded.delete(target);ui.disclosures.delete('meta:'+target);}renderSheet();});break;
+      case 'toggle-vault':disclose(()=>{ui.vaultReveal=null;if(ui.vaultExpanded.has(target))ui.vaultExpanded.delete(target);else {ui.vaultExpanded.add(target);ui.disclosures.delete('meta:'+target);ui.resetExpanded.delete(target);ui.collectionPages['reset:'+target]=1;}renderSheet();});break;
+      case 'vault-page':show('vault');break;
+      case 'authenticator-open':ui.authTransfer=null;ui.authText='';show('authenticator');break;
+      case 'authenticator-choose':
+      case 'authenticator-preview':{
+        let result;
+        nativeDialog=b.dataset.action==='authenticator-choose';
+        try{result=await api(nativeDialog?'authenticator_choose':'authenticator_preview',...(nativeDialog?[]:[{text:ui.authText||''}]));}
+        finally{nativeDialog=false;}
+        if(!navigation.current(ticket)){api('authenticator_cancel').catch(()=>{});break;}
+        if(result?.cancelled)break;
+        if(!result?.ok){formError(result?.error||'读取未完成');break;}
+        ui.authTransfer=result;ui.authText='';renderSheet();break;}
+      case 'authenticator-commit':{
+        const selections=(ui.authTransfer?.rows||[]).filter(row=>row.email).map(({id,email})=>({id,email}));
+        const result=await api('authenticator_commit',{token:ui.authTransfer?.token,selections});
+        if(!navigation.current(ticket))break;
+        if(!result?.ok){formError(result?.error||'导入未完成');break;}
+        ui.authTransfer=null;await poll(true);back();notify(`已导入 ${result.imported} 个验证器`);break;}
+      case 'vault-open-exchange':await run('vault_open_exchange',{email:target});break;
+      case 'vault-edit':ui.vaultEditor={email:target||'',locked:!!target,password:'',material:'',exchange_url:'',recovery_codes:''};show('vault-edit',target);break;
+      case 'vault-save':{
+        const result=await api('vault_save',ui.vaultEditor||{});
+        if(!navigation.current(ticket))break;
+        if(result?.ok===false){formError(result.error);break;}
+        ui.vaultEditor=null;await poll(true);back();notify('登录资料已保存');break;}
+      case 'mfa-open':ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};show('mfa',target);break;
+      case 'mfa-preview':{
+        const owner=ui.email,result=await api('mfa_preview',{email:owner,secret:ui.mfa?.secret||''});
+        if(!navigation.current(ticket)){api('mfa_cancel',{email:owner}).catch(()=>{});break;}
+        if(result?.ok===false){formError(result.error);break;}
+        ui.mfa={...ui.mfa,...result,secret:'',confirmed:false};await poll(true);renderSheet();break;}
+      case 'mfa-copy':{
+        const pending=(data.mfa_pending||[]).find(p=>p.token===ui.mfa?.token);
+        if(pending?.code)await navigator.clipboard.writeText(pending.code);break;}
+      case 'mfa-commit':{
+        const result=await api('mfa_commit',{email:ui.email,token:ui.mfa?.token,confirmed:ui.mfa?.confirmed===true,recovery_codes:ui.mfa?.recovery_codes||''});
+        if(!navigation.current(ticket))break;
+        if(result?.ok===false){formError(result.error);break;}
+        ui.mfa=null;await poll(true);back();notify('新验证器已保存');break;}
+      case 'store-open':ui.storeConfirm=false;show('desktop-store');break;
+      case 'store-toggle':ui.storeConfirm=false;if(ui.storeGroups.has(target))ui.storeGroups.delete(target);else ui.storeGroups.add(target);renderSheet();break;
+      case 'store-clear':if(!ui.storeConfirm){ui.storeConfirm=true;renderSheet();break;}ui.storeConfirm=false;await run('clear_desktop_store',{groups:[...ui.storeGroups]});break;
+      case 'vault-reveal':{
+        const who=target;
+        if(ui.vaultReveal&&ui.vaultReveal.email===who){ui.vaultReveal=null;renderSheet();break;}
+        const secret=await api('vault_secret',{email:who,field:'password'});
+        if(!navigation.current(ticket))break;
+        if(!secret||secret.ok===false||!secret.value){notify(secret?.error||'没有保存这个账号的密码',{tone:'error'});break;}
+        ui.vaultReveal={email:who,value:secret.value};renderSheet();
+        setTimeout(()=>{if(ui.vaultReveal&&ui.vaultReveal.email===who){ui.vaultReveal=null;renderSheet();}},3000);
+        break;}
+      case 'vault-copy':{
+        let copyText='';
+        if(val==='email')copyText=target;
+        else if(val==='code')copyText=window.NXVault.find(data,target)?.code||'';
+        else {const secret=await api('vault_secret',{email:target,field:val});copyText=secret?.value||'';}
+        if(!copyText){notify('没有可复制的内容',{tone:'error'});break;}
+        await navigator.clipboard.writeText(copyText);notify('已复制');break;}
+      case 'vault-import':{
+        const result=await api('vault_import',{text:ui.vaultDraft||''});
+        if(result?.ok===false){notify(result.error||'导入未完成',{tone:'error'});break;}
+        ui.vaultDraft='';await poll(true);renderSheet();notify(`已导入 ${result?.added??0} 个账号${result?.skipped?`，第 ${result.lines.join('、')} 行格式需修改`:''}`);break;}
+      case 'vault-forget':{
+        if(ui.vaultForget!==target){ui.vaultForget=target;renderSheet();break;}ui.vaultForget=null;
+        const result=await api('vault_forget',{email:target});
+        if(result?.ok===false){notify(result.error||'删除未完成',{tone:'error'});break;}
+        await poll(true);renderSheet();break;}
+      case 'vault-login':{
+        const known=(data.accounts||[]).some(account=>account.email===target);
+        show(known?'reauth':'add',target);await run(known?'reauth_start':'add_start',target);break;}
       case 'use-reset':{
         const account=data.accounts.find(a=>a.email===target),creditId=b.dataset.credit;
         if(!account||busy()||acting)break;
@@ -862,7 +950,7 @@
         }catch(error){notify(error.message||'安装未完成',{tone:'error'});}
         finally{feedback.finish(token);}
         break;}
-      case 'start-add':await run('add_start');break;
+      case 'start-add':await run('add_start',ui.email||null);break;
       case 'cancel-add':if(await run('add_cancel')&&navigation.current(ticket))closeSheet();break;
       case 'finish-add':if(await run('add_finish')&&navigation.current(ticket))closeSheet();break;
       case 'start-reauth':await run('reauth_start',target);break;
@@ -875,11 +963,25 @@
       case 'error':if(data.last_error?.id)await run('dismiss_error',data.last_error.id);else {clearNotification();render();}break;
     }} catch(error){if(navigation.current(ticket))notify(error.message||'操作未完成，请重试',{tone:'error'});}
   });
+  app.addEventListener('change',event=>{
+    if(event.target.id==='mfa-confirm'&&ui.mfa){ui.mfa.confirmed=event.target.checked;const save=app.querySelector('[data-action="mfa-commit"]');if(save)save.disabled=!ui.mfa.confirmed;}
+    if(event.target.matches('.auth-map')&&ui.authTransfer){const row=ui.authTransfer.rows.find(row=>row.id===event.target.dataset.id);if(row)row.email=event.target.value;}
+  });
   app.addEventListener('compositionstart',event=>{if(event.target.matches('.field'))composingField=event.target;});
   app.addEventListener('compositionend',()=>{composingField=null;if(deferredSheet){deferredSheet=false;renderSheet();}});
   app.addEventListener('input',event=>{
     if(!event.target.matches('.field'))return;
     const id=event.target.id;
+    if(id==='authenticator-text'){ui.authText=event.target.value;return;}
+    const vaultFields={'vault-email':'email','vault-password':'password','vault-material':'material','vault-url':'exchange_url','vault-recovery':'recovery_codes'};
+    if(vaultFields[id]&&ui.vaultEditor){ui.vaultEditor[vaultFields[id]]=event.target.value;return;}
+    if((id==='mfa-secret'||id==='mfa-recovery')&&ui.mfa){ui.mfa[id==='mfa-secret'?'secret':'recovery_codes']=event.target.value;return;}
+    if(id==='vault-import'){
+      ui.vaultDraft=event.target.value;
+      const trigger=document.querySelector('[data-action="vault-import"]');
+      if(trigger)trigger.disabled=!ui.vaultDraft.trim();
+      return;
+    }
     if(id==='resume-message')ui.messageDraft=event.target.value;
     if(ui.page==='detail'&&['alias','manual-date'].includes(id)){
       const field=id==='alias'?'alias':'subscription_date',draft=ui.metaDrafts.get(ui.email)||{};
@@ -944,7 +1046,7 @@
   window.nxOpenUninstall=()=>{panelVisible=true;window.NXDataTransfer.handle({dataset:{action:"uninstall-open"}},{...viewContext(),show,back,render:()=>renderSheet()});poll();};
   window.nxOpenUpdate=()=>{panelVisible=true;show('update');poll();};
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
-  window.nxHidden=()=>{window.NXDataTransfer?.hidden(ui.page,{api});window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
+  window.nxHidden=()=>{ui.vaultReveal=null;ui.vaultDraft='';ui.vaultEditor=null;if(ui.page==='mfa'){api('mfa_cancel',{email:ui.email}).catch(()=>{});ui.mfa=null;}window.NXDataTransfer?.hidden(ui.page,{api});window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
   window.addEventListener('pywebviewready',poll);
   window.addEventListener('resize',()=>{window.NXMotion?.stop();if(config.demo)setSize(ui.page?'workspace':'home');});
   setInterval(()=>{
@@ -958,7 +1060,7 @@
   function schedulePoll(delay=null){
     clearTimeout(pollTimer);pollTimer=null;
     if(!panelVisible && !config.demo) return;
-    const wait=delay ?? ((busy()||ui.submitted||data.adding||data.reauth||['checking','downloading','installing'].includes(data.update?.status))?800:5000);
+    const wait=delay ?? ((['vault','mfa'].includes(ui.page)||ui.vaultExpanded.size)?1000:(busy()||ui.submitted||data.adding||data.reauth||['checking','downloading','installing'].includes(data.update?.status))?800:5000);
     pollTimer=setTimeout(()=>poll(),wait);
   }
   applyAppearance(data.settings.appearance);
@@ -975,10 +1077,13 @@
           await openUsage(params.get('email')||'all');return;
         }
         if(page==='resume'){await openResumeDetails();return;}
-        const target=['detail','edit','remove','reauth'].includes(page)?data.accounts.find(a=>a.email===params.get('email'))||current()||data.accounts.find(a=>a.error_code==='reauth_required'):page==='confirm'?relay():null;
+        const target=['detail','edit','remove','reauth','mfa','vault-edit'].includes(page)?data.accounts.find(a=>a.email===params.get('email'))||current()||data.accounts.find(a=>a.error_code==='reauth_required'):page==='confirm'?relay():null;
         if(page==='confirm')ui.switchKind=params.get('kind')==='relay'?'relay':'manual';
+        if(page==='mfa')ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};
+        if(page==='vault-edit')ui.vaultEditor={email:target?.email||'',locked:!!target,password:'',material:'',exchange_url:'',recovery_codes:''};
         show(page,target?.email||null);
         if(page==='detail'&&params.get('expand')==='reset'&&target){ui.resetExpanded.add(target.email);renderSheet();}
+        if(page==='detail'&&params.get('expand')==='vault'&&target){ui.vaultExpanded.add(target.email);renderSheet();}
         if(page==='settings'&&params.get('expand')==='resume-history'){ui.disclosures.add('resume-history');await loadInline('resume-history');}
         if(page==='archives')await loadInline('archives');
       },

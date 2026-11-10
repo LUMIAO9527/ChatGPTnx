@@ -116,8 +116,18 @@ def main():
             sample={'schema':1,'accounts':[{'email':'runtime-check@invalid.local','credential':None}]}
             if unseal(seal(sample,'runtime-check-password'),'runtime-check-password')!=sample:
                 raise RuntimeError('backup runtime check failed')
+            import zxingcpp
+            from PIL import Image
+            bitmap = zxingcpp.create_barcode('NX runtime check', zxingcpp.BarcodeFormat.QRCode).to_image(scale=4)
+            view = memoryview(bitmap)
+            with Image.frombytes('L', (view.shape[1], view.shape[0]), bytes(view)) as picture:
+                codes = zxingcpp.read_barcodes(picture)
+            if len(codes) != 1 or codes[0].text != 'NX runtime check':
+                raise RuntimeError('authenticator image reader check failed')
+            result['authenticator_reader_ready'] = True
             required = ('panel.html', 'nx.ico', 'nx-light.ico', 'nx-dark.ico', 'switch_account.ps1',
-                        'continue_in_desktop.ps1', 'ChatGPTnx.Update.exe', 'uninstall.ps1')
+                        'continue_in_desktop.ps1', 'ChatGPTnx.Update.exe', 'uninstall.ps1',
+                        'login_fill.ps1', 'login_surface.ps1')
             if not all((resources / name).is_file() for name in required):
                 raise RuntimeError('runtime resources missing')
             result['dependencies_ready'] = True

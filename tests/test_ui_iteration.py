@@ -50,7 +50,8 @@ class CatalogTests(unittest.TestCase):
         source=(ROOT/'src/ui/app.js').read_text(encoding='utf-8')
         self.assertIn('NXViews.onboarding',source)
         self.assertNotIn('card onboarding',source)
-        self.assertIn("detail('Credits',creditValue(a))",source)
+        self.assertIn('重置 · Credits',source)
+        self.assertIn('NXVault.row',source)
     def test_capture_validates_route_and_scroll_content(self):
         source=(ROOT/'tools/capture_previews.py').read_text(encoding='utf-8')
         self.assertIn("case['expected']",source)

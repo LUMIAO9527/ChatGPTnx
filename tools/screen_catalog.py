@@ -448,6 +448,25 @@ add(G,'export-data-options','随附资料 · 三项完整显示',route='data-exp
 for item in CASES:
     if item['group']==G:item['expected']={'archives':'settings'}.get(item['route'],item['route'])
 
+G='19 · 登录资料与验证器'
+for key,label,route,steps,params in [
+ ('vault','账号库 · 已保存资料','vault',[],{}),
+ ('vault-edit','登录资料 · 编辑已有账号','vault-edit',[],{}),
+ ('vault-new','登录资料 · 添加账号','vault',[click('vault-edit')],{}),
+ ('vault-detail','详情 · 密码与 2FA 展开','detail',[],{'expand':'vault'}),
+ ('vault-detail-other','详情 · 备用账号 2FA 展开','detail',[],{'expand':'vault','email':'backup@example.com'}),
+ ('vault-password','详情 · 临时显示密码','detail',[click('toggle-vault'),click('vault-reveal')],{}),
+ ('mfa','验证器 · 录入设置页密钥','mfa',[],{}),
+ ('mfa-preview','验证器 · 验证码与确认','mfa',[{'fill':'#mfa-secret','value':'JBSWY3DPEHPK3PXP'},click('mfa-preview')],{}),
+ ('mfa-other','验证器 · 切换到目标账号','mfa',[],{'email':'backup@example.com'}),
+ ('phone-authenticator','手机验证器 · 选择导出图片','authenticator',[],{}),
+ ('phone-authenticator-review','手机验证器 · 核对账号','authenticator',[click('authenticator-choose')],{}),
+ ('desktop-store','登录数据 · 清理范围','desktop-store',[],{}),
+ ('desktop-store-confirm','登录数据 · 清理确认','desktop-store',[click('store-clear')],{}),
+]:
+    add(G,key,label,route=route,steps=steps,**params)
+    CASES[-1]['expected']='vault-edit' if key=='vault-new' else route
+
 NATIVE_SURFACES = [
  {'surface':'托盘菜单与气泡通知','source':'src/nx/desktop.py / src/nx/trayicon.py','verification':'由 Windows 原生绘制，须在本机验收；不以 HTML 模型冒充真实截图。'},
  {'surface':'ChatGPT 登录、继续按钮和系统权限窗口','source':'src/switch_account.ps1 / src/continue_in_desktop.ps1','verification':'外部应用/系统窗口，不由本项目渲染。演示仅模拟外部事件，不操作真实桌面。'},
