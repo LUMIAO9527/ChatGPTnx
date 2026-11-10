@@ -62,11 +62,11 @@ The quota overview and usage statistics help you see which account is available 
 
 ## Download and run
 
-The source and local build are **v1.8.0**. Open `ChatGPTnx-v1.8.0.html` at the project root for all current pages and states. The public download link below still points to v1.7.3.
+The current version is **v1.8.0**. Open `ChatGPTnx-v1.8.0.html` at the project root for all current pages and states.
 
 After an account switch, ChatGPTnx tries the original chat's Continue button first. If it confirms that no button action was sent, it sends the configured continuation message.
 
-Download `ChatGPTnx.exe` from the [v1.7.3 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.7.3). The release also provides `ChatGPTnx-v1.7.3-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
+Download `ChatGPTnx.exe` from the [v1.8.0 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.8.0). The release also provides `ChatGPTnx-v1.8.0-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
 
 1. On first launch the panel opens to choose the program folder (recommended: `D:\ChatGPTnx`; nothing is written beside the download before you choose). Open the panel from the system tray afterwards.
 2. Select **Add account** and sign in to ChatGPT. The app automatically verifies and saves the account. If verification is temporarily unavailable, use **Retry verification** in the panel.

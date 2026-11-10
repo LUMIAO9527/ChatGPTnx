@@ -2,7 +2,7 @@
 
 公开版本以 [GitHub Releases](https://github.com/LUMIAO9527/ChatGPTnx/releases) 为准。日期为本地时间（UTC+8）。
 
-## 1.8.0（2026-11-11，本地交付）
+## 1.8.0（2026-11-11）
 
 新增加密账号库、密码与实时 2FA 验证码，以及 Google Authenticator 二维码导入和验证器更换流程。登录页可逐步填入已存资料，设置中可选择清理桌面端内置网页的登录数据。
 
