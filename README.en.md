@@ -7,7 +7,7 @@
 <p>Keep a long task moving across the accounts you own. Switch accounts when quota runs out, then attempt to continue the original task.</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.8.3" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.8.4" height="20">
 <img src="docs/images/badges/license.svg" alt="Source available to inspect; rights reserved" height="20">
 </div>
 
@@ -62,11 +62,11 @@ The quota overview and usage statistics help you see which account is available 
 
 ## Download and run
 
-The current version is **v1.8.3**. Open `ChatGPTnx-v1.8.3.html` at the project root for all current pages and states.
+The current version is **v1.8.4**. Open `ChatGPTnx-v1.8.4.html` at the project root for all current pages and states.
 
 After an account switch, ChatGPTnx tries the original chat's Continue button first. If it confirms that no button action was sent, it sends the configured continuation message.
 
-Download `ChatGPTnx.exe` from the [v1.8.3 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.8.3). The release also provides `ChatGPTnx-v1.8.3-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
+Download `ChatGPTnx.exe` from the [v1.8.4 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.8.4). The release also provides `ChatGPTnx-v1.8.4-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
 
 1. On first launch the panel opens to choose the program folder (recommended: `D:\ChatGPTnx`; nothing is written beside the download before you choose). Open the panel from the system tray afterwards.
 2. Select **Add account** and sign in to ChatGPT. The app automatically verifies and saves the account. If verification is temporarily unavailable, use **Retry verification** in the panel.
@@ -89,7 +89,7 @@ The source is available to inspect. Use and redistribution are governed by the [
 
 ## Unified offline demo and debugging
 
-Open `ChatGPTnx-v1.8.3.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space. Select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
+Open `ChatGPTnx-v1.8.4.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space. Select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
 
 The console can check all light/dark scenarios and record intermediate navigation frames, including interrupted returns, inline disclosures, floating notices, passive refreshes, and long release notes. A shared rule prioritizes information-card backgrounds, then main buttons or account avatars; unrelated pages use a grouped body transition.
 

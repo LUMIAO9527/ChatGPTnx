@@ -21,16 +21,16 @@
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[], location:window.NX_SETUP||null};
   let workflowResume = false;
   let lastLoginResult = '';
-  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), vaultExpanded:new Set(), vaultReveal:null, vaultDraft:'', vaultEditor:null, vaultForget:null, mfa:null, disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
+  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), vaultExpanded:new Set(), vaultReveal:null, vaultDraft:'', vaultEditor:null, vaultForget:null, mfa:null, disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map(),
+    authMethod:'image',authText:'',authTransfer:null,authRevision:0,authBusy:false};
   let connected = false, bridgeError = '', acting = false, nativeDialog = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
   const app = $('#app');
   app.innerHTML = '<main id="home"></main><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden></section><div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>';
   const home = $('#home'), sheet = $('#sheet');
   let detailScrollFloor=0;
-  // Keep a collapsed settings header in place even when the natural scroll
-  // range shrinks. The floor retreats with upward scrolling and survives polls.
-  function holdSettingsScroll(body,top=body?.scrollTop||0) {
-    const content=body?.querySelector(':scope > .settings-content');
+  // Keep inline disclosure headings in place when the natural scroll range shrinks.
+  function holdContentScroll(body,top=body?.scrollTop||0) {
+    const content=body?.querySelector(':scope > :is(.settings-content,.transfer-overview)');
     if(!content)return;
     const css=getComputedStyle(body),inset=parseFloat(css.paddingTop)+parseFloat(css.paddingBottom);
     ui.settingsScrollFloor=Math.ceil(top+body.clientHeight-inset+1);
@@ -50,8 +50,8 @@
       body.style.setProperty('--detail-scroll-floor',detailScrollFloor+'px');
       return;
     }
-    if(!ui.settingsScrollFloor||!body.matches?.('.settings-body'))return;
-    const content=body.querySelector(':scope > .settings-content');
+    if(!ui.settingsScrollFloor)return;
+    const content=body.querySelector?.(':scope > :is(.settings-content,.transfer-overview)');
     if(!content||[...content.querySelectorAll('[data-disclosure]')].some(n=>n.__nxDisclosureIntent!==undefined))return;
     const css=getComputedStyle(body),inset=parseFloat(css.paddingTop)+parseFloat(css.paddingBottom);
     const intrinsic=(content.lastElementChild?.getBoundingClientRect().bottom||0)-content.getBoundingClientRect().top;
@@ -228,7 +228,7 @@
     if (config.demo) return window.NXDemo.call(method,...args);
     const bridge=window.pywebview?.api;
     if (typeof bridge?.[method]!=='function') throw new Error('本地接口尚未就绪或版本不匹配');
-    const opensDialog=['backup_choose','backup_export'].includes(method);
+    const opensDialog=['backup_choose','backup_export','authenticator_choose'].includes(method);
     if(opensDialog)nativeDialog=true;
     try{return await bridge[method](...args);}finally{if(opensDialog)nativeDialog=false;}
   }
@@ -247,8 +247,8 @@
     $('#announcer').textContent=notification.text;paintNotifications();
     notificationTimer=setTimeout(clearNotification,duration);
   }
-  function formError(message) {
-    const label=sheet.querySelector('.vault-inline-form #form-error,.transfer-body .vault-form #form-error')||$('#form-error');if(label)label.textContent=message;
+  function formError(message,id='form-error') {
+    const label=$('#'+id);if(label)label.textContent=message;
     $('#announcer').textContent=message;
   }
   function fieldError(field,message) {
@@ -279,11 +279,11 @@
   function sheetHistory() {
     const saved={page:ui.page,email:ui.email,scope:ui.scope,
       scroll:captureScroll(sheet),focus:focusKey(document.activeElement)};
-    if(ui.page==='settings'||ui.page==='detail'){
+    if(['settings','detail','data-transfer'].includes(ui.page)){
       saved.disclosures=[...ui.disclosures];
       saved.collectionPages={...ui.collectionPages};
     }
-    if(ui.page==='settings')saved.settingsScrollFloor=ui.settingsScrollFloor;
+    if(['settings','data-transfer'].includes(ui.page))saved.settingsScrollFloor=ui.settingsScrollFloor;
     if(ui.page==='detail'){
       saved.resetOpen=ui.resetExpanded.has(ui.email);
       saved.vaultOpen=ui.vaultExpanded.has(ui.email);
@@ -291,11 +291,17 @@
     }
     return saved;
   }
-  function clearCredentialForms() {
-    if(ui.mfa)api('mfa_cancel',{email:ui.email}).catch(()=>{});
+  function resetAuthenticator() {
     if(ui.authTransfer)api('authenticator_cancel').catch(()=>{});
-    ui.mfa=null;ui.authTransfer=null;ui.authText='';ui.vaultEditor=null;ui.vaultReveal=null;ui.vaultForget=null;
-    ui.disclosures.delete('credential-more');ui.disclosures.delete('authenticator-link');
+    ui.authRevision++;ui.authTransfer=null;ui.authText='';
+    const error=$('#authenticator-error');if(error)error.textContent='';
+  }
+  function clearCredentialForms() {
+    resetAuthenticator();
+    const error=$('#credential-error');if(error)error.textContent='';
+    if(ui.mfa)api('mfa_cancel',{email:ui.email}).catch(()=>{});
+    ui.mfa=null;ui.authMethod='image';ui.vaultEditor=null;ui.vaultReveal=null;ui.vaultForget=null;
+    ui.disclosures.delete('credential-more');
   }
   function show(page, target=null, push=true, saved=null) {
     if(window.NXDataTransfer?.busy(ui.page))return;
@@ -309,7 +315,7 @@
     if(page==='edit')page='detail';
     window.NXDataTransfer?.leave(ui.page,page,{api});
     window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','confirm','remove','reauth'].includes(page)?target:null,{from:ui.page||'home',to:page});
-    if(page==='settings'){
+    if(page==='settings'||page==='data-transfer'){
       ui.disclosures=new Set(saved?.disclosures);
       ui.collectionPages=saved?.collectionPages||{};
       ui.settingsScrollFloor=saved?.settingsScrollFloor||0;
@@ -480,7 +486,7 @@
       }
     }
     sheet.dataset.page=ui.page;
-    const oldError=preserve?sheet.querySelector('#form-error')?.textContent:'';
+    const oldErrors=preserve?[...sheet.querySelectorAll('#form-error,#credential-error,#authenticator-error')].map(node=>[node.id,node.textContent]):[];
     const oldFields=[...sheet.querySelectorAll('.field')].map(n=>({node:n,id:n.id,value:n.value,invalid:n.getAttribute('aria-invalid'),focused:n===document.activeElement,start:n.selectionStart,end:n.selectionEnd}));
     const floor=ui.page==='detail'&&detailScrollFloor?` style="--detail-scroll-floor:${detailScrollFloor}px"`:'';
     const markup=pageHead(title,headActions)+`<div class="sheet-body ${cls}"${floor}>${statusRegion()}${body}</div>`+(foot?`<footer class="sheet-foot ${footClass}">${foot}</footer>`:'');
@@ -490,7 +496,7 @@
     if(window.NXDataTransfer?.busy(ui.page))sheet.querySelector('.sheet-head [data-action="back"]').disabled=true;
     if(!preserve){const body=sheet.querySelector('.sheet-body');if(body)body.scrollTop=0;}
     if(preserve)for(const saved of oldFields){const node=document.getElementById(saved.id);if(node&&sheet.contains(node)){if(node!==saved.node)node.replaceWith(saved.node);const live=saved.node;live.value=saved.value;if(saved.invalid)live.setAttribute('aria-invalid',saved.invalid);if(saved.focused){live.focus({preventScroll:true});try{live.setSelectionRange(saved.start,saved.end);}catch{}}}}
-    if(oldError&&sheet.querySelector('#form-error'))sheet.querySelector('#form-error').textContent=oldError;
+    for(const [id,text] of oldErrors){const node=sheet.querySelector('#'+id);if(node)node.textContent=text;}
     paintNotifications();restoreScroll(sheet,position);restoreFocus(sheet,key);feedback.paint();
     if(preserve)window.NXMotion?.paint(sheet);
     window.NXUsageMotion?.afterPatch(sheet,rangePose);
@@ -675,6 +681,10 @@
       detailScrollFloor=Math.ceil(detail.scrollTop+detail.clientHeight);
       detail.style.setProperty('--detail-scroll-floor',detailScrollFloor+'px');
     }
+    if(ui.page==='data-transfer'){
+      const body=sheet.querySelector('.sheet-body');
+      if(body?.scrollTop)holdContentScroll(body);
+    }
     if(window.NXDisclosure)window.NXDisclosure.transact(sheet,change);
     else change();
   }
@@ -741,10 +751,17 @@
     if(ui.resumeClearConfirm&&!e.target.closest('[data-action="resume-clear"]'))cancelResumeClear();
     const summary=e.target.closest('details[data-disclosure] > summary');
     if(summary){
-      e.preventDefault();const d=summary.parentElement,opening=!(window.NXDisclosure?.isOpen(d)??d.open),body=d.closest('.sheet-body'),preservedScroll=body?.scrollTop||0;
+      e.preventDefault();const d=summary.parentElement,opening=!(window.NXDisclosure?.isOpen(d)??d.open),body=d.closest('.sheet-body');
+      const preservedScroll=body?.scrollTop||0;
       summary.focus({preventScroll:true});
-      if(ui.page==='settings')holdSettingsScroll(body,preservedScroll);
-      disclose(()=>{if(opening&&ui.page==='settings')selectSettingDisclosure(d.dataset.disclosure);d.open=opening;summary.setAttribute('aria-expanded',String(opening));syncDisclosure(d);});
+      if(ui.page==='settings'||ui.page==='data-transfer'&&body?.scrollTop!==preservedScroll)holdContentScroll(body,preservedScroll);
+      disclose(()=>{
+        if(opening&&ui.page==='settings')selectSettingDisclosure(d.dataset.disclosure);
+        d.open=opening;summary.setAttribute('aria-expanded',String(opening));syncDisclosure(d);
+        if(!opening&&d.dataset.disclosure==='authenticator-import'){
+          resetAuthenticator();ui.authMethod='image';renderSheet();
+        }
+      });
       // Reveal a partially clipped heading on open.
       if(opening&&d.isConnected){const r=summary.getBoundingClientRect(),v=body?.getBoundingClientRect();if(v&&r.top<v.top)body.scrollTop-=v.top-r.top;}
       return;
@@ -837,31 +854,54 @@
       case 'detail':show('detail',target);break;
       case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.vaultExpanded.delete(target);clearCredentialForms();ui.disclosures.delete('meta:'+target);}renderSheet();});break;
       case 'toggle-vault':disclose(()=>{ui.vaultReveal=null;if(ui.vaultExpanded.has(target)){ui.vaultExpanded.delete(target);clearCredentialForms();}else {ui.vaultExpanded.add(target);ui.disclosures.delete('meta:'+target);ui.resetExpanded.delete(target);ui.collectionPages['reset:'+target]=1;}renderSheet();});break;
+      case 'authenticator-reset':
+        if(ui.authBusy)break;
+        resetAuthenticator();disclose(()=>renderSheet());break;
+      case 'authenticator-method':{
+        if(ui.authBusy||!['image','link'].includes(val)||val===ui.authMethod)break;
+        resetAuthenticator();ui.authMethod=val;disclose(()=>renderSheet());break;}
       case 'authenticator-choose':
       case 'authenticator-preview':{
+        if(ui.authBusy)break;
+        const choose=b.dataset.action==='authenticator-choose';
+        const revision=ui.authRevision,errorId=ui.mfa?'credential-error':'authenticator-error';
+        const error=$('#'+errorId);if(error)error.textContent='';
+        ui.authBusy=true;renderSheet();
         let result;
-        nativeDialog=b.dataset.action==='authenticator-choose';
-        try{result=await api(nativeDialog?'authenticator_choose':'authenticator_preview',...(nativeDialog?[]:[{text:ui.authText||''}]));}
-        finally{nativeDialog=false;}
-        if(!navigation.current(ticket)){api('authenticator_cancel').catch(()=>{});break;}
-        if(result?.cancelled)break;
-        if(!result?.ok){formError(result?.error||'读取未完成');break;}
+        try{
+          result=choose?await api('authenticator_choose'):await api('authenticator_preview',{text:ui.authText});
+          if((!navigation.current(ticket)||ui.authRevision!==revision)&&result?.token)await api('authenticator_cancel');
+        }finally{ui.authBusy=false;renderSheet();}
+        if(!navigation.current(ticket)||ui.authRevision!==revision||result?.cancelled)break;
+        if(!result?.ok){formError(result?.error||'读取未完成',errorId);break;}
         if(ui.mfa)api('mfa_cancel',{email:ui.email}).catch(()=>{});
-        ui.mfa=null;ui.vaultEditor=null;ui.authTransfer=result;ui.authText='';disclose(()=>renderSheet());break;}
+        ui.mfa=null;ui.vaultEditor=null;ui.authRevision++;ui.authTransfer=result;ui.authText='';
+        disclose(()=>renderSheet());break;}
       case 'authenticator-commit':{
-        const selections=(ui.authTransfer?.rows||[]).filter(row=>row.email).map(({id,email})=>({id,email}));
-        const result=await api('authenticator_commit',{token:ui.authTransfer?.token,selections});
-        if(!navigation.current(ticket))break;
-        if(!result?.ok){formError(result?.error||'导入未完成');break;}
+        if(ui.authBusy||!ui.authTransfer)break;
+        const {token,rows}=ui.authTransfer,revision=ui.authRevision;
+        const selections=rows.filter(row=>row.email).map(({id,email})=>({id,email}));
+        const error=$('#authenticator-error');if(error)error.textContent='';
+        ui.authBusy=true;renderSheet();
+        let result;
+        try{result=await api('authenticator_commit',{token,selections});}
+        finally{ui.authBusy=false;renderSheet();}
+        if(!navigation.current(ticket)||ui.authRevision!==revision)break;
+        if(!result?.ok){formError(result?.error||'导入未完成','authenticator-error');break;}
         ui.authTransfer=null;disclose(()=>renderSheet());await poll(true);notify(`已导入 ${result.imported} 个验证器`);break;}
       case 'vault-open-exchange':await run('vault_open_exchange',{email:target});break;
-      case 'vault-edit':clearCredentialForms();ui.vaultEditor={email:target,password:'',material:'',exchange_url:'',recovery_codes:''};disclose(()=>renderSheet());break;
-      case 'vault-cancel':clearCredentialForms();disclose(()=>renderSheet());break;
+      case 'vault-edit':
+        clearCredentialForms();ui.vaultEditor={email:target,password:'',material:'',exchange_url:'',recovery_codes:''};
+        disclose(()=>renderSheet());$('#vault-password')?.focus({preventScroll:true});break;
+      case 'vault-cancel':{
+        const action=ui.vaultEditor?'vault-edit':'mfa-open';
+        clearCredentialForms();disclose(()=>renderSheet());sheet.querySelector(`[data-action="${action}"]`)?.focus({preventScroll:true});break;}
       case 'vault-save':{
         const result=await api('vault_save',ui.vaultEditor||{});
         if(!navigation.current(ticket))break;
-        if(result?.ok===false){formError(result.error);break;}
-        clearCredentialForms();disclose(()=>renderSheet());await poll(true);notify('登录资料已保存');break;}
+        if(result?.ok===false){formError(result.error,'credential-error');break;}
+        clearCredentialForms();disclose(()=>renderSheet());sheet.querySelector('[data-action="vault-edit"]')?.focus({preventScroll:true});
+        await poll(true);notify('登录资料已保存');break;}
       case 'mfa-open':clearCredentialForms();ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};disclose(()=>renderSheet());break;
       case 'mfa-reset':
         ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};
@@ -869,7 +909,7 @@
       case 'mfa-preview':{
         const owner=ui.email,result=await api('mfa_preview',{email:owner,secret:ui.mfa?.secret||''});
         if(!navigation.current(ticket)){api('mfa_cancel',{email:owner}).catch(()=>{});break;}
-        if(result?.ok===false){formError(result.error);break;}
+        if(result?.ok===false){formError(result.error,'credential-error');break;}
         ui.mfa={...ui.mfa,...result,secret:'',confirmed:false};disclose(()=>renderSheet());await poll(true);break;}
       case 'mfa-copy':{
         const pending=(data.mfa_pending||[]).find(p=>p.token===ui.mfa?.token);
@@ -877,7 +917,7 @@
       case 'mfa-commit':{
         const result=await api('mfa_commit',{email:ui.email,token:ui.mfa?.token,confirmed:ui.mfa?.confirmed===true,recovery_codes:ui.mfa?.recovery_codes||''});
         if(!navigation.current(ticket))break;
-        if(result?.ok===false){formError(result.error);break;}
+        if(result?.ok===false){formError(result.error,'credential-error');break;}
         ui.mfa=null;disclose(()=>renderSheet());await poll(true);notify('新验证器已保存');break;}
       case 'vault-reveal':{
         const who=target;
@@ -1015,9 +1055,7 @@
     if(event.target.matches('.auth-map')&&ui.authTransfer){
       const rows=ui.authTransfer.rows;
       const row=rows.find(row=>row.id===event.target.dataset.id);
-      if(row)row.email=event.target.value;
-      const save=sheet.querySelector('[data-action="authenticator-commit"]');
-      if(save)save.disabled=!rows.some(row=>row.email);
+      if(row){row.email=event.target.value;event.target.title=row.email||'忽略此条';renderSheet();}
     }
   });
   app.addEventListener('compositionstart',event=>{if(event.target.matches('.field'))composingField=event.target;});
@@ -1025,7 +1063,7 @@
   app.addEventListener('input',event=>{
     if(!event.target.matches('.field'))return;
     const id=event.target.id;
-    if(id==='authenticator-text'){ui.authText=event.target.value;return;}
+    if(id==='authenticator-text'){ui.authText=event.target.value;const read=sheet.querySelector('[data-action="authenticator-preview"]');if(read)read.disabled=!ui.authText.trim();return;}
     const vaultFields={'vault-email':'email','vault-password':'password','vault-material':'material','vault-url':'exchange_url','vault-recovery':'recovery_codes'};
     if(vaultFields[id]&&ui.vaultEditor){ui.vaultEditor[vaultFields[id]]=event.target.value;return;}
     if((id==='mfa-secret'||id==='mfa-recovery')&&ui.mfa){ui.mfa[id==='mfa-secret'?'secret':'recovery_codes']=event.target.value;return;}

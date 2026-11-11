@@ -454,11 +454,13 @@ for key,label,route,steps,params in [
  ('vault-detail-other','详情 · 备用账号 2FA','detail',[],{'expand':'vault','email':'backup@example.com'}),
  ('vault-password','详情 · 临时显示密码','detail',[click('vault-reveal')],{'expand':'vault'}),
  ('vault-edit','详情 · 修改登录资料','detail',[click('vault-edit')],{'expand':'vault'}),
+ ('vault-edit-more','详情 · 其他登录资料','detail',[click('vault-edit'),{'click':'[data-disclosure="credential-more"] > summary'}],{'expand':'vault'}),
  ('mfa','详情 · 导入验证器','detail',[click('mfa-open')],{'expand':'vault'}),
  ('mfa-preview','详情 · 核对新验证码','detail',[click('mfa-open'),{'fill':'#mfa-secret','value':'JBSWY3DPEHPK3PXP'},click('mfa-preview')],{'expand':'vault'}),
  ('mfa-other','详情 · 备用账号验证器','detail',[click('mfa-open')],{'expand':'vault','email':'backup@example.com'}),
  ('phone-authenticator','导入 · 手机验证器','data-transfer',[{'click':'[data-disclosure="authenticator-import"] > summary'}],{}),
  ('phone-authenticator-review','导入 · 核对账号','data-transfer',[{'click':'[data-disclosure="authenticator-import"] > summary'},click('authenticator-choose')],{}),
+ ('phone-authenticator-link','导入 · 验证器导出链接','data-transfer',[{'click':'[data-disclosure="authenticator-import"] > summary'},{'click':'[data-action="authenticator-method"][data-value="link"]'}],{}),
  ('credential-import','导入 · 登录资料','data-transfer',[{'click':'[data-disclosure="credential-import"] > summary'}],{}),
 ]:
     add(G,key,label,route=route,steps=steps,**params)

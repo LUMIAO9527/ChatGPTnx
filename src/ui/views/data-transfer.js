@@ -108,7 +108,7 @@ window.NXDataTransfer = (() => {
     if(page==='data-export')return exportView(c);
     if(page==='data-import')return importView(c);
     if(page==='uninstall')return uninstallView(c);
-    return {title:'导入与导出',cls:'transfer-body',body:`<div class="settings-list">${c.link('','导出数据','transfer-export')}${c.link('','导入备份','transfer-import')}${window.NXVault.imports(c)}</div>`};
+    return {title:'导入与导出',cls:'transfer-body',body:`<div class="transfer-overview" style="min-height:${c.ui.settingsScrollFloor||0}px"><div class="settings-list">${c.link('','导出数据','transfer-export')}${c.link('','导入备份','transfer-import')}${window.NXVault.imports(c)}</div></div>`};
   }
   function busy(page){return pages.has(page)&&!!(state?.pending||page==='data-export'&&state?.exportStage==='working'||page==='data-import'&&state?.importStage==='working'||page==='uninstall'&&state?.uninstallStage==='working');}
   function clearPasswords(){
