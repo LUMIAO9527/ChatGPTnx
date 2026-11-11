@@ -80,6 +80,8 @@ window.NXFeedback = (() => {
       if(!force&&viewport?.scrollTop>baseRange+1){holdRunway=true;return;}
       runway.remove();runway=null;holdRunway=false;changed();
     }
+    const visibility=new MutationObserver(()=>{if(host.hidden)clearRunway();});
+    visibility.observe(host,{attributes:true,attributeFilter:['hidden']});
     function revealFocus() {
       const node=document.activeElement;
       const overlaps=!host.hidden&&node&&surface?.contains(node)&&!host.contains(node)
@@ -119,6 +121,7 @@ window.NXFeedback = (() => {
     }
     function reserveScroll() {
       if(!viewport||viewport.querySelector(':scope > .roster-empty'))return;
+      if(host.hidden||host.inert||!host.querySelector('.status-notification')){clearRunway();return;}
       if(fixedDetail()){clearRunway(true);return;}
       const clearance=Math.max(0,viewport.getBoundingClientRect().bottom-host.getBoundingClientRect().top+8);
       if(clearance<1){clearRunway();return;}
@@ -155,7 +158,7 @@ window.NXFeedback = (() => {
       revealFocus();
     });
     root.addEventListener('focusout',request);
-    function refresh(){layout();if(!host.hidden)reserveScroll();}
+    function refresh(){layout();reserveScroll();}
     return {paint,layout,refresh,host};
   }
   return {status,controlKey,create,createDock};

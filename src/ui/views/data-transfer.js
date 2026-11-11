@@ -108,7 +108,7 @@ window.NXDataTransfer = (() => {
     if(page==='data-export')return exportView(c);
     if(page==='data-import')return importView(c);
     if(page==='uninstall')return uninstallView(c);
-    return {title:'导入与导出',cls:'transfer-body',body:`<p class="transfer-intro">把账号与记录带到另一台电脑，或保存一份备份。</p><div class="settings-list">${c.link('','导出数据','transfer-export')}${c.link('','导入备份','transfer-import')}</div><section class="transfer-scope"><h3>随备份一起迁移</h3><ul><li>账号、昵称与会员信息</li><li>用量历史、最近额度及采集时间</li><li>外观、通知与接续消息</li></ul><p class="transfer-help">导出时可选择账号和资料范围，备份由密码加密。</p></section>`};
+    return {title:'导入与导出',cls:'transfer-body',body:`<div class="settings-list">${c.link('','导出数据','transfer-export')}${c.link('','导入备份','transfer-import')}${window.NXVault.imports(c)}</div>`};
   }
   function busy(page){return pages.has(page)&&!!(state?.pending||page==='data-export'&&state?.exportStage==='working'||page==='data-import'&&state?.importStage==='working'||page==='uninstall'&&state?.uninstallStage==='working');}
   function clearPasswords(){

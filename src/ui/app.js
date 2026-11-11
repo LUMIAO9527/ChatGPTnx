@@ -21,7 +21,7 @@
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[], location:window.NX_SETUP||null};
   let workflowResume = false;
   let lastLoginResult = '';
-  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), vaultExpanded:new Set(), vaultReveal:null, vaultDraft:'', vaultEditor:null, vaultForget:null, mfa:null, storeGroups:new Set(['cookies','storage','cache']), storeConfirm:false, disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
+  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), vaultExpanded:new Set(), vaultReveal:null, vaultDraft:'', vaultEditor:null, vaultForget:null, mfa:null, disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map()};
   let connected = false, bridgeError = '', acting = false, nativeDialog = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
   const app = $('#app');
   app.innerHTML = '<main id="home"></main><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden></section><div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>';
@@ -248,7 +248,7 @@
     notificationTimer=setTimeout(clearNotification,duration);
   }
   function formError(message) {
-    const label=$('#form-error');if(label)label.textContent=message;
+    const label=sheet.querySelector('.vault-inline-form #form-error,.transfer-body .vault-form #form-error')||$('#form-error');if(label)label.textContent=message;
     $('#announcer').textContent=message;
   }
   function fieldError(field,message) {
@@ -291,13 +291,17 @@
     }
     return saved;
   }
+  function clearCredentialForms() {
+    if(ui.mfa)api('mfa_cancel',{email:ui.email}).catch(()=>{});
+    if(ui.authTransfer)api('authenticator_cancel').catch(()=>{});
+    ui.mfa=null;ui.authTransfer=null;ui.authText='';ui.vaultEditor=null;ui.vaultReveal=null;ui.vaultForget=null;
+    ui.disclosures.delete('credential-more');ui.disclosures.delete('authenticator-link');
+  }
   function show(page, target=null, push=true, saved=null) {
     if(window.NXDataTransfer?.busy(ui.page))return;
     const previous=push&&ui.page?sheetHistory():null;
     resetConfirmation=null;ui.resumeClearConfirm=false;ui.vaultForget=null;
-    if(ui.page==='mfa'&&page!=='mfa'){api('mfa_cancel',{email:ui.email}).catch(()=>{});ui.mfa=null;}
-    if(ui.page==='authenticator'&&page!=='authenticator'){api('authenticator_cancel').catch(()=>{});ui.authTransfer=null;ui.authText='';}
-    if(page!=='vault-edit')ui.vaultEditor=null;
+    clearCredentialForms();
     if(page!=='detail'){ui.vaultReveal=null;ui.vaultExpanded.clear();}
     const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message','resume-clear':'resume-history'};
     const initial=page;
@@ -336,13 +340,13 @@
   }
   function closeSheet(animate=true) {
     if(window.NXDataTransfer?.busy(ui.page))return;
-    if(ui.page==='authenticator'){api('authenticator_cancel').catch(()=>{});ui.authTransfer=null;ui.authText='';}
+    clearCredentialForms();
     window.NXDataTransfer?.leave(ui.page,null,{api});
     if(ui.page&&animate)window.NXMotion?.begin(sheet, -1,null,{from:ui.page,to:'home'});
     else window.NXMotion?.stop();
     resetConfirmation=null;ui.resumeClearConfirm=false;
     feedback.clear();clearNotification();navigation.invalidate();ui.recording=null;
-    if(ui.page==='mfa')api('mfa_cancel',{email:ui.email}).catch(()=>{});ui.mfa=null;ui.vaultEditor=null;ui.vaultReveal=null;ui.vaultExpanded.clear();ui.vaultDraft='';ui.page=null;ui.email=null;ui.history=[];sheet.hidden=true;home.inert=false;
+    ui.vaultExpanded.clear();ui.vaultDraft='';ui.page=null;ui.email=null;ui.history=[];sheet.hidden=true;home.inert=false;
     setSize('home');renderHome();
     restoreFocus(home,previousFocusKey);
     if(!home.contains(document.activeElement))home.querySelector('button')?.focus({preventScroll:true});
@@ -420,21 +424,6 @@
         title=ui.scope==='all'?'用量总览':'个人用量';body=usageContent();cls='usage-body usage-report '+(ui.scope==='all'?'all-usage':'personal-usage');foot='';break;
       case 'quota-overview':
         title='额度总览';body=quotaOverviewContent();cls='quota-overview-body';break;
-      case 'vault':
-        title='账号库';body=window.NXVault.page(viewContext());cls='vault-body';break;
-      case 'authenticator':
-        title='导入 2FA';cls='vault-form-body';
-        ({body,foot}=window.NXVault.authenticator(viewContext()));break;
-      case 'vault-edit':
-        title='登录资料';body=window.NXVault.editor(viewContext());cls='vault-form-body';
-        foot=actionButton({action:'vault-save',content:'保存',size:'large',tone:'primary'});break;
-      case 'mfa':
-        title='更换验证器';cls='vault-form-body';
-        ({body,foot}=window.NXVault.mfa(viewContext()));break;
-      case 'desktop-store':
-        title='清理内置网页数据';body=window.NXVault.cleanup(viewContext());cls='vault-form-body';
-        foot=actionButton({action:'store-clear',content:ui.storeConfirm?'确认清理':'清理所选数据',
-          size:'large',tone:'primary',attrs:!ui.storeGroups.size||busy()?'disabled':''});break;
       case 'detail': {
         if(!a){closeSheet();return;}
         title='账号详情';const m=a.membership||{},isCurrent=a.email===data.current;
@@ -472,7 +461,7 @@
           const copy=!data.adding?'将重启桌面端，打开登录窗口。':'完成登录后自动验证并保存；取消会恢复原账号。';
           const state=data.operation?data.operation.phase:data.login_progress?.message|| (ready?'已检测到登录，准备自动验证':status==='unchanged'?'仍是添加前的账号，请登录新账号':status==='existing'?'这个账号已经在清单里':status==='waiting'?'等待登录新账号':'等待打开登录窗口');
           const steps=`<ol class="add-progress"><li class="${ready?'done':'current'}">在 ChatGPT 桌面端登录新账号</li><li class="${ready?'current':''}">自动验证并保存</li></ol>`;
-          body=`<div class="confirm-mark">${icon(ready?'check':'plus')}</div><h3 class="confirm-title">${heading}</h3><p class="note">${copy}</p>${!data.adding?'<button class="control control--large secondary" data-action="vault-page">从账号库登录</button>':''}${steps}${statusRegion(statusBar({text:state,tone:data.operation?'progress':ready?'success':'neutral',symbol:ready?'check':'clock',className:'flow-status'}))}`;
+          body=`<div class="confirm-mark">${icon(ready?'check':'plus')}</div><h3 class="confirm-title">${heading}</h3><p class="note">${copy}</p>${!data.adding?window.NXVault.savedAccounts(viewContext()):''}${steps}${statusRegion(statusBar({text:state,tone:data.operation?'progress':ready?'success':'neutral',symbol:ready?'check':'clock',className:'flow-status'}))}`;
           foot=data.adding?`<button class="control control--large secondary" data-action="cancel-add">取消并恢复</button><button class="control control--large primary" data-action="finish-add" ${disabled()||!ready?'disabled':''}>重试验证</button>`:`<button class="control control--large secondary" data-action="back">返回</button><button class="control control--large primary control--confirmation" data-action="start-add" ${disabled()}>打开登录窗口</button>`;break;
         }
       case 'reauth': {
@@ -491,7 +480,6 @@
       }
     }
     sheet.dataset.page=ui.page;
-    if(cls==='vault-form-body')footClass='vault-form-footer';
     const oldError=preserve?sheet.querySelector('#form-error')?.textContent:'';
     const oldFields=[...sheet.querySelectorAll('.field')].map(n=>({node:n,id:n.id,value:n.value,invalid:n.getAttribute('aria-invalid'),focused:n===document.activeElement,start:n.selectionStart,end:n.selectionEnd}));
     const floor=ui.page==='detail'&&detailScrollFloor?` style="--detail-scroll-floor:${detailScrollFloor}px"`:'';
@@ -549,7 +537,7 @@
     set_preferences:'正在保存…',set_account_meta:'正在保存…',set_auto_relay_account:'正在保存…',
     set_relay_pick:'正在设置…',cancel_relay_pick:'正在取消…',consume_reset:'正在重置…',set_account_hotkey:'正在保存…',adopt_current:'正在保存…',
     add_start:'正在打开…',add_finish:'正在保存…',add_cancel:'正在恢复…',
-    clear_desktop_store:'正在清理…',reauth_start:'正在打开…',reauth_finish:'正在验证…',reauth_cancel:'正在恢复…',
+    reauth_start:'正在打开…',reauth_finish:'正在验证…',reauth_cancel:'正在恢复…',
     switch:'正在切换…',relay:'正在接力…',remove:'正在归档…',restore:'正在恢复…',
     clear_resume_history:'正在清理…',open_resume_task:'正在定位…',retry_resume_task:'正在排队…',copy_text:'正在复制…'
   };
@@ -559,7 +547,7 @@
     const ticket=navigation.ticket();
     if(['set_preferences','set_account_meta'].includes(method)){const error=$('#form-error');if(error)error.textContent='';}
     acting=true;
-    const dockAction=new Set(['launch_chatgpt','adopt_current','add_start','add_finish','add_cancel','reauth_start','reauth_finish','reauth_cancel','switch','relay','consume_reset','remove','restore','open_resume_task','clear_desktop_store']);
+    const dockAction=new Set(['launch_chatgpt','adopt_current','add_start','add_finish','add_cancel','reauth_start','reauth_finish','reauth_cancel','switch','relay','consume_reset','remove','restore','open_resume_task']);
     const usesDock=dockAction.has(method),operation={text:actionLabels[method]||'处理中…',ticket};
     if(usesDock)controlOperation=operation;
     const token=usesDock?null:feedback.begin(source,actionLabels[method]||'处理中…');render();
@@ -707,7 +695,7 @@
         if(ui.page==='detail'&&key.startsWith('meta:')&&(ui.resetExpanded.size||ui.vaultExpanded.size)){
           ui.resetExpanded.clear();
           ui.vaultExpanded.clear();
-          ui.vaultReveal=null;
+          clearCredentialForms();
           renderSheet();
         }
       }
@@ -847,12 +835,8 @@
       case 'retry-resume-task':await run('retry_resume_task',b.dataset.session,val);break;
       case 'home':closeSheet();break;
       case 'detail':show('detail',target);break;
-      case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.vaultExpanded.delete(target);ui.vaultReveal=null;ui.disclosures.delete('meta:'+target);}renderSheet();});break;
-      case 'toggle-vault':disclose(()=>{ui.vaultReveal=null;if(ui.vaultExpanded.has(target))ui.vaultExpanded.delete(target);else {ui.vaultExpanded.add(target);ui.disclosures.delete('meta:'+target);ui.resetExpanded.delete(target);ui.collectionPages['reset:'+target]=1;}renderSheet();});break;
-      case 'vault-page':show('vault');break;
-      case 'authenticator-open':
-        ui.authTransfer=null;ui.authText='';ui.disclosures.delete('authenticator-link');
-        show('authenticator');break;
+      case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.vaultExpanded.delete(target);clearCredentialForms();ui.disclosures.delete('meta:'+target);}renderSheet();});break;
+      case 'toggle-vault':disclose(()=>{ui.vaultReveal=null;if(ui.vaultExpanded.has(target)){ui.vaultExpanded.delete(target);clearCredentialForms();}else {ui.vaultExpanded.add(target);ui.disclosures.delete('meta:'+target);ui.resetExpanded.delete(target);ui.collectionPages['reset:'+target]=1;}renderSheet();});break;
       case 'authenticator-choose':
       case 'authenticator-preview':{
         let result;
@@ -862,21 +846,23 @@
         if(!navigation.current(ticket)){api('authenticator_cancel').catch(()=>{});break;}
         if(result?.cancelled)break;
         if(!result?.ok){formError(result?.error||'读取未完成');break;}
-        ui.authTransfer=result;ui.authText='';renderSheet(false);b.focus({preventScroll:true});break;}
+        if(ui.mfa)api('mfa_cancel',{email:ui.email}).catch(()=>{});
+        ui.mfa=null;ui.vaultEditor=null;ui.authTransfer=result;ui.authText='';disclose(()=>renderSheet());break;}
       case 'authenticator-commit':{
         const selections=(ui.authTransfer?.rows||[]).filter(row=>row.email).map(({id,email})=>({id,email}));
         const result=await api('authenticator_commit',{token:ui.authTransfer?.token,selections});
         if(!navigation.current(ticket))break;
         if(!result?.ok){formError(result?.error||'导入未完成');break;}
-        ui.authTransfer=null;await poll(true);back();notify(`已导入 ${result.imported} 个验证器`);break;}
+        ui.authTransfer=null;disclose(()=>renderSheet());await poll(true);notify(`已导入 ${result.imported} 个验证器`);break;}
       case 'vault-open-exchange':await run('vault_open_exchange',{email:target});break;
-      case 'vault-edit':ui.vaultEditor={email:target||'',locked:!!target,password:'',material:'',exchange_url:'',recovery_codes:''};show('vault-edit',target);break;
+      case 'vault-edit':clearCredentialForms();ui.vaultEditor={email:target,password:'',material:'',exchange_url:'',recovery_codes:''};disclose(()=>renderSheet());break;
+      case 'vault-cancel':clearCredentialForms();disclose(()=>renderSheet());break;
       case 'vault-save':{
         const result=await api('vault_save',ui.vaultEditor||{});
         if(!navigation.current(ticket))break;
         if(result?.ok===false){formError(result.error);break;}
-        ui.vaultEditor=null;await poll(true);back();notify('登录资料已保存');break;}
-      case 'mfa-open':ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};show('mfa',target);break;
+        clearCredentialForms();disclose(()=>renderSheet());await poll(true);notify('登录资料已保存');break;}
+      case 'mfa-open':clearCredentialForms();ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};disclose(()=>renderSheet());break;
       case 'mfa-reset':
         ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};
         renderSheet();$('#mfa-secret')?.focus({preventScroll:true});break;
@@ -884,7 +870,7 @@
         const owner=ui.email,result=await api('mfa_preview',{email:owner,secret:ui.mfa?.secret||''});
         if(!navigation.current(ticket)){api('mfa_cancel',{email:owner}).catch(()=>{});break;}
         if(result?.ok===false){formError(result.error);break;}
-        ui.mfa={...ui.mfa,...result,secret:'',confirmed:false};await poll(true);renderSheet();break;}
+        ui.mfa={...ui.mfa,...result,secret:'',confirmed:false};disclose(()=>renderSheet());await poll(true);break;}
       case 'mfa-copy':{
         const pending=(data.mfa_pending||[]).find(p=>p.token===ui.mfa?.token);
         if(pending?.code)await navigator.clipboard.writeText(pending.code);break;}
@@ -892,10 +878,7 @@
         const result=await api('mfa_commit',{email:ui.email,token:ui.mfa?.token,confirmed:ui.mfa?.confirmed===true,recovery_codes:ui.mfa?.recovery_codes||''});
         if(!navigation.current(ticket))break;
         if(result?.ok===false){formError(result.error);break;}
-        ui.mfa=null;await poll(true);back();notify('新验证器已保存');break;}
-      case 'store-open':ui.storeConfirm=false;show('desktop-store');break;
-      case 'store-toggle':ui.storeConfirm=false;if(ui.storeGroups.has(target))ui.storeGroups.delete(target);else ui.storeGroups.add(target);renderSheet();break;
-      case 'store-clear':if(!ui.storeConfirm){ui.storeConfirm=true;renderSheet();break;}ui.storeConfirm=false;await run('clear_desktop_store',{groups:[...ui.storeGroups]});break;
+        ui.mfa=null;disclose(()=>renderSheet());await poll(true);notify('新验证器已保存');break;}
       case 'vault-reveal':{
         const who=target;
         if(ui.vaultReveal&&ui.vaultReveal.email===who){ui.vaultReveal=null;renderSheet();break;}
@@ -916,12 +899,12 @@
       case 'vault-import':{
         const result=await api('vault_import',{text:ui.vaultDraft||''});
         if(result?.ok===false){notify(result.error||'导入未完成',{tone:'error'});break;}
-        ui.vaultDraft='';await poll(true);renderSheet();notify(`已导入 ${result?.added??0} 个账号${result?.skipped?`，第 ${result.lines.join('、')} 行格式需修改`:''}`);break;}
+        ui.vaultDraft='';const input=$('#vault-import');if(input)input.value='';await poll(true);renderSheet();notify(`已导入 ${result?.added??0} 个账号${result?.skipped?`，第 ${result.lines.join('、')} 行格式需修改`:''}`);break;}
       case 'vault-forget':{
         if(ui.vaultForget!==target){ui.vaultForget=target;renderSheet();break;}ui.vaultForget=null;
         const result=await api('vault_forget',{email:target});
         if(result?.ok===false){notify(result.error||'删除未完成',{tone:'error'});break;}
-        await poll(true);renderSheet();break;}
+        clearCredentialForms();disclose(()=>renderSheet());await poll(true);break;}
       case 'vault-login':{
         const known=(data.accounts||[]).some(account=>account.email===target);
         show(known?'reauth':'add',target);await run(known?'reauth_start':'add_start',target);break;}
@@ -1116,7 +1099,7 @@
   window.nxOpenUninstall=()=>{panelVisible=true;window.NXDataTransfer.handle({dataset:{action:"uninstall-open"}},{...viewContext(),show,back,render:()=>renderSheet()});poll();};
   window.nxOpenUpdate=()=>{panelVisible=true;show('update');poll();};
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
-  window.nxHidden=()=>{ui.vaultReveal=null;ui.vaultDraft='';ui.vaultEditor=null;if(ui.page==='mfa'){api('mfa_cancel',{email:ui.email}).catch(()=>{});ui.mfa=null;}window.NXDataTransfer?.hidden(ui.page,{api});window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
+  window.nxHidden=()=>{clearCredentialForms();ui.vaultDraft='';window.NXDataTransfer?.hidden(ui.page,{api});window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
   window.addEventListener('pywebviewready',poll);
   window.addEventListener('resize',()=>{window.NXMotion?.stop();if(config.demo)setSize(ui.page?'workspace':'home');});
   setInterval(()=>{
@@ -1130,7 +1113,7 @@
   function schedulePoll(delay=null){
     clearTimeout(pollTimer);pollTimer=null;
     if(!panelVisible && !config.demo) return;
-    const wait=delay ?? ((['vault','mfa'].includes(ui.page)||ui.vaultExpanded.size)?1000:(busy()||ui.submitted||data.adding||data.reauth||['checking','downloading','installing'].includes(data.update?.status))?800:5000);
+    const wait=delay ?? ((ui.mfa||ui.vaultExpanded.size)?1000:(busy()||ui.submitted||data.adding||data.reauth||['checking','downloading','installing'].includes(data.update?.status))?800:5000);
     pollTimer=setTimeout(()=>poll(),wait);
   }
   applyAppearance(data.settings.appearance);
@@ -1147,10 +1130,8 @@
           await openUsage(params.get('email')||'all');return;
         }
         if(page==='resume'){await openResumeDetails();return;}
-        const target=['detail','edit','remove','reauth','mfa','vault-edit'].includes(page)?data.accounts.find(a=>a.email===params.get('email'))||current()||data.accounts.find(a=>a.error_code==='reauth_required'):page==='confirm'?relay():null;
+        const target=['detail','edit','remove','reauth'].includes(page)?data.accounts.find(a=>a.email===params.get('email'))||current()||data.accounts.find(a=>a.error_code==='reauth_required'):page==='confirm'?relay():null;
         if(page==='confirm')ui.switchKind=params.get('kind')==='relay'?'relay':'manual';
-        if(page==='mfa')ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};
-        if(page==='vault-edit')ui.vaultEditor={email:target?.email||'',locked:!!target,password:'',material:'',exchange_url:'',recovery_codes:''};
         show(page,target?.email||null);
         if(page==='detail'&&params.get('expand')==='reset'&&target){ui.resetExpanded.add(target.email);renderSheet();}
         if(page==='detail'&&params.get('expand')==='vault'&&target){ui.vaultExpanded.add(target.email);renderSheet();}

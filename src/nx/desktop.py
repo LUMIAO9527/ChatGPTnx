@@ -416,7 +416,6 @@ class Bridge:
     def mfa_preview(self, payload): return self._service.mfa_preview(payload)
     def mfa_commit(self, payload): return self._service.mfa_commit(payload)
     def mfa_cancel(self, payload): return self._service.mfa_cancel(payload)
-    def clear_desktop_store(self, payload): return self._service.clear_desktop_store(payload)
     def check_update(self): return self._service.check_update()
     def open_github(self):
         try:

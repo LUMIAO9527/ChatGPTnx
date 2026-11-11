@@ -161,7 +161,6 @@ window.NXDemo = (() => {
         Object.assign(entry,{has_secret:true,secret_source:'enrolled',migrated_at:sec(),has_exchange:false,has_recovery:!!p.recovery_codes,code:'138402',remain:23});
         state.mfa_pending=[];return {ok:true};}
       case 'mfa_cancel':state.mfa_pending=state.mfa_pending.filter(v=>v.email!==email?.email);return {ok:true};
-      case 'clear_desktop_store':return operation('clear_desktop_store',null,()=>{});
       case 'vault_forget':{
         const payload=email&&typeof email==='object'?email:{};
         const before=state.vault.length;

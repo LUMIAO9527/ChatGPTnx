@@ -670,22 +670,6 @@ class Service:
         self.notify()
         return {'ok': True, 'removed': bool(removed)}
 
-    def clear_desktop_store(self, payload):
-        """Remove the Chromium storage that keeps a stale device identity."""
-        payload = payload if isinstance(payload, dict) else {}
-        if self.operation or self.state.get('adding') or self.state.get('reauth'):
-            return {'ok': False, 'error': '请先完成当前操作'}
-        from . import desktop_store
-        groups = payload.get('groups')
-        if not isinstance(groups, list) or not groups or any(g not in desktop_store.GROUPS for g in groups):
-            return {'ok': False, 'error': '请选择清理范围'}
-        def work():
-            self.phase('正在清理桌面登录数据')
-            result = desktop_store.clear(groups=tuple(groups), restart=True)
-            if not result['ok'] or result['skipped']:
-                raise RuntimeError(result.get('error') or '部分登录数据未能清理，请重试')
-            self._record_current()
-        return self.begin('clear_desktop_store', None, lambda: self._serialize_desktop(work))
 
     def get_diagnostics(self):
         """Preview only: creates no file and never reads credential/log bodies."""
@@ -751,7 +735,7 @@ class Service:
         return bool(self.state.get('adding') or self.state.get('reauth') or
                     operation and operation['kind'] in
                     ('switch', 'add_start', 'add_cancel', 'add_finish', 'adopt',
-                     'reauth_start', 'reauth_cancel', 'reauth_finish', 'clear_desktop_store'))
+                     'reauth_start', 'reauth_cancel', 'reauth_finish'))
 
     def _serialize_desktop(self, work):
         with self.desktop_gate:
