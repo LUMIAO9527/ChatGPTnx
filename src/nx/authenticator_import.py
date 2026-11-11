@@ -1,6 +1,6 @@
 """Read authenticator transfer QR images locally and return account material.
 
-Supports otpauth TOTP enrolment and Google Authenticator's version 1 transfer
+Supports otpauth TOTP enrolment and Google Authenticator's version 1 and 2 transfer
 payload. No image, URI or seed is written by this module.
 """
 from __future__ import annotations
@@ -127,7 +127,7 @@ def parse_uri(text):
                 raise ImportError('验证器导出分组无法识别')
             metadata[number] = value
     size, index = metadata.get(3, 1), metadata.get(4, 0)
-    if metadata.get(2, 1) != 1 or not accounts or not 1 <= size <= 50 or not 0 <= index < size:
+    if metadata.get(2, 1) not in (1, 2) or not accounts or not 1 <= size <= 50 or not 0 <= index < size:
         raise ImportError('验证器导出版本或分组不受支持')
     return Transfer(tuple(accounts), metadata.get(5, 0), size, index)
 

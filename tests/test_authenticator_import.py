@@ -28,10 +28,10 @@ def blob(field, value):
 
 
 def transfer_uri(name='OpenAI:a@example.com', *, batch_size=1, batch_index=0,
-                 algorithm=1, digits=1, kind=2, secret=KEY):
+                 algorithm=1, digits=1, kind=2, secret=KEY, version=1):
     entry = blob(1, secret) + blob(2, name.encode()) + blob(3, b'OpenAI')
     entry += number(4, algorithm) + number(5, digits) + number(6, kind)
-    payload = blob(1, entry) + number(2, 1) + number(3, batch_size)
+    payload = blob(1, entry) + number(2, version) + number(3, batch_size)
     payload += number(4, batch_index) + number(5, 1234)
     return 'otpauth-migration://offline?data=' + quote(base64.b64encode(payload).decode(), safe='')
 
@@ -42,6 +42,32 @@ class AuthenticatorImportTests(unittest.TestCase):
         self.assertEqual(result.accounts[0].name, 'OpenAI:a@example.com')
         self.assertEqual(result.accounts[0].secret, SECRET)
         self.assertNotIn(SECRET, repr(result))
+
+    def test_version_two_single_qr_without_batch_id_keeps_all_accounts(self):
+        names=['OpenAI:first@example.com','OpenAI:second@example.com','OpenAI:third@example.com']
+        payload=b''
+        for name in names:
+            entry=blob(1,KEY)+blob(2,name.encode())+blob(3,b'OpenAI')
+            entry+=number(4,1)+number(5,1)+number(6,2)
+            payload+=blob(1,entry)
+        payload+=number(2,2)+number(3,1)+number(4,0)
+        uri='otpauth-migration://offline?data='+quote(base64.b64encode(payload).decode(),safe='')
+        transfer=parse_uri(uri)
+        self.assertEqual([a.name for a in transfer.accounts],names)
+        self.assertTrue(all(a.secret==SECRET for a in transfer.accounts))
+        self.assertEqual((transfer.batch_id,transfer.batch_size,transfer.batch_index),(0,1,0))
+
+    def test_version_two_keeps_algorithm_and_batch_validation(self):
+        for args in ({'algorithm':2},{'digits':2},{'kind':1},{'batch_index':1}):
+            with self.subTest(args=args),self.assertRaises(ImportError):
+                parse_uri(transfer_uri(version=2,**args))
+        with self.assertRaises(ImportError):
+            combine([parse_uri(transfer_uri(version=2,batch_size=2))])
+
+    def test_unknown_transfer_version_is_rejected(self):
+        for version in (0,3,99):
+            with self.subTest(version=version),self.assertRaises(ImportError):
+                parse_uri(transfer_uri(version=version))
 
     def test_standard_totp_qr(self):
         entry = parse_uri('otpauth://totp/OpenAI%3Aa%40example.com?secret=' + SECRET).accounts[0]
@@ -72,7 +98,7 @@ class AuthenticatorImportTests(unittest.TestCase):
     def test_real_image_decoder_reads_generated_transfer_qr(self):
         import zxingcpp
         from PIL import Image
-        uri = transfer_uri()
+        uri = transfer_uri(version=2)
         bitmap = zxingcpp.create_barcode(uri, zxingcpp.BarcodeFormat.QRCode).to_image(scale=5)
         view = memoryview(bitmap)
         with tempfile.TemporaryDirectory() as folder:
