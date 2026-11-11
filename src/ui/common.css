@@ -540,19 +540,16 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .vault-label { color:var(--muted); flex:0 0 40px; }
 .vault-line strong { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:550; }
 .vault-line .control { flex:0 0 auto; }
-.vault-remain { color:var(--muted); font-variant-numeric:tabular-nums; }
+.vault-remain { flex:0 0 3ch; min-width:3ch; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
 .vault-remain.danger, .vault-line strong.danger, .vault-summary .right strong.danger { color:var(--danger); }
-.vault-foot { padding-top:6px; }
-.vault-body { display:grid; gap:10px; padding:0 2px; }
+.vault-detail-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; padding-top:4px; }
 .vault-list { display:grid; gap:6px; }
-.vault-card { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:var(--detail-row-radius); background:var(--surface); }
+.vault-card { display:flex; align-items:center; gap:8px; min-height:var(--height-row); padding:6px 10px; border-radius:calc(var(--height-row) * var(--control-radius-ratio)); background:var(--surface); }
 .vault-card-copy { display:grid; min-width:0; flex:1; }
 .vault-card-copy strong { font-weight:550; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .vault-card-copy small { color:var(--muted); font-size:var(--font-small); font-variant-numeric:tabular-nums; }
 .vault-import { display:grid; gap:8px; }
 .vault-import textarea { width:100%; resize:vertical; min-height:64px; }
-.vault-import-actions { display:flex; }
-.vault-import-actions .control { flex:1; }
 .detail-compact .account-editor .detail-line { padding-inline:12px; }
 .detail-compact .account-editor .disclosure-body { position:relative; padding:0 12px; }
 .detail-compact .account-editor .inline-field { height:var(--detail-row-size); }
@@ -778,8 +775,11 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .detail-actions .control { --control-size:var(--height-row); }
 .detail-actions .secondary { --control-padding:6px; --control-icon-size:16px; gap:4px; }
 .detail-body .link-row { min-height:var(--detail-row-size); margin:0; padding:6px 10px; }
-.sheet-body.detail-body { padding-bottom:2px; overflow-y:hidden; }
-.sheet-body.detail-body:is(.reset-expanded,.vault-expanded,:has(.account-editor details[open])) { padding-bottom:6px; overflow-y:auto; }
+.sheet-body.detail-body { position:relative; padding-bottom:2px; overflow-y:auto; }
+.sheet-body.detail-body::after {
+  content:''; position:absolute; inset:0 auto auto 0; width:1px;
+  height:var(--detail-scroll-floor,0px); pointer-events:none;
+}
 .detail-archive { display:grid; gap:1px; }
 .detail-compact .danger-row { height:var(--detail-row-size); min-height:var(--detail-row-size); padding:6px 10px; border-radius:var(--detail-row-radius); background:transparent; }
 .detail-expiry-note { height:13px; min-height:13px; flex-basis:13px; line-height:13px; }
@@ -966,8 +966,9 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 #app .status-dismiss { --nx-rest-transform: translateY(-50%); }
 
 /* Account credentials use the panel's existing scroll body and controls. */
-.sheet-body.vault-body { display:block; }
-.vault-content,.vault-form { display:grid; gap:12px; align-content:start; }
+.vault-content,.vault-form { display:grid; gap:10px; align-content:start; }
+.vault-form .note { margin:0; text-align:left; }
+.vault-form-footer > .control { flex:1 1 0; min-width:0; }
 .vault-field { display:grid; gap:5px; min-width:0; }
 .vault-field > span { color:var(--muted); }
 .vault-field .field { width:100%; min-width:0; }
@@ -975,16 +976,21 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .vault-card-edit { text-align:left; border:0; background:transparent; padding:0; color:inherit; cursor:pointer; }
 .vault-card-edit strong { display:block; font-size:var(--font-body); }
 .vault-form-actions { display:flex; flex-wrap:wrap; gap:6px; }
-.vault-current-code,.vault-enroll-code { display:flex; align-items:center; gap:8px; padding:10px; border-radius:var(--radius-ui); background:var(--surface); }
-.vault-current-code strong,.vault-enroll-code strong { flex:1; }
-.vault-enroll-code strong { font-size:24px; letter-spacing:2px; }
-.vault-steps { margin:0; padding-left:18px; display:grid; gap:10px; line-height:1.65; }
+.vault-current-code,.vault-enroll-code { align-items:center; gap:6px; padding:8px 10px; border-radius:var(--radius-control); background:var(--surface); }
+.vault-current-code { display:flex; }
+.vault-current-code strong { flex:1; }
+.vault-enroll-code { display:grid; grid-template-columns:minmax(0,1fr) 3ch auto; }
+.vault-enroll-code > span:first-child { grid-column:1/-1; color:var(--muted); }
+.vault-enroll-code strong { font-size:22px; letter-spacing:1px; }
 .vault-confirm { display:flex; align-items:flex-start; gap:8px; line-height:1.6; }
-.vault-cleanup-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px; }
-.vault-cleanup-row > span { display:grid; gap:4px; }
-.vault-cleanup-row small { color:var(--muted); }
+.settings-link-copy { display:grid; gap:1px; line-height:15px; }
+.settings-link-copy small { color:var(--muted); font-size:var(--font-small); line-height:12px; }
+.vault-form .settings-list > .setting-choice { padding-block:5px; }
 .vault-entry-actions,.authenticator-list { display:grid; gap:8px; min-width:0; }
-.authenticator-paste { display:grid; gap:8px; }
-.authenticator-paste > summary { padding:8px 0; color:var(--muted); cursor:pointer; }
-.authenticator-paste > textarea { width:100%; margin:8px 0; resize:vertical; }
+.vault-entry-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.authenticator-paste .disclosure-body { display:grid; gap:8px; padding:8px 12px; }
+.authenticator-paste textarea { resize:vertical; }
 .authenticator-list .vault-field > span { overflow-wrap:anywhere; }
+:root[data-motion="on"] #app :is(.sheet-head,.detail-compact,.vault-body,.vault-form-body,.vault-form-footer) button {
+  --nx-press-scale:1;
+}

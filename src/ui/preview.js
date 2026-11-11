@@ -31,7 +31,8 @@
       // An expanded disclosure is allowed to push the body past its height, the
       // same way the reset list and the nickname editor already are.
       if(!reset&&!editor&&!vaultOpen){
-        if(body.scrollTop||body.scrollHeight>body.clientHeight+1)problems.push('账号详情产生滚动');
+        const held=parseFloat(body.style.getPropertyValue('--detail-scroll-floor'))>0;
+        if(!held&&(body.scrollTop||body.scrollHeight>body.clientHeight+1))problems.push('账号详情产生滚动');
         if(controls.slice(1).some((n,i)=>Math.abs(n.getBoundingClientRect().top-controls[i].getBoundingClientRect().bottom-6)>.5))problems.push('账号详情行间距不一致');
         if(archive&&archive.getBoundingClientRect().bottom>body.getBoundingClientRect().bottom+.5)problems.push('账号详情归档行溢出正文');
         if(note&&note.getBoundingClientRect().bottom>body.getBoundingClientRect().bottom+.5)problems.push('账号详情日期溢出正文');

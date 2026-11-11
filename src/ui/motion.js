@@ -167,6 +167,7 @@
   const primaryControl = surface => {
     if (!surface) return null;
     for (const node of surface.querySelectorAll('.primary, .relay')) {
+      if(node.parentNode?.classList.contains('vault-form-footer'))continue;
       const value=capturePart(node,surface);
       if (value) return {node,...value,r:parseFloat(getComputedStyle(node).borderRadius)||0};
     }

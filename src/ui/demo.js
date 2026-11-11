@@ -370,8 +370,8 @@ window.NXDemo = (() => {
     if(which==='expired')state.accounts[0].windows[1].resets_at=sec()-1;
     if(which==='fail-switch')failNext=true;
     if(which==='empty'){state.accounts=[];state.current=null;usages={};state.pending='fresh-login@example.com';}
-    if(which==='adding-home'){previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:email||'',phase:'login'};state.add_login_status='waiting';}
-    if(which==='adding-ready'){previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:email||'',phase:'login'};state.add_login_status='ready';}
+    if(which==='adding-home'){previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:'',phase:'login'};state.add_login_status='waiting';}
+    if(which==='adding-ready'){previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:'',phase:'login'};state.add_login_status='ready';}
     if(which==='relay-week-priority'){
       state.current=state.accounts[0].email;
       state.accounts[1]={...state.accounts[1],alias:'上方账号',ok:true,windows:[{label:'5h',duration_mins:300,used:0,resets_at:sec()+18000},{label:'周',duration_mins:10080,used:88,resets_at:sec()+604800}]};
@@ -458,7 +458,7 @@ window.NXDemo = (() => {
     if(which==='notify-low')state.settings.notify_low=true;
     if(which==='hotkey-conflict')state.hotkeys[0].registered=false;
     if(which==='adding-unchanged'||which==='adding-existing'||which==='adding-opening'||which==='adding-saving'||which==='adding-cancelling'){
-      previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:email||'',phase:'login'};
+      previous=state.current;state.current=null;state.adding=true;state.add_state={previous,target:'',phase:'login'};
       state.add_login_status=which==='adding-existing'?'existing':which==='adding-unchanged'?'unchanged':'waiting';
       if(which==='adding-opening')state.operation={kind:'add_start',phase:'正在打开登录窗口'};
       if(which==='adding-saving'){state.add_login_status='ready';state.operation={kind:'add_finish',phase:'正在保存新账号'};}

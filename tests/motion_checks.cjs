@@ -304,6 +304,18 @@ function primaryFixture(e,surface,action,box,footer=false){
   const copy=e.el('span','control-content',box[0]+12,box[1]+10,Math.max(30,box[2]-24),18);copy.textContent=action;
   button.append(copy);parent.append(button);return {button,copy,parent};
 }
+check('credential form actions keep their footer position across navigation',()=>{
+  const e=setup(),old=e.surface('home','a');
+  primaryFixture(e,old,'relay',[14,173,299,62]);
+  e.mount(old.node);e.motion.begin(old.node,1,null,{from:'home',to:'mfa'});
+  const next=e.surface('mfa','a'),to=primaryFixture(e,next,'mfa-preview',[14,404,299,40],true);
+  to.parent.className='sheet-foot vault-form-footer';
+  e.mount(next.node);e.motion.paint(next.node);
+  assert(!e.test.models.has('primary-action'));
+  assert.equal(to.button.style.position,'');
+  assert.equal(to.button.style.width,'');
+  e.tick(1000);clean(e);
+});
 check('different primary actions morph across home body and confirmation footer',()=>{
   for(const scale of [1,1.25,1.75,2]){
     const e=setup(scale),old=e.surface('home','a'),from=primaryFixture(e,old,'relay',[14,173,299,62]);e.mount(old.node);e.motion.begin(old.node,1,'b');
@@ -538,4 +550,14 @@ check('usage return respects the overview history and other entry routes',()=>{c
 check('missing account data renders a safe identity instead of throwing',()=>{const text=viewCtx.window.NXViews.usage({...base,data:{accounts:[],current:null}});assert(text.includes('current-card'));assert(text.includes('未选择账号'));assert(!text.includes('data-action="usage-refresh"'))});
 check('archived usage never offers a live refresh control',()=>{for(const ok of[true,false]){const archived={...live,archived:true,ok,windows:ok?live.windows:[]};const text=viewCtx.window.NXViews.usage({...base,data:{accounts:[],current:null},ui:{...base.ui,usage:{rows:[archived]}}});assert(text.includes('已归档'));assert(!text.includes('data-action="usage-refresh"'));assert(!text.includes('data-action="refresh-one"'));assert(!text.includes('data-action="reauth"'))}});
 check('quota overview keeps known windows in explicit columns',()=>{const text=viewCtx.window.NXViews.accounts({...base,ui:{quotaScope:'relay',quotaMetric:'quota'}});assert(text.includes('data-window-minutes="300"'));assert(text.includes('data-window-minutes="10080"'));assert(text.includes('data-action="detail"'));const weekly={...live,windows:[live.windows[1]]};const single=viewCtx.window.NXViews.accounts({...base,data:{accounts:[weekly]},ui:{quotaScope:'week',quotaMetric:'quota'}});assert(single.includes('data-window-minutes="10080"'));assert(!single.includes('data-window-minutes="300"'))});
+check('pending add-account demo scenes initialize with an empty login target',()=>{
+  const demo=fs.readFileSync(path.join(root,'src/ui/demo.js'),'utf8');
+  for(const scenario of ['adding-home','adding-ready','adding-opening','adding-saving','adding-cancelling','adding-existing','adding-unchanged']){
+    const window={NX_CONFIG:{version:'1.0.0'}};
+    vm.runInNewContext(demo,{window,location:{search:'?scenario='+scenario},URLSearchParams});
+    const state=window.NXDemo.state();
+    assert.equal(state.adding,true);
+    assert.equal(state.add_state.target,'');
+  }
+});
 console.log(checks+' UI/motion checks passed');

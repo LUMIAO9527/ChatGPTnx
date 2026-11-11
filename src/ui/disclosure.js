@@ -20,7 +20,15 @@ window.NXDisclosure=(()=>{
     if(body){body.inert=model.inert;if(model.aria===null)body.removeAttribute('aria-hidden');else body.setAttribute('aria-hidden',model.aria);if(body.__nxMotionRetained)body.remove();else if(model.reveal)body.hidden=!open;delete body.__nxMotionRetained;}
     delete node.__nxDisclosureIntent;models.delete(node);
   }
-  const stop=()=>{cancelAnimationFrame(frameId);frameId=0;for(const model of [...models.values()])restore(model);for(const entry of [...popups.values()]){entry.animation?.cancel();entry.finish();}};
+  function settleDisclosures(){
+    cancelAnimationFrame(frameId);
+    frameId=0;
+    for(const model of [...models.values()])restore(model);
+  }
+  function stop(){
+    settleDisclosures();
+    for(const entry of [...popups.values()])entry.finish();
+  }
   function advance(now){
     for(const model of models.values())for(const key of ['height','alpha','clip']){
       [model.pose[key],model.velocity[key],model.acceleration[key]]=window.NXMotion.curve(model.origin[key],model.initialVelocity[key],model.initialAcceleration[key],model.goal[key],Math.max(0,now-model.start)/1000,.22);
@@ -50,9 +58,11 @@ window.NXDisclosure=(()=>{
     return snapshots;
   }
   function transact(root,change){
-    if(!enabled()){stop();change();return;}
+    if(!enabled()){settleDisclosures();change();return;}
+    const viewport=root.querySelector('.sheet-body');
+    const scrollTop=viewport?.scrollTop||0;
     const now=performance.now();advance(now);paint();const before=capture(root);
-    stop();changing=true;
+    settleDisclosures();changing=true;
     try{change();}finally{changing=false;}
     for(const node of root.querySelectorAll(selector)){
       const old=before.get(node);if(!old)continue;
@@ -81,7 +91,11 @@ window.NXDisclosure=(()=>{
         }
       }
     }
-    paint();schedule();
+    paint();
+    // Measuring the final layout can temporarily shorten the scroll range.
+    // Restore the starting position after reinstating the animated heights.
+    if(viewport?.isConnected)viewport.scrollTop=scrollTop;
+    schedule();
   }
   function afterPatch(root){
     if(changing||!models.size)return;

@@ -26,6 +26,7 @@
   const app = $('#app');
   app.innerHTML = '<main id="home"></main><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden></section><div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>';
   const home = $('#home'), sheet = $('#sheet');
+  let detailScrollFloor=0;
   // Keep a collapsed settings header in place even when the natural scroll
   // range shrinks. The floor retreats with upward scrolling and survives polls.
   function holdSettingsScroll(body,top=body?.scrollTop||0) {
@@ -38,6 +39,17 @@
   }
   app.addEventListener('scroll',event=>{
     const body=event.target;
+    if(detailScrollFloor&&body.matches?.('.detail-body')){
+      const tail=body.querySelector('.detail-compact');
+      if(!tail||[...tail.querySelectorAll('[data-disclosure]')].some(n=>n.__nxDisclosureIntent!==undefined))return;
+      const top=body.scrollTop;
+      const contentEnd=tail.getBoundingClientRect().bottom-body.getBoundingClientRect().top+
+        top+parseFloat(getComputedStyle(body).paddingBottom);
+      const floor=Math.ceil(top+body.clientHeight);
+      detailScrollFloor=top&&floor>contentEnd+1?floor:0;
+      body.style.setProperty('--detail-scroll-floor',detailScrollFloor+'px');
+      return;
+    }
     if(!ui.settingsScrollFloor||!body.matches?.('.settings-body'))return;
     const content=body.querySelector(':scope > .settings-content');
     if(!content||[...content.querySelectorAll('[data-disclosure]')].some(n=>n.__nxDisclosureIntent!==undefined))return;
@@ -264,8 +276,24 @@
   function pageHead(title,actions='') {
     return `<header class="sheet-head">${tool('back','back','返回')}<h2 id="sheet-title" tabindex="-1">${esc(title)}</h2>${actions}${config.demo?'<span class="demo-tag">演示</span>':''}</header>`;
   }
+  function sheetHistory() {
+    const saved={page:ui.page,email:ui.email,scope:ui.scope,
+      scroll:captureScroll(sheet),focus:focusKey(document.activeElement)};
+    if(ui.page==='settings'||ui.page==='detail'){
+      saved.disclosures=[...ui.disclosures];
+      saved.collectionPages={...ui.collectionPages};
+    }
+    if(ui.page==='settings')saved.settingsScrollFloor=ui.settingsScrollFloor;
+    if(ui.page==='detail'){
+      saved.resetOpen=ui.resetExpanded.has(ui.email);
+      saved.vaultOpen=ui.vaultExpanded.has(ui.email);
+      saved.detailScrollFloor=detailScrollFloor;
+    }
+    return saved;
+  }
   function show(page, target=null, push=true, saved=null) {
     if(window.NXDataTransfer?.busy(ui.page))return;
+    const previous=push&&ui.page?sheetHistory():null;
     resetConfirmation=null;ui.resumeClearConfirm=false;ui.vaultForget=null;
     if(ui.page==='mfa'&&page!=='mfa'){api('mfa_cancel',{email:ui.email}).catch(()=>{});ui.mfa=null;}
     if(ui.page==='authenticator'&&page!=='authenticator'){api('authenticator_cancel').catch(()=>{});ui.authTransfer=null;ui.authText='';}
@@ -277,16 +305,27 @@
     if(page==='edit')page='detail';
     window.NXDataTransfer?.leave(ui.page,page,{api});
     window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','confirm','remove','reauth'].includes(page)?target:null,{from:ui.page||'home',to:page});
-    const returningToSettings = page==='settings' && saved?.page==='settings';
-    if(page==='settings' && !returningToSettings){ui.disclosures.clear();ui.collectionPages={};}
-    if(page==='detail'){ui.disclosures.clear();ui.resetExpanded.clear();ui.vaultExpanded.clear();ui.vaultReveal=null;ui.collectionPages['reset:'+target]=1;}
+    if(page==='settings'){
+      ui.disclosures=new Set(saved?.disclosures);
+      ui.collectionPages=saved?.collectionPages||{};
+      ui.settingsScrollFloor=saved?.settingsScrollFloor||0;
+    }
+    if(page==='detail'){
+      ui.disclosures=new Set(saved?.disclosures);
+      ui.resetExpanded.clear();
+      ui.vaultExpanded.clear();
+      ui.vaultReveal=null;
+      detailScrollFloor=saved?.detailScrollFloor||0;
+      ui.collectionPages['reset:'+target]=saved?.collectionPages?.['reset:'+target]||1;
+      if(saved?.resetOpen)ui.resetExpanded.add(target);
+      if(saved?.vaultOpen)ui.vaultExpanded.add(target);
+    }
     if(page==='resume'){ui.resumeExpanded.clear();ui.resumeCollapsed.clear();}
     if(Object.hasOwn(aliases,initial)&&aliases[initial])selectSettingDisclosure(aliases[initial]);
     if(initial==='edit')ui.disclosures.add('meta:'+target);
     feedback.clear();clearNotification();
     if (!ui.page) {previousFocus=document.activeElement;previousFocusKey=focusKey(previousFocus);}
-    if (push && ui.page) ui.history.push({page:ui.page,email:ui.email,scope:ui.scope,
-      scroll:captureScroll(sheet),focus:focusKey(document.activeElement)});
+    if (previous) ui.history.push(previous);
     navigation.invalidate();ui.recording=null;
     ui.page=page;ui.email=target;
     home.inert=true;sheet.hidden=false;
@@ -313,7 +352,7 @@
     const saved=ui.history.pop();if(!saved){closeSheet();return;}
     ui.scope=saved.scope;show(saved.page,saved.email,false,saved);
   }
-  const link=(i,label,action,attrs='')=>`<button class="link-row" data-action="${action}" ${attrs}>${i?icon(i):''}<span>${esc(label)}</span>${icon('chevron')}</button>`;
+  const link=(i,label,action,attrs='',description='')=>`<button class="link-row" data-action="${action}" ${attrs}>${i?icon(i):''}<span${description?' class="settings-link-copy"':''}>${esc(label)}${description?`<small>${esc(description)}</small>`:''}</span>${icon('chevron')}</button>`;
   const settingsGroup=(label,...groups)=>`<section class="settings-section"><h3 class="settings-heading">${esc(label)}</h3>${groups.map(content=>`<div class="settings-list">${content}</div>`).join('')}</section>`;
   const detail=(label,value,hint='')=>`<div class="detail-line detail-item detail-value-row"><span>${esc(label)}</span><span class="right"><strong>${esc(value)}</strong>${hint?`<small>${esc(hint)}</small>`:''}</span></div>`;
   function resetCredits(a) {
@@ -384,15 +423,18 @@
       case 'vault':
         title='账号库';body=window.NXVault.page(viewContext());cls='vault-body';break;
       case 'authenticator':
-        title='导入手机验证器';body=window.NXVault.authenticator(viewContext());cls='vault-form-body';
-        foot=`<button class="control control--large secondary" data-action="back">返回</button>${ui.authTransfer?'<button class="control control--large primary" data-action="authenticator-commit">导入所选账号</button>':''}`;break;
+        title='导入 2FA';cls='vault-form-body';
+        ({body,foot}=window.NXVault.authenticator(viewContext()));break;
       case 'vault-edit':
-        title='登录资料';body=window.NXVault.editor(viewContext());cls='vault-form-body';foot=`<button class="control control--large secondary" data-action="back">返回</button><button class="control control--large primary" data-action="vault-save">保存</button>`;break;
+        title='登录资料';body=window.NXVault.editor(viewContext());cls='vault-form-body';
+        foot=actionButton({action:'vault-save',content:'保存',size:'large',tone:'primary'});break;
       case 'mfa':
-        title='更换验证器';body=window.NXVault.mfa(viewContext());cls='vault-form-body';
-        foot=`<button class="control control--large secondary" data-action="back">返回</button>${data.current?.toLowerCase()===ui.email?.toLowerCase()?`<button class="control control--large primary" data-action="${ui.mfa?.token?'mfa-commit':'mfa-preview'}" ${ui.mfa?.token&&!ui.mfa?.confirmed?'disabled':''}>${ui.mfa?.token?'保存新密钥':'生成验证码'}</button>`:''}`;break;
+        title='更换验证器';cls='vault-form-body';
+        ({body,foot}=window.NXVault.mfa(viewContext()));break;
       case 'desktop-store':
-        title='清理登录数据';body=window.NXVault.cleanup(viewContext());cls='vault-form-body';foot=`<button class="control control--large secondary" data-action="back">返回</button><button class="control control--large primary ${ui.storeConfirm?'control--confirmation':''}" data-action="store-clear" ${!ui.storeGroups.size||busy()?'disabled':''}>${ui.storeConfirm?'确认清理':'清理所选内容'}</button>`;break;
+        title='清理内置网页数据';body=window.NXVault.cleanup(viewContext());cls='vault-form-body';
+        foot=actionButton({action:'store-clear',content:ui.storeConfirm?'确认清理':'清理所选数据',
+          size:'large',tone:'primary',attrs:!ui.storeGroups.size||busy()?'disabled':''});break;
       case 'detail': {
         if(!a){closeSheet();return;}
         title='账号详情';const m=a.membership||{},isCurrent=a.email===data.current;
@@ -449,9 +491,11 @@
       }
     }
     sheet.dataset.page=ui.page;
+    if(cls==='vault-form-body')footClass='vault-form-footer';
     const oldError=preserve?sheet.querySelector('#form-error')?.textContent:'';
     const oldFields=[...sheet.querySelectorAll('.field')].map(n=>({node:n,id:n.id,value:n.value,invalid:n.getAttribute('aria-invalid'),focused:n===document.activeElement,start:n.selectionStart,end:n.selectionEnd}));
-    const markup=pageHead(title,headActions)+`<div class="sheet-body ${cls}">${statusRegion()}${body}</div>`+(foot?`<footer class="sheet-foot ${footClass}">${foot}</footer>`:'');
+    const floor=ui.page==='detail'&&detailScrollFloor?` style="--detail-scroll-floor:${detailScrollFloor}px"`:'';
+    const markup=pageHead(title,headActions)+`<div class="sheet-body ${cls}"${floor}>${statusRegion()}${body}</div>`+(foot?`<footer class="sheet-foot ${footClass}">${foot}</footer>`:'');
     // Keep shared identity nodes alive across routes. New routes reset input
     // nodes and scroll; passive state refreshes preserve both.
     patchHTML(sheet,markup,{preserveFields:preserve});
@@ -594,7 +638,7 @@
   async function openUsage(scope='all',force=false) {
     if(scope!=='all'&&!data.accounts.some(a=>a.email===scope)&&!ui.usage?.rows?.some(r=>r.email===scope&&r.archived))scope='all';
     if(ui.page!=='usage'||ui.scope!==scope){
-      if(ui.page)ui.history.push({page:ui.page,email:ui.email,scope:ui.scope,scroll:captureScroll(sheet),focus:focusKey(document.activeElement)});
+      if(ui.page)ui.history.push(sheetHistory());
       ui.scope=scope;show('usage',null,false);
     }
     const ticket=navigation.ticket();
@@ -636,7 +680,16 @@
     }
   }
   const settingDisclosureKeys=new Set(['appearance','notifications','relay','early-anchor','message','hotkeys','archives','resume-history']);
-  const disclose=change=>window.NXDisclosure?window.NXDisclosure.transact(sheet,change):change();
+  function disclose(change){
+    // Preserve the visible heading when the expanded content retracts.
+    const detail=sheet.querySelector('.detail-body');
+    if(detail?.scrollTop){
+      detailScrollFloor=Math.ceil(detail.scrollTop+detail.clientHeight);
+      detail.style.setProperty('--detail-scroll-floor',detailScrollFloor+'px');
+    }
+    if(window.NXDisclosure)window.NXDisclosure.transact(sheet,change);
+    else change();
+  }
   function selectSettingDisclosure(key) {
     for(const k of settingDisclosureKeys)if(k!==key)ui.disclosures.delete(k);
     ui.disclosures.add(key);
@@ -649,7 +702,15 @@
     const key=d.dataset?.disclosure;if(!key||!d.isConnected||!sheet.contains(d))return;
     if(window.NXDisclosure?.isOpen(d)??d.open){
       if(ui.page==='settings'&&settingDisclosureKeys.has(key))selectSettingDisclosure(key);
-      else {ui.disclosures.add(key);if(ui.page==='detail'&&key.startsWith('meta:')&&ui.resetExpanded.size){ui.resetExpanded.clear();renderSheet();}}
+      else {
+        ui.disclosures.add(key);
+        if(ui.page==='detail'&&key.startsWith('meta:')&&(ui.resetExpanded.size||ui.vaultExpanded.size)){
+          ui.resetExpanded.clear();
+          ui.vaultExpanded.clear();
+          ui.vaultReveal=null;
+          renderSheet();
+        }
+      }
       if(ui.inlineLoading[key]!=='error')loadInline(key);
     }else {
       ui.disclosures.delete(key);
@@ -694,13 +755,10 @@
     if(summary){
       e.preventDefault();const d=summary.parentElement,opening=!(window.NXDisclosure?.isOpen(d)??d.open),body=d.closest('.sheet-body'),preservedScroll=body?.scrollTop||0;
       summary.focus({preventScroll:true});
-      if(!opening)holdSettingsScroll(body,preservedScroll);
+      if(ui.page==='settings')holdSettingsScroll(body,preservedScroll);
       disclose(()=>{if(opening&&ui.page==='settings')selectSettingDisclosure(d.dataset.disclosure);d.open=opening;summary.setAttribute('aria-expanded',String(opening));syncDisclosure(d);});
-      // Opening may need the heading revealed. While closing, keep the old
-      // scrollTop until the animated height has settled; this prevents a jump
-      // to the next settings section when the content shrinks.
+      // Reveal a partially clipped heading on open.
       if(opening&&d.isConnected){const r=summary.getBoundingClientRect(),v=body?.getBoundingClientRect();if(v&&r.top<v.top)body.scrollTop-=v.top-r.top;}
-      if(!opening&&body){const started=performance.now();const keep=()=>{if(!body.isConnected)return;const max=Math.max(0,body.scrollHeight-body.clientHeight);body.scrollTop=Math.min(preservedScroll,max);if(performance.now()-started<300)requestAnimationFrame(keep);};requestAnimationFrame(keep);}
       return;
     }
     const b=e.target.closest('[data-action]');if(!b||b.disabled)return;
@@ -789,10 +847,12 @@
       case 'retry-resume-task':await run('retry_resume_task',b.dataset.session,val);break;
       case 'home':closeSheet();break;
       case 'detail':show('detail',target);break;
-      case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.vaultExpanded.delete(target);ui.disclosures.delete('meta:'+target);}renderSheet();});break;
+      case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.vaultExpanded.delete(target);ui.vaultReveal=null;ui.disclosures.delete('meta:'+target);}renderSheet();});break;
       case 'toggle-vault':disclose(()=>{ui.vaultReveal=null;if(ui.vaultExpanded.has(target))ui.vaultExpanded.delete(target);else {ui.vaultExpanded.add(target);ui.disclosures.delete('meta:'+target);ui.resetExpanded.delete(target);ui.collectionPages['reset:'+target]=1;}renderSheet();});break;
       case 'vault-page':show('vault');break;
-      case 'authenticator-open':ui.authTransfer=null;ui.authText='';show('authenticator');break;
+      case 'authenticator-open':
+        ui.authTransfer=null;ui.authText='';ui.disclosures.delete('authenticator-link');
+        show('authenticator');break;
       case 'authenticator-choose':
       case 'authenticator-preview':{
         let result;
@@ -802,7 +862,7 @@
         if(!navigation.current(ticket)){api('authenticator_cancel').catch(()=>{});break;}
         if(result?.cancelled)break;
         if(!result?.ok){formError(result?.error||'读取未完成');break;}
-        ui.authTransfer=result;ui.authText='';renderSheet();break;}
+        ui.authTransfer=result;ui.authText='';renderSheet(false);b.focus({preventScroll:true});break;}
       case 'authenticator-commit':{
         const selections=(ui.authTransfer?.rows||[]).filter(row=>row.email).map(({id,email})=>({id,email}));
         const result=await api('authenticator_commit',{token:ui.authTransfer?.token,selections});
@@ -817,6 +877,9 @@
         if(result?.ok===false){formError(result.error);break;}
         ui.vaultEditor=null;await poll(true);back();notify('登录资料已保存');break;}
       case 'mfa-open':ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};show('mfa',target);break;
+      case 'mfa-reset':
+        ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};
+        renderSheet();$('#mfa-secret')?.focus({preventScroll:true});break;
       case 'mfa-preview':{
         const owner=ui.email,result=await api('mfa_preview',{email:owner,secret:ui.mfa?.secret||''});
         if(!navigation.current(ticket)){api('mfa_cancel',{email:owner}).catch(()=>{});break;}
@@ -839,8 +902,9 @@
         const secret=await api('vault_secret',{email:who,field:'password'});
         if(!navigation.current(ticket))break;
         if(!secret||secret.ok===false||!secret.value){notify(secret?.error||'没有保存这个账号的密码',{tone:'error'});break;}
-        ui.vaultReveal={email:who,value:secret.value};renderSheet();
-        setTimeout(()=>{if(ui.vaultReveal&&ui.vaultReveal.email===who){ui.vaultReveal=null;renderSheet();}},3000);
+        const reveal={email:who,value:secret.value};
+        ui.vaultReveal=reveal;renderSheet();
+        setTimeout(()=>{if(ui.vaultReveal===reveal){ui.vaultReveal=null;renderSheet();}},3000);
         break;}
       case 'vault-copy':{
         let copyText='';
@@ -965,7 +1029,13 @@
   });
   app.addEventListener('change',event=>{
     if(event.target.id==='mfa-confirm'&&ui.mfa){ui.mfa.confirmed=event.target.checked;const save=app.querySelector('[data-action="mfa-commit"]');if(save)save.disabled=!ui.mfa.confirmed;}
-    if(event.target.matches('.auth-map')&&ui.authTransfer){const row=ui.authTransfer.rows.find(row=>row.id===event.target.dataset.id);if(row)row.email=event.target.value;}
+    if(event.target.matches('.auth-map')&&ui.authTransfer){
+      const rows=ui.authTransfer.rows;
+      const row=rows.find(row=>row.id===event.target.dataset.id);
+      if(row)row.email=event.target.value;
+      const save=sheet.querySelector('[data-action="authenticator-commit"]');
+      if(save)save.disabled=!rows.some(row=>row.email);
+    }
   });
   app.addEventListener('compositionstart',event=>{if(event.target.matches('.field'))composingField=event.target;});
   app.addEventListener('compositionend',()=>{composingField=null;if(deferredSheet){deferredSheet=false;renderSheet();}});
