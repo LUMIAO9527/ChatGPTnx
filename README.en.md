@@ -97,8 +97,8 @@ Regenerate it with `python tools/build_explorer.py` after editing the UI; `build
 
 ## Passwords and 2FA
 
-Open Settings → Account data → Account vault to add sign-in material. Bulk import accepts one `email----password----2FA material----optional redemption URL` record per line and preserves redemption codes and URLs separately.
+Edit sign-in material in the Passwords and 2FA rows of account details. Open Settings → Import and Export → Import Sign-in Material for bulk import. Bulk import accepts one `email----password----2FA material----optional redemption URL` record per line and preserves redemption codes and URLs separately.
 
-Choose Import 2FA, select every QR image in one Google Authenticator export batch, review the account mapping, and import. The phone and NX can both generate codes. Account details provide copy controls and a password reveal that hides itself after three seconds.
+Open Settings → Import and Export → Import Phone 2FA. Select every QR image from the same Google Authenticator export or switch to Export Link. Review the account mapping and select Import. Account details provide copy controls and a password reveal that hides itself after three seconds.
 
 For a replacement authenticator, use the new key issued by ChatGPT's security settings. NX shows the matching code; complete enrollment in ChatGPT, then confirm and save the key and recovery codes in NX. Phone, email-code, and human checks remain user steps while normal completed-sign-in detection continues.
