@@ -290,21 +290,6 @@
     return saved;
   }
   const revealedPasswordSelector='.vault-value-slot.is-revealed';
-  function clearVaultReveal() {
-    clearTimeout(ui.vaultReveal?.hideTimer);
-    ui.vaultReveal=null;
-  }
-  function scheduleVaultHide() {
-    const reveal=ui.vaultReveal;
-    if(!reveal)return;
-    clearTimeout(reveal.hideTimer);
-    reveal.hideTimer=setTimeout(()=>{
-      if(ui.vaultReveal===reveal){clearVaultReveal();renderSheet();}
-    },3000);
-  }
-  app.addEventListener('scroll',event=>{
-    if(event.target.matches?.(revealedPasswordSelector))scheduleVaultHide();
-  },true);
   app.addEventListener('wheel',event=>{
     const viewport=event.target.closest?.(revealedPasswordSelector);
     const delta=event.deltaX||event.deltaY;
@@ -313,11 +298,10 @@
       event.deltaMode===WheelEvent.DOM_DELTA_PAGE?viewport.clientWidth:1;
     event.preventDefault();
     viewport.scrollLeft+=delta*unit;
-    scheduleVaultHide();
   },{passive:false});
   function clearCredentialForms() {
     const error=$('#credential-error');if(error)error.textContent='';
-    ui.vaultEditor=null;clearVaultReveal();
+    ui.vaultEditor=null;
     clearBinding();
   }
   function clearBinding() {
@@ -374,6 +358,7 @@
     const initial=page;
     if(Object.hasOwn(aliases,page))page='settings';
     if(page==='edit')page='detail';
+    if(page!=='detail'||target!==ui.email)ui.vaultReveal=null;
     window.NXDataTransfer?.leave(ui.page,page,{api});
     window.NXMotion?.begin(ui.page ? sheet : home, saved ? -1 : 1, page==='usage'?ui.scope:['detail','confirm','remove','reauth'].includes(page)?target:null,{from:ui.page||'home',to:page});
     if(page==='settings'||page==='data-transfer'){
@@ -406,6 +391,7 @@
   function closeSheet(animate=true) {
     if(window.NXDataTransfer?.busy(ui.page))return;
     clearCredentialForms();
+    ui.vaultReveal=null;
     window.NXDataTransfer?.leave(ui.page,null,{api});
     if(ui.page&&animate)window.NXMotion?.begin(sheet, -1,null,{from:ui.page,to:'home'});
     else window.NXMotion?.stop();
@@ -951,6 +937,7 @@
           const result=await api('vault_save',{email:editor.email,password:editor.password});
           if(!navigation.current(ticket)||ui.vaultEditor!==editor)break;
           if(!result?.ok){formError(result?.error||'密码保存未完成','credential-error');break;}
+          if(ui.vaultReveal?.email===editor.email)ui.vaultReveal.value=editor.password;
           await poll(true);
           if(ui.vaultEditor===editor){
             disclose(()=>{clearCredentialForms();renderSheet();});
@@ -969,13 +956,12 @@
         break;}
       case 'vault-reveal':{
         const who=target;
-        if(ui.vaultReveal?.email===who){clearVaultReveal();renderSheet();break;}
+        if(ui.vaultReveal?.email===who){ui.vaultReveal=null;renderSheet();break;}
         const secret=await api('vault_secret',{email:who,field:'password'});
         if(!navigation.current(ticket)||ui.vaultEditor||!ui.vaultExpanded.has(who))break;
         if(!secret||secret.ok===false||!secret.value){notify(secret?.error||'没有保存这个账号的密码',{tone:'error'});break;}
-        clearVaultReveal();
         ui.vaultReveal={email:who,value:secret.value};
-        renderSheet();scheduleVaultHide();
+        renderSheet();
         break;}
       case 'vault-copy':{
         let copyText='';
@@ -1158,14 +1144,12 @@
       if(modifiers.length<2){notify('至少同时使用 Ctrl、Alt、Shift 中的两个');return;}
       ui.recording=null;await action('set_account_hotkey',target,[...modifiers,e.key].join('+'));return;
     }
-    if(ui.vaultReveal&&e.key==='Escape'){e.preventDefault();clearVaultReveal();renderSheet();return;}
     const passwordViewport=e.target.closest?.(revealedPasswordSelector);
     if(passwordViewport&&passwordViewport.scrollWidth>passwordViewport.clientWidth&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
       const offsets={ArrowLeft:-32,ArrowRight:32,Home:-passwordViewport.scrollWidth,End:passwordViewport.scrollWidth};
       if(Object.hasOwn(offsets,e.key)){
         e.preventDefault();
         passwordViewport.scrollLeft+=offsets[e.key];
-        scheduleVaultHide();
         return;
       }
     }
@@ -1195,7 +1179,7 @@
   window.nxOpenUninstall=()=>{panelVisible=true;window.NXDataTransfer.handle({dataset:{action:"uninstall-open"}},{...viewContext(),show,back,render:()=>renderSheet()});poll();};
   window.nxOpenUpdate=()=>{panelVisible=true;show('update');poll();};
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
-  window.nxHidden=()=>{clearCredentialForms();ui.vaultDraft='';window.NXDataTransfer?.hidden(ui.page,{api});window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
+  window.nxHidden=()=>{clearCredentialForms();ui.vaultReveal=null;ui.vaultDraft='';window.NXDataTransfer?.hidden(ui.page,{api});window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
   window.addEventListener('pywebviewready',poll);
   window.addEventListener('resize',()=>{window.NXMotion?.stop();if(config.demo)setSize(ui.page?'workspace':'home');});
   setInterval(()=>{

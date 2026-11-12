@@ -537,7 +537,7 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .detail-line.control-header .right > .icon { transition:transform .22s var(--ease); }
 .detail-line.control-header[aria-expanded="true"] .right > .icon { transform:rotate(90deg); }
 .vault-details { --credential-label-width:44px; position:relative; display:grid; grid-template-columns:minmax(0,1fr); gap:2px; padding:0 10px 8px; }
-.vault-line { display:flex; align-items:center; gap:8px; height:36px; min-height:36px; padding:3px 0; border-top:1px solid var(--line); font-size:var(--font-small); }
+.vault-line { display:flex; align-items:center; gap:8px; height:var(--height-control); min-height:var(--height-control); padding:3px 0; border-top:1px solid var(--line); font-size:var(--font-small); }
 .vault-line:first-child { border-top:0; }
 .vault-label { color:var(--muted); flex:0 0 var(--credential-label-width); }
 .vault-line strong { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:550; }
@@ -555,13 +555,11 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .vault-value-slot:has(> .vault-value:focus-visible) { outline:2px solid var(--ink); outline-offset:1px; }
 .vault-value-slot > .vault-value:focus-visible { outline:none; }
 .vault-inline-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; align-items:center; }
-.vault-inline-actions > .control { min-width:0; width:100%; }
+.vault-inline-actions > .control { --control-size:var(--height-control); --control-font-size:var(--font-body); --control-padding:6px; min-width:0; width:100%; }
 .credential-field .field { flex:1; min-width:0; width:100%; height:28px; min-height:28px; padding:4px 8px; border-radius:10.5px; font-size:var(--font-body); }
 .credential-hint { margin:4px 0 0; color:var(--muted); font-size:var(--font-small); line-height:16px; }
-.credential-editor .field-feedback { min-height:0; padding:0; line-height:16px; }
+.credential-editor .field-feedback { min-height:0; padding:0; margin:0; line-height:16px; }
 .credential-editor .field-feedback:empty { display:none; }
-.credential-feedback { height:16px; padding-top:2px; overflow:auto; scrollbar-width:thin; }
-.credential-feedback .field-feedback { margin:0; line-height:12px; }
 .saved-login-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .vault-import { display:grid; gap:8px; }
 .vault-import textarea { width:100%; resize:none; min-height:80px; }
@@ -1014,7 +1012,6 @@ details p, .note { color: var(--muted); font-size: var(--font-body); line-height
 .binding-instruction { margin:0; font-size:var(--font-small); line-height:15px; color:var(--muted); text-align:left; }
 .binding-error { color:var(--danger); }
 .vault-line .vault-code { font-size:var(--font-title); letter-spacing:.4px; }
-.binding-actions .control { --control-size:var(--height-control); --control-font-size:var(--font-body); --control-padding:6px; }
 .binding-inline { border-top:1px solid var(--line); padding:var(--space-3) 0 var(--space-1); }
 .credential-field .field::placeholder,.vault-import .field::placeholder { color:var(--muted); opacity:1; }
 .sheet[data-page="data-transfer"] { --sheet-header-gap:0px; --content-top:8px; }

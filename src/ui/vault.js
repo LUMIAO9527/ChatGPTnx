@@ -75,15 +75,13 @@ window.NXVault = (() => {
           content: bindingActive ? '收起' : '绑定', size: 'small', className: 'secondary',
           attrs: `data-email="${esc(account.email)}" aria-expanded="${bindingActive}" aria-controls="account-binding-form"`
         });
-    const actions = editing ? `<div class="credential-feedback">
-        <span id="credential-error" class="field-feedback" role="alert"></span></div>
-      <div class="vault-inline-actions">${actionButton({
+    const actions = editing ? `<div class="vault-inline-actions">${actionButton({
         action: 'vault-cancel', content: '取消', size: 'large', className: 'secondary',
         attrs: editorState.saving ? 'disabled' : ''
       })}${actionButton({
         action: 'vault-save', content: '保存', size: 'large', tone: 'primary',
         attrs: editorState.saving || !editorState.password ? 'disabled' : ''
-      })}</div>` : '';
+      })}</div><span id="credential-error" class="field-feedback" role="alert"></span>` : '';
     const binding = bindingActive ? `<div id="account-binding-form" class="binding-inline">${window.NXBinding.content(c)}</div>` : '';
     const body = expanded ? `<div id="vault-details" class="vault-details${editing ? ' credential-editor' : ''}"
         role="region" aria-label="密码与 2FA">

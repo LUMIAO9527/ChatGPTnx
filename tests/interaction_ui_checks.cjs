@@ -104,6 +104,15 @@ fs.mkdirSync(output,{recursive:true});
     });
     const email='work-02@example.com', tail='NX_END_987!';
     const longPassword='NX-synthetic_123!? '.repeat(32).slice(0,512-tail.length)+tail;
+    const actionRow=(selector)=>page.locator(selector).evaluate(node=>{
+      const bounds=node.getBoundingClientRect();
+      const buttons=[...node.children].map(button=>button.getBoundingClientRect());
+      const line=node.closest('.vault-details').querySelector('.vault-verifier').getBoundingClientRect();
+      return {height:bounds.height,lineHeight:line.height,buttonHeights:buttons.map(button=>button.height),
+        aligned:buttons[0].left===line.left&&buttons[1].right===line.right&&buttons[0].top===buttons[1].top,
+        equalWidth:Math.abs(buttons[0].width-buttons[1].width)<1,gap:buttons[1].left-buttons[0].right,
+        top:bounds.top,verifierBottom:line.bottom};
+    });
     for(const [width,appearance] of [[300,'dark'],[312,'light'],[327,'dark']]){
       await fresh();
       await page.evaluate(async ({width,appearance,email,longPassword})=>{
@@ -138,14 +147,9 @@ fs.mkdirSync(output,{recursive:true});
       assert(await viewport.evaluate(node=>node.scrollWidth>node.clientWidth&&node.scrollLeft===0));
       const box=await viewport.boundingBox();
       await page.mouse.move(box.x+10,box.y+8);
-      if(width===312)await page.waitForTimeout(1800);
       await page.mouse.wheel(width===327?190:0,width===327?0:190);
       await page.waitForFunction(()=>document.querySelector('.vault-value-slot').scrollLeft>0);
       assert.deepEqual(await geometry(),masked);
-      if(width===312){
-        await page.waitForTimeout(1350);
-        assert.equal(await password.getAttribute('aria-label'),'隐藏密码');
-      }
       if(width===300){
         await password.press('Home');
         const bar=await viewport.evaluate(node=>node.offsetHeight-node.clientHeight);
@@ -176,20 +180,27 @@ fs.mkdirSync(output,{recursive:true});
       await page.evaluate(()=>NXPreview.refresh());
       assert.equal(await viewport.evaluate(node=>node.scrollLeft),end);
       assert.deepEqual(await geometry(),masked);
-      if(width===312)await page.locator('#app').screenshot({path:path.join(output,'long-password.png')});
+      if(width===312){
+        await page.waitForTimeout(3500);
+        assert.equal(await password.getAttribute('aria-label'),'隐藏密码');
+        assert.equal(await viewport.evaluate(node=>node.scrollLeft),end);
+        await page.locator('#app').screenshot({path:path.join(output,'long-password.png')});
+      }
       await copy.click();
       await page.waitForFunction(value=>window.__passwordCopy===value,longPassword);
-      if(width===312){
-        await page.waitForFunction(()=>document.querySelector('.vault-value')?.getAttribute('aria-label')==='显示密码');
-      }else{
-        await page.keyboard.press('Escape');
-        assert.equal(await password.getAttribute('aria-label'),'显示密码');
-      }
+      assert.equal(await password.getAttribute('aria-label'),'隐藏密码');
+      await page.mouse.click(box.x+10,box.y+8);
+      assert.equal(await password.getAttribute('aria-label'),'显示密码');
       assert.deepEqual(await geometry(),masked);
       await password.click();
       await page.waitForFunction(()=>document.querySelector('.vault-value-slot').classList.contains('is-revealed'));
       assert.equal(await viewport.evaluate(node=>node.scrollLeft),0);
-      await page.mouse.click(box.x+10,box.y+8);
+      await page.locator('[data-action="toggle-vault"]').click();
+      await page.locator('[data-action="toggle-vault"]').click();
+      assert.equal(await password.getAttribute('aria-label'),'隐藏密码');
+      await page.locator('#sheet .sheet-head [data-action="back"]').click();
+      await details(email);
+      await page.locator('[data-action="toggle-vault"]').click();
       assert.equal(await password.getAttribute('aria-label'),'显示密码');
       await edit.click();
       const field=page.locator('#vault-password');
@@ -200,14 +211,33 @@ fs.mkdirSync(output,{recursive:true});
         return actions&&actions.getBoundingClientRect().bottom<=body.getBoundingClientRect().bottom;
       });
       const beforeInput=await field.boundingBox();
+      const editorRow=await actionRow('.credential-editor .vault-inline-actions');
+      assert.equal(editorRow.height,editorRow.lineHeight);
+      assert.deepEqual(editorRow.buttonHeights,[editorRow.lineHeight,editorRow.lineHeight]);
+      assert(editorRow.aligned&&editorRow.equalWidth);
+      assert.equal(editorRow.top-editorRow.verifierBottom,2);
+      assert.equal(editorRow.gap,8);
+      assert.equal(await page.locator('#credential-error').isVisible(),false);
       await field.fill(longPassword);
       assert.deepEqual(await field.boundingBox(),beforeInput);
+      assert.deepEqual(await actionRow('.credential-editor .vault-inline-actions'),editorRow);
       assert.equal((await page.locator('.detail-vault').boundingBox()).width,masked.vault[2]);
+      if(width===312)await page.locator('#app').screenshot({path:path.join(output,'credential-editor.png')});
       await page.locator('[data-action="vault-cancel"]').click();
       assert.equal((await page.locator('.detail-vault').boundingBox()).width,masked.vault[2]);
+      await details('studio@example.com');
+      await page.locator('[data-action="toggle-vault"]').click();
+      await page.locator('[data-action="vault-import-authenticator"]').click();
+      await page.locator('.binding-actions').scrollIntoViewIfNeeded();
+      const bindingRow=await actionRow('.binding-actions');
+      assert.equal(bindingRow.height,editorRow.height);
+      assert.deepEqual(bindingRow.buttonHeights,editorRow.buttonHeights);
+      assert(bindingRow.aligned&&bindingRow.equalWidth);
+      assert.equal(bindingRow.gap,editorRow.gap);
+      if(width===312)await page.locator('#app').screenshot({path:path.join(output,'binding-picker.png')});
     }
     assert.deepEqual(errors,[]);
-    console.log('Password layout: wheel, scrollbar, keyboard, idle masking, refresh, full copy, and pencil editor passed at 300/312/327 px.');
+    console.log('Credential layout: persistent reveal, manual masking, navigation, horizontal scroll, full copy, and matching action rows passed at 300/312/327 px.');
     console.log('Interaction UI: all noncurrent accounts, independent choices/cancellation, reset confirmation/cancellation/single request, UUID, left alignment, light/dark passed.');
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
