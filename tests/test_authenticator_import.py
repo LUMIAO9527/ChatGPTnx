@@ -36,6 +36,14 @@ def transfer_uri(name='OpenAI:a@example.com', *, batch_size=1, batch_index=0,
     return 'otpauth-migration://offline?data=' + quote(base64.b64encode(payload).decode(), safe='')
 
 
+def qr_image(uri):
+    from PIL import Image
+    import zxingcpp
+    bitmap = zxingcpp.create_barcode(uri, zxingcpp.BarcodeFormat.QRCode).to_image(scale=5)
+    view = memoryview(bitmap)
+    return Image.frombytes('L', (view.shape[1], view.shape[0]), bytes(view))
+
+
 class AuthenticatorImportTests(unittest.TestCase):
     def test_google_transfer_returns_seed_and_account(self):
         result = parse_uri(transfer_uri())
@@ -96,16 +104,11 @@ class AuthenticatorImportTests(unittest.TestCase):
                 parse_uri(raw)
 
     def test_real_image_decoder_reads_generated_transfer_qr(self):
-        import zxingcpp
-        from PIL import Image
         uri = transfer_uri(version=2)
-        bitmap = zxingcpp.create_barcode(uri, zxingcpp.BarcodeFormat.QRCode).to_image(scale=5)
-        view = memoryview(bitmap)
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder, qr_image(uri) as image:
             path = Path(folder) / 'synthetic.png'
-            image = Image.frombytes('L', (view.shape[1], view.shape[0]), bytes(view))
             image.save(path)
-            image.close()
+            self.assertEqual(read_images([image])[0].secret, SECRET)
             self.assertEqual(read_images([path])[0].secret, SECRET)
 
     def test_ordinary_qr_is_not_an_authenticator(self):

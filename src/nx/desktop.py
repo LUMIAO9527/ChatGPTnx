@@ -407,15 +407,56 @@ class Bridge:
     def vault_open_exchange(self, payload): return self._service.vault_open_exchange(payload)
     def authenticator_preview(self, payload): return self._service.authenticator_preview(payload)
     def authenticator_commit(self, payload): return self._service.authenticator_commit(payload)
-    def authenticator_cancel(self): return self._service.authenticator_cancel()
+    def authenticator_cancel(self, token=None): return self._service.authenticator_cancel(token)
     def authenticator_choose(self):
         chosen = self._host.choose_authenticator_images()
         if not chosen.get('ok') or chosen.get('cancelled'):
             return chosen
         return self._service.authenticator_preview({'paths': chosen['paths']})
     def mfa_preview(self, payload): return self._service.mfa_preview(payload)
+    def mfa_choose(self, payload):
+        payload = payload if isinstance(payload, dict) else {}
+        chosen = self._host.choose_authenticator_images()
+        if not chosen.get('ok') or chosen.get('cancelled'):
+            return chosen
+        return self._service.mfa_preview_images({'email': payload.get('email'), 'paths': chosen['paths']})
+
+    def mfa_clipboard(self, payload):
+        from PIL import Image, ImageGrab
+        payload = payload if isinstance(payload, dict) else {}
+        try:
+            picture = ImageGrab.grabclipboard()
+        except OSError:
+            return {'ok': False, 'error': '剪贴板暂时无法读取，请重试'}
+        email = payload.get('email')
+        if isinstance(picture, Image.Image):
+            with picture:
+                return self._service.mfa_preview_images({'email': email, 'paths': [picture]})
+        if isinstance(picture, list) and picture:
+            return self._service.mfa_preview_images({'email': email, 'paths': picture})
+        return {'ok': False, 'error': '剪贴板中没有截图，请先复制截图'}
+
     def mfa_commit(self, payload): return self._service.mfa_commit(payload)
     def mfa_cancel(self, payload): return self._service.mfa_cancel(payload)
+    def copy_text(self, text):
+        if not isinstance(text, str) or not text or '\x00' in text:
+            return {'ok': False, 'error': '没有可复制的内容'}
+        try:
+            import win32clipboard
+            from win32con import CF_UNICODETEXT
+            form = self._host._form()
+            if not form or not form.IsHandleCreated:
+                return {'ok': False, 'error': '剪贴板暂时无法使用，请重试'}
+            win32clipboard.OpenClipboard(form.Handle.ToInt64())
+            try:
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardText(text, CF_UNICODETEXT)
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception:
+            return {'ok': False, 'error': '剪贴板暂时无法使用，请重试'}
+        return {'ok': True}
+
     def check_update(self): return self._service.check_update()
     def open_github(self):
         try:

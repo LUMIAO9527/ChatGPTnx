@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from nx.account_vault import Vault, parse_line, material_fields
 from nx.core import Service
-from test_authenticator_import import transfer_uri, SECRET
+from test_authenticator_import import qr_image, transfer_uri, SECRET
 
 
 class VaultFlowTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class VaultFlowTests(unittest.TestCase):
         s.lock = threading.RLock()
         s.notify = Mock()
         s._mfa_pending = {}
-        s._authenticator_pending = None
+        s._authenticator_pending = {}
         s.accounts = SimpleNamespace(all=lambda: ['a@example.com', 'b@example.com'], current=lambda: 'a@example.com')
         s.desktop_transitioning = lambda: False
 
@@ -82,10 +82,10 @@ class VaultFlowTests(unittest.TestCase):
         self.assertNotIn(SECRET, json.dumps(result))
         self.assertIsNone(self.service.vault.get('a@example.com'))
 
-    def test_phone_transfer_maps_confirmed_account_label(self):
+    def test_phone_transfer_requires_an_email_even_for_saved_aliases(self):
         self.service.vault.put('a@example.com', label='GPT-001', password='saved')
         result = self.service.authenticator_preview({'text': transfer_uri('GPT-001')})
-        self.assertEqual(result['rows'][0]['email'], 'a@example.com')
+        self.assertEqual(result['rows'], [{'source': 'GPT-001', 'problem': '二维码未标邮箱'}])
 
     def test_phone_transfer_commit_preserves_saved_password(self):
         s = self.service
@@ -95,7 +95,7 @@ class VaultFlowTests(unittest.TestCase):
         self.assertEqual(result, {'ok': True, 'imported': 1})
         saved = Vault(s.vault.path).get('a@example.com')
         self.assertEqual((saved.password, saved.secret, saved.label), ('saved', SECRET, 'GPT-001'))
-        self.assertIsNone(s._authenticator_pending)
+        self.assertEqual(s._authenticator_pending, {})
 
     def test_cancelled_or_expired_phone_transfer_cannot_be_committed(self):
         s = self.service
@@ -103,8 +103,79 @@ class VaultFlowTests(unittest.TestCase):
         s.authenticator_cancel()
         self.assertFalse(s.authenticator_commit({'token': result['token'], 'selections': [{'id': '0', 'email': 'a@example.com'}]})['ok'])
         result = s.authenticator_preview({'text': transfer_uri()})
-        s._authenticator_pending['expires_at'] = 0
+        s._authenticator_pending[result['token']]['expires_at'] = 0
         self.assertFalse(s.authenticator_commit({'token': result['token'], 'selections': [{'id': '0', 'email': 'a@example.com'}]})['ok'])
+
+    def test_selected_google_export_rows_are_committed_atomically(self):
+        s = self.service
+        s.vault.put('a@example.com', password='old')
+        with (qr_image(transfer_uri('OpenAI:A@EXAMPLE.COM', batch_size=2, version=2)) as first,
+              qr_image(transfer_uri('OpenAI:b@example.com', batch_size=2, batch_index=1, version=2)) as second):
+            self.assertFalse(s.authenticator_preview({'paths': [first]})['ok'])
+            result = s.authenticator_preview({'paths': [second, first]})
+        self.assertEqual([row['email'] for row in result['rows']], ['a@example.com', 'b@example.com'])
+        selections = [{key: row[key] for key in ('email', 'id')} for row in result['rows']]
+        self.assertIsNone(s.vault.get('b@example.com'))
+        before = s.vault.path.read_bytes()
+        request = {'token': result['token'], 'selections': selections}
+        swapped = {**request, 'selections': [selections[0], {**selections[1], 'email': 'a@example.com'}]}
+        self.assertFalse(s.authenticator_commit(swapped)['ok'])
+        with patch.object(s.vault, '_save', side_effect=OSError('fixture')):
+            self.assertFalse(s.authenticator_commit(request)['ok'])
+        self.assertEqual(s.vault.path.read_bytes(), before)
+        self.assertFalse(s.vault.get('a@example.com').secret)
+        self.assertIsNone(s.vault.get('b@example.com'))
+        self.assertEqual(s.authenticator_commit(request), {'ok': True, 'imported': 2})
+        saved = Vault(s.vault.path)
+        self.assertEqual(saved.get('a@example.com').password, 'old')
+        self.assertEqual(saved.get('b@example.com').secret, SECRET)
+
+    def test_batch_cancel_does_not_cancel_a_new_review(self):
+        s = self.service
+        first = s.authenticator_preview({'text': transfer_uri()})
+        second = s.authenticator_preview({'text': transfer_uri('OpenAI:b@example.com')})
+        s.authenticator_cancel(first['token'])
+        self.assertEqual(s.authenticator_commit({'token': second['token'], 'selections': [
+            {'id': '0', 'email': 'b@example.com'}
+        ]}), {'ok': True, 'imported': 1})
+        self.assertIsNone(s.vault.get('a@example.com'))
+
+    def test_conflicting_qrs_for_the_same_email_are_skipped(self):
+        s = self.service
+        with (qr_image(transfer_uri('a@example.com')) as first,
+              qr_image(transfer_uri('A@EXAMPLE.COM', secret=b'0123456789abcdefghij')) as second):
+            preview = s.authenticator_preview({'paths': [first, second]})
+        self.assertEqual(len(preview['rows']), 1)
+        self.assertEqual(preview['rows'][0]['problem'], '同一邮箱有多个验证器')
+        self.assertFalse(s.authenticator_commit({'token': preview['token'], 'selections': [
+            {'id': '0', 'email': 'a@example.com'}
+        ]})['ok'])
+
+    def test_single_qr_binds_selected_saved_account_and_preserves_material(self):
+        s = self.service
+        s.vault.put('b@example.com', password='saved', recovery_codes='synthetic recovery')
+        with qr_image(transfer_uri('OpenAI:B@EXAMPLE.COM')) as image:
+            self.assertFalse(s.mfa_preview_images({'email': 'a@example.com', 'paths': [image]})['ok'])
+            preview = s.mfa_preview_images({'email': 'b@example.com', 'paths': [image]})
+        self.assertTrue(preview['account_matched'])
+        self.assertRegex(preview['code'], r'^\d{6}$')
+        self.assertNotIn(SECRET, json.dumps(s.mfa_public()))
+        request = {'email': 'b@example.com', 'token': preview['token'], 'confirmed': True}
+        self.assertFalse(s.mfa_commit({**request, 'email': 'a@example.com'})['ok'])
+        self.assertTrue(s.mfa_commit(request)['ok'])
+        self.assertEqual(s.accounts.current(), 'a@example.com')
+        entry = Vault(s.vault.path).get('b@example.com')
+        self.assertEqual((entry.secret, entry.password, entry.recovery_codes), (SECRET, 'saved', 'synthetic recovery'))
+
+    def test_screenshot_without_email_can_only_be_reviewed_for_a_saved_account(self):
+        s = self.service
+        with qr_image(transfer_uri('OpenAI:verifier')) as image:
+            self.assertFalse(s.mfa_preview_images({'email': 'unknown@example.com', 'paths': [image]})['ok'])
+            first = s.mfa_preview_images({'email': 'b@example.com', 'paths': [image]})
+            second = s.mfa_preview_images({'email': 'b@example.com', 'paths': [image]})
+        self.assertFalse(first['account_matched'])
+        s.mfa_cancel({'email': 'b@example.com', 'token': first['token']})
+        self.assertEqual([row['token'] for row in s.mfa_public()], [second['token']])
 
     def test_enrolment_waits_for_service_confirmation_and_current_account(self):
         s = self.service

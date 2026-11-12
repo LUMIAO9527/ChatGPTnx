@@ -203,7 +203,7 @@ class Service:
         self._fill_state = {}
         self._fill_workflow = None
         self._mfa_pending = {}
-        self._authenticator_pending = None
+        self._authenticator_pending = {}
         self.query = query or Query(paths, lambda: self.state.get('settings'))
         self.runner = runner or self._powershell
         self.log = logging.getLogger('chatgptnx.' + str(id(self)))
@@ -504,7 +504,8 @@ class Service:
         return {'ok': True, 'added': len(records), 'skipped': len(errors), 'lines': errors}
 
     def vault_save(self, payload):
-        from .account_vault import material_fields
+        from .account_vault import material_fields, VaultError
+        from .totp import TotpError
         payload = payload if isinstance(payload, dict) else {}
         if self.vault is None:
             return {'ok': False, 'error': self.vault_error or '账号库不可用'}
@@ -515,14 +516,15 @@ class Service:
             if payload.get('recovery_codes'):
                 fields['recovery_codes'] = payload['recovery_codes']
             self.vault.put(payload.get('email'), **fields)
+        except (VaultError, TotpError) as error:
+            return {'ok': False, 'error': str(error)}
         except (OSError, ValueError):
-            return {'ok': False, 'error': '请检查邮箱、2FA 资料和兑换链接，或重试保存'}
+            return {'ok': False, 'error': '保存未完成，请重试'}
         self.notify()
         return {'ok': True}
 
     def authenticator_preview(self, payload):
         from .authenticator_import import parse_uri, read_images, combine, ImportError
-        import re
         payload = payload if isinstance(payload, dict) else {}
         if self.vault is None:
             return {'ok': False, 'error': self.vault_error or '账号库不可用'}
@@ -535,64 +537,83 @@ class Service:
             return {'ok': False, 'error': str(error)}
         except Exception:
             return {'ok': False, 'error': '二维码读取未完成，请重新选择图片'}
-        roster = {email.lower(): email for email in self.accounts.all()}
-        labels = {}
-        for entry in self.vault.public():
-            roster[entry['email'].lower()] = entry['email']
-            if entry['label']:
-                labels.setdefault(entry['label'].casefold(), []).append(entry['email'])
-        rows = []
-        for index, entry in enumerate(accounts):
-            names = re.findall(r'[^\s:<>]+@[^\s:<>]+', entry.name)
-            matched = roster.get(names[-1].lower()) if names else None
-            if not matched:
-                named = entry.name.rsplit(':', 1)[-1].strip().casefold()
-                choices = labels.get(named, [])
-                matched = choices[0] if len(choices) == 1 else None
-            old = self.vault.get(matched)
-            rows.append({'id': str(index), 'name': entry.name, 'issuer': entry.issuer,
-                         'email': matched or '', 'replaces': bool(old and old.secret)})
-        token = uuid.uuid4().hex
         with self.lock:
-            self._authenticator_pending = {'token': token, 'accounts': accounts,
-                                            'expires_at': time.time() + 900}
-        return {'ok': True, 'token': token, 'rows': rows,
-                'emails': sorted(roster.values(), key=str.casefold)}
+            roster = {email.lower(): email for email in self.accounts.all()}
+            rows, candidates = [], {}
+            for entry in accounts:
+                labels = entry.emails
+                distinct = {label.lower() for label in labels}
+                email = roster.get(labels[0].lower()) if len(distinct) == 1 else None
+                source = labels[0] if labels else entry.name or '未标邮箱'
+                if not entry.is_chatgpt:
+                    problem = '非 ChatGPT 验证器'
+                elif len(distinct) > 1:
+                    problem = '二维码包含多个邮箱'
+                elif not labels:
+                    problem = '二维码未标邮箱'
+                elif not email:
+                    problem = '未找到对应账号'
+                else:
+                    problem = ''
+                if problem:
+                    rows.append({'source': source, 'problem': problem})
+                    continue
+                if email in candidates:
+                    row, secret = candidates[email]
+                    if secret != entry.secret:
+                        row['problem'] = '同一邮箱有多个验证器'
+                    continue
+                old = self.vault.get(email)
+                row = {'id': str(len(rows)), 'source': source, 'email': email,
+                       'replaces': bool(old and old.secret)}
+                candidates[email] = row, entry.secret
+                rows.append(row)
+
+            entries = {row['id']: {'email': email, 'secret': secret}
+                       for email, (row, secret) in candidates.items() if not row.get('problem')}
+            token = uuid.uuid4().hex
+            now = time.time()
+            self._authenticator_pending = {key: item for key, item in self._authenticator_pending.items()
+                                            if item['expires_at'] > now}
+            self._authenticator_pending[token] = {'entries': entries, 'expires_at': now + 900}
+        return {'ok': True, 'token': token, 'rows': rows}
 
     def authenticator_commit(self, payload):
         payload = payload if isinstance(payload, dict) else {}
         if self.vault is None:
             return {'ok': False, 'error': self.vault_error or '账号库不可用'}
+        token = payload.get('token')
         with self.lock:
-            pending = self._authenticator_pending
-            if (not pending or pending['expires_at'] <= time.time()
-                    or pending['token'] != payload.get('token')):
-                return {'ok': False, 'error': '请重新选择验证器导出图片'}
+            pending = self._authenticator_pending.get(token) if isinstance(token, str) else None
+            if not pending or pending['expires_at'] <= time.time():
+                return {'ok': False, 'error': '请重新选择二维码图片'}
             selections = payload.get('selections')
             if not isinstance(selections, list) or not selections:
                 return {'ok': False, 'error': '请至少选择一个账号'}
-            records, seen, used = [], set(), set()
+            records, seen = [], set()
+            roster = {email.lower() for email in self.accounts.all()}
+            for selection in selections:
+                index = selection.get('id') if isinstance(selection, dict) else None
+                record = pending['entries'].get(index) if isinstance(index, str) else None
+                if (not record or index in seen or selection.get('email') != record['email']
+                        or record['email'].lower() not in roster):
+                    return {'ok': False, 'error': '请重新核对所选账号'}
+                records.append(record)
+                seen.add(index)
             try:
-                for item in selections:
-                    index = int(item['id'])
-                    email = str(item['email']).strip()
-                    if (str(index) != str(item['id']) or not 0 <= index < len(pending['accounts'])
-                            or index in used or email.lower() in seen):
-                        raise ValueError()
-                    used.add(index)
-                    seen.add(email.lower())
-                    records.append({'email': email, 'secret': pending['accounts'][index].secret,
-                                    'secret_source': 'imported', 'migrated_at': 0})
                 self.vault.put_many(records)
-            except (ValueError, TypeError, KeyError, OSError):
-                return {'ok': False, 'error': '请检查账号对应关系后重试，每个邮箱只能选择一次'}
-            self._authenticator_pending = None
+            except (ValueError, OSError):
+                return {'ok': False, 'error': '验证器保存未完成，请重试'}
+            del self._authenticator_pending[token]
         self.notify()
         return {'ok': True, 'imported': len(records)}
 
-    def authenticator_cancel(self):
+    def authenticator_cancel(self, token=None):
         with self.lock:
-            self._authenticator_pending = None
+            if token is None:
+                self._authenticator_pending.clear()
+            elif isinstance(token, str):
+                self._authenticator_pending.pop(token, None)
         return {'ok': True}
 
     def vault_open_exchange(self, payload):
@@ -609,57 +630,101 @@ class Service:
         return {'ok': bool(opened), **({} if opened else {'error': '未能打开兑换链接，请复制后打开'})}
 
     def mfa_public(self):
-        from .mfa_migration import current_code
         now = time.time()
         with self.lock:
-            self._mfa_pending = {email: item for email, item in self._mfa_pending.items()
+            self._mfa_pending = {token: item for token, item in self._mfa_pending.items()
                                  if item['expires_at'] > now}
-            return [{'email': email, 'token': item['token'], 'expires_at': item['expires_at'],
-                     'code': current_code(item['secret'], at=now)[0],
-                     'remain': current_code(item['secret'], at=now)[1]}
-                    for email, item in self._mfa_pending.items()]
+            return [self._mfa_display(token, item, now) for token, item in self._mfa_pending.items()]
+
+    @staticmethod
+    def _mfa_display(token, item, now):
+        from .mfa_migration import current_code
+        code, remain = current_code(item['secret'], at=now)
+        return {'email': item['email'], 'token': token, 'expires_at': item['expires_at'],
+                'account_matched': item['account_matched'], 'code': code, 'remain': remain}
+
+    def _stage_mfa(self, email, secret, *, source, matched=True):
+        with self.lock:
+            if source == 'imported':
+                if email not in {saved.lower() for saved in self.accounts.all()}:
+                    return {'ok': False, 'error': '请先登录并保存该账号'}
+            elif email != str(self.accounts.current() or '').lower():
+                return {'ok': False, 'error': '请先切换到这个账号，再打开安全设置'}
+            token, now = uuid.uuid4().hex, time.time()
+            item = {'email': email, 'secret': secret, 'expires_at': now + 900,
+                    'source': source, 'account_matched': matched}
+            self._mfa_pending[token] = item
+            return {'ok': True, **self._mfa_display(token, item, now)}
+
+    def mfa_preview_images(self, payload):
+        from .authenticator_import import read_images, ImportError
+        from .account_vault import _clean_email, VaultError
+        payload = payload if isinstance(payload, dict) else {}
+        if self.vault is None:
+            return {'ok': False, 'error': self.vault_error or '账号库不可用'}
+        try:
+            email = _clean_email(payload.get('email')).lower()
+            accounts = read_images(payload.get('paths') or [])
+        except (ImportError, VaultError) as error:
+            return {'ok': False, 'error': str(error)}
+        matches = [entry for entry in accounts if entry.is_chatgpt and
+                   {label.lower() for label in entry.emails} == {email}]
+        if matches and len({entry.secret for entry in matches}) == 1:
+            return self._stage_mfa(email, matches[0].secret, source='imported')
+        if len(accounts) == 1 and accounts[0].is_chatgpt and not accounts[0].emails:
+            return self._stage_mfa(email, accounts[0].secret, source='imported', matched=False)
+        return {'ok': False, 'error': '请选择此账号的 ChatGPT 验证器二维码'}
 
     def mfa_preview(self, payload):
         from .totp import normalize_secret, TotpError
         payload = payload if isinstance(payload, dict) else {}
-        email = str(payload.get('email') or '').strip()
+        email = str(payload.get('email') or '').strip().lower()
         if self.vault is None:
             return {'ok': False, 'error': self.vault_error or '账号库不可用'}
-        if email.lower() != str(self.accounts.current() or '').lower():
-            return {'ok': False, 'error': '请先切换到这个账号，再打开安全设置'}
         try:
             secret = normalize_secret(payload.get('secret'))
         except TotpError as error:
             return {'ok': False, 'error': str(error)}
-        with self.lock:
-            self._mfa_pending[email.lower()] = {'token': uuid.uuid4().hex,
-                'secret': secret, 'expires_at': time.time() + 900}
-        return {'ok': True, **next(item for item in self.mfa_public() if item['email'] == email.lower())}
+        return self._stage_mfa(email, secret, source='enrolled')
 
     def mfa_commit(self, payload):
         payload = payload if isinstance(payload, dict) else {}
         email = str(payload.get('email') or '').strip().lower()
+        token = payload.get('token')
+        if self.vault is None:
+            return {'ok': False, 'error': self.vault_error or '账号库不可用'}
         with self.lock:
-            item = self._mfa_pending.get(email)
-            if not item or item['expires_at'] <= time.time() or item['token'] != payload.get('token'):
-                return {'ok': False, 'error': '请重新录入设置页给出的密钥'}
+            item = self._mfa_pending.get(token) if isinstance(token, str) else None
+            if not item or item['expires_at'] <= time.time() or item['email'] != email:
+                return {'ok': False, 'error': '请重新读取验证器二维码'}
             if payload.get('confirmed') is not True:
-                return {'ok': False, 'error': '请先在 ChatGPT 完成验证码确认'}
-            if email != str(self.accounts.current() or '').lower() or self.desktop_transitioning():
-                return {'ok': False, 'error': '当前账号已变化，请切回后继续'}
+                return {'ok': False, 'error': '请先核对验证码'}
+            fields = {'secret': item['secret']}
+            if item['source'] == 'imported':
+                roster = {saved.lower(): saved for saved in self.accounts.all()}
+                if email not in roster:
+                    return {'ok': False, 'error': '请先登录并保存该账号'}
+                target = roster[email]
+            else:
+                if email != str(self.accounts.current() or '').lower() or self.desktop_transitioning():
+                    return {'ok': False, 'error': '当前账号已变化，请切回后继续'}
+                target = email
+                fields.update(secret_source='enrolled', migrated_at=time.time(), exchange_code='',
+                              exchange_url='', recovery_codes=str(payload.get('recovery_codes') or ''))
             try:
-                self.vault.put(email, secret=item['secret'], secret_source='enrolled',
-                    migrated_at=time.time(), exchange_code='', exchange_url='',
-                    recovery_codes=str(payload.get('recovery_codes') or ''))
+                self.vault.put(target, **fields)
             except (OSError, ValueError):
                 return {'ok': False, 'error': '保存未完成，请重试'}
-            del self._mfa_pending[email]
+            del self._mfa_pending[token]
         self.notify()
         return {'ok': True}
 
     def mfa_cancel(self, payload):
+        payload = payload if isinstance(payload, dict) else {}
+        email, token = str(payload.get('email') or '').lower(), payload.get('token')
         with self.lock:
-            self._mfa_pending.pop(str((payload or {}).get('email') or '').lower(), None)
+            self._mfa_pending = {key: item for key, item in self._mfa_pending.items()
+                                 if item['email'] != email or (token is not None and key != token)}
         return {'ok': True}
 
     def vault_forget(self, payload):

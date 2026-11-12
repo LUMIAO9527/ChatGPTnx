@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .totp import normalize_secret
@@ -25,6 +26,14 @@ class Account:
     name: str
     issuer: str
     secret: str = field(repr=False)
+
+    @property
+    def emails(self):
+        return re.findall(r'[^\s:<>]+@[^\s:<>]+', self.name)
+
+    @property
+    def is_chatgpt(self):
+        return self.issuer.strip().lower() in {'', 'openai', 'chatgpt', 'openai.com', 'chatgpt.com'}
 
 
 @dataclass(frozen=True)
@@ -158,6 +167,7 @@ def combine(transfers):
 
 
 def read_images(paths):
+    from contextlib import nullcontext
     from PIL import Image, UnidentifiedImageError
     import zxingcpp
 
@@ -165,11 +175,15 @@ def read_images(paths):
         raise ImportError('请选择验证器导出图片')
     transfers = []
     for value in paths:
-        path = Path(value)
         try:
-            if path.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp', '.bmp') or path.stat().st_size > 20 * 1024 * 1024:
-                raise ImportError('请选择小于 20 MB 的二维码图片')
-            with Image.open(path) as original:
+            if isinstance(value, Image.Image):
+                source = nullcontext(value)
+            else:
+                path = Path(value)
+                if path.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp', '.bmp') or path.stat().st_size > 20 * 1024 * 1024:
+                    raise ImportError('请选择小于 20 MB 的二维码图片')
+                source = Image.open(path)
+            with source as original:
                 if original.width * original.height > 24000000:
                     raise ImportError('二维码图片尺寸过大，请裁取二维码后重试')
                 image = original.convert('RGB')
@@ -181,6 +195,6 @@ def read_images(paths):
                         transfers.append(parse_uri(barcode.text))
                 finally:
                     image.close()
-        except (OSError, UnidentifiedImageError, Image.DecompressionBombError):
+        except (OSError, TypeError, UnidentifiedImageError, Image.DecompressionBombError):
             raise ImportError('无法读取二维码图片，请重新选择') from None
     return combine(transfers)

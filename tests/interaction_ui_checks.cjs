@@ -86,7 +86,7 @@ fs.mkdirSync(output,{recursive:true});
     assert.equal(sent[0],originalCurrent);assert.equal(sent[1],'fixture-reset-1');
     assert.match(sent[2],/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.equal(await page.evaluate(()=>NXDemo.state().current),originalCurrent);
-    assert.match(await page.locator('.reset-summary').innerText(),/重置次数\s*1 次/);
+    assert.match(await page.locator('.reset-summary').innerText(),/重置 · Credits\s*1 次/);
     assert.deepEqual(errors,[]);
     console.log('Interaction UI: all noncurrent accounts, independent choices/cancellation, reset confirmation/cancellation/single request, UUID, left alignment, light/dark passed.');
   }finally{await browser.close();}

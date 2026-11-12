@@ -31,8 +31,7 @@
       // An expanded disclosure is allowed to push the body past its height, the
       // same way the reset list and the nickname editor already are.
       if(!reset&&!editor&&!vaultOpen){
-        const held=parseFloat(body.style.getPropertyValue('--detail-scroll-floor'))>0;
-        if(!held&&(body.scrollTop||body.scrollHeight>body.clientHeight+1))problems.push('账号详情产生滚动');
+        if(body.scrollTop||body.scrollHeight>body.clientHeight+1)problems.push('账号详情产生滚动');
         if(controls.slice(1).some((n,i)=>Math.abs(n.getBoundingClientRect().top-controls[i].getBoundingClientRect().bottom-6)>.5))problems.push('账号详情行间距不一致');
         if(archive&&archive.getBoundingClientRect().bottom>body.getBoundingClientRect().bottom+.5)problems.push('账号详情归档行溢出正文');
         if(note&&note.getBoundingClientRect().bottom>body.getBoundingClientRect().bottom+.5)problems.push('账号详情日期溢出正文');
@@ -320,6 +319,7 @@
   addEventListener('error',event=>report('error',{message:event.message||'页面脚本异常'}));
   addEventListener('unhandledrejection',event=>report('error',{message:String(event.reason?.message||event.reason||'异步操作异常')}));
   async function applyStep(step) {
+    if(step.example){window.NXDemoQR.example(step.example);return;}
     if(typeof step.motion==='boolean'){window.NXMotion.setEnabled(step.motion);await wait(step.wait??40);return;}
     if(step.simulate){window.NXDemo.simulate(step.simulate);await window.NXPreview.refresh();await wait(step.wait??80);return;}
     const target=step.click||step.fill||step.hover||step.scroll;

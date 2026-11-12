@@ -7,7 +7,7 @@
 <p>Keep a long task moving across the accounts you own. Switch accounts when quota runs out, then attempt to continue the original task.</p>
 
 <img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.8.4" height="20">
+<img src="docs/images/badges/version.svg" alt="v1.8.5" height="20">
 <img src="docs/images/badges/license.svg" alt="Source available to inspect; rights reserved" height="20">
 </div>
 
@@ -62,11 +62,11 @@ The quota overview and usage statistics help you see which account is available 
 
 ## Download and run
 
-The current version is **v1.8.4**. Open `ChatGPTnx-v1.8.4.html` at the project root for all current pages and states.
+The current version is **v1.8.5**. Open `ChatGPTnx-v1.8.5.html` at the project root for all current pages and states.
 
 After an account switch, ChatGPTnx tries the original chat's Continue button first. If it confirms that no button action was sent, it sends the configured continuation message.
 
-Download `ChatGPTnx.exe` from the [v1.8.4 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.8.4). The release also provides `ChatGPTnx-v1.8.4-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
+Download `ChatGPTnx.exe` from the [v1.8.5 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.8.5). The release also provides `ChatGPTnx-v1.8.5-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
 
 1. On first launch the panel opens to choose the program folder (recommended: `D:\ChatGPTnx`; nothing is written beside the download before you choose). Open the panel from the system tray afterwards.
 2. Select **Add account** and sign in to ChatGPT. The app automatically verifies and saves the account. If verification is temporarily unavailable, use **Retry verification** in the panel.
@@ -89,7 +89,7 @@ The source is available to inspect. Use and redistribution are governed by the [
 
 ## Unified offline demo and debugging
 
-Open `ChatGPTnx-v1.8.4.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space. Select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
+Open `ChatGPTnx-v1.8.5.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space. Select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
 
 The console can check all light/dark scenarios and record intermediate navigation frames, including interrupted returns, inline disclosures, floating notices, passive refreshes, and long release notes. A shared rule prioritizes information-card backgrounds, then main buttons or account avatars; unrelated pages use a grouped body transition.
 
@@ -97,8 +97,6 @@ Regenerate it with `python tools/build_explorer.py` after editing the UI; `build
 
 ## Passwords and 2FA
 
-Edit sign-in material in the Passwords and 2FA rows of account details. Open Settings → Import and Export → Import Sign-in Material for bulk import. Bulk import accepts one `email----password----2FA material----optional redemption URL` record per line and preserves redemption codes and URLs separately.
+Open **Password and 2FA** in account details. Record or update the local password on its row, click to reveal it briefly, or copy it directly. Select **Bind** on the 2FA row to choose a QR image or read a screenshot. Check the six-digit code and save the authenticator. The same row shows the current code and countdown.
 
-Open Settings → Import and Export → Import Phone 2FA. Select every QR image from the same Google Authenticator export or switch to Export Link. Review the account mapping and select Import. Account details provide copy controls and a password reveal that hides itself after three seconds.
-
-For a replacement authenticator, use the new key issued by ChatGPT's security settings. NX shows the matching code; complete enrollment in ChatGPT, then confirm and save the key and recovery codes in NX. Phone, email-code, and human checks remain user steps while normal completed-sign-in detection continues.
+Open **Settings → Import and Export → Import Phone 2FA** to select multiple QR images or all images from the same Google Authenticator export. Review the matched email addresses, then save the selected authenticators.

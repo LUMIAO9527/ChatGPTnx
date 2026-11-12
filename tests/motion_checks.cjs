@@ -551,7 +551,8 @@ check('missing account data renders a safe identity instead of throwing',()=>{co
 check('archived usage never offers a live refresh control',()=>{for(const ok of[true,false]){const archived={...live,archived:true,ok,windows:ok?live.windows:[]};const text=viewCtx.window.NXViews.usage({...base,data:{accounts:[],current:null},ui:{...base.ui,usage:{rows:[archived]}}});assert(text.includes('已归档'));assert(!text.includes('data-action="usage-refresh"'));assert(!text.includes('data-action="refresh-one"'));assert(!text.includes('data-action="reauth"'))}});
 check('quota overview keeps known windows in explicit columns',()=>{const text=viewCtx.window.NXViews.accounts({...base,ui:{quotaScope:'relay',quotaMetric:'quota'}});assert(text.includes('data-window-minutes="300"'));assert(text.includes('data-window-minutes="10080"'));assert(text.includes('data-action="detail"'));const weekly={...live,windows:[live.windows[1]]};const single=viewCtx.window.NXViews.accounts({...base,data:{accounts:[weekly]},ui:{quotaScope:'week',quotaMetric:'quota'}});assert(single.includes('data-window-minutes="10080"'));assert(!single.includes('data-window-minutes="300"'))});
 check('pending add-account demo scenes initialize with an empty login target',()=>{
-  const demo=fs.readFileSync(path.join(root,'src/ui/demo.js'),'utf8');
+  const demo=['demo-authenticator.js','demo.js']
+    .map(file=>fs.readFileSync(path.join(root,'src/ui',file),'utf8')).join('\n');
   for(const scenario of ['adding-home','adding-ready','adding-opening','adding-saving','adding-cancelling','adding-existing','adding-unchanged']){
     const window={NX_CONFIG:{version:'1.0.0'}};
     vm.runInNewContext(demo,{window,location:{search:'?scenario='+scenario},URLSearchParams});

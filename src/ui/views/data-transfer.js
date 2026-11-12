@@ -3,9 +3,12 @@
 window.NXDataTransfer = (() => {
   const pages=new Set(['data-transfer','data-export','data-import','uninstall']);
   let state=null,context=null,ticket=0;
+  const authenticatorKey='authenticator-import';
+  let authenticator=null;
   const filename=()=>`ChatGPTnx-${new Date().toLocaleDateString('sv-SE')}.nxbackup`;
   function reset(c){
     ticket++;
+    resetAuthenticator(c);
     state={selected:new Set(c.data.accounts.map(a=>a.email)),usage:true,preferences:true,archived:false,
       password:'',confirm:'',exportStage:'edit',importStage:'choose',file:'',unlock:'',error:'',
       merge:'merge',importSelected:new Set(),keep:true,uninstallStage:'confirm',blocked:false,
@@ -17,6 +20,99 @@ window.NXDataTransfer = (() => {
       tone:options.danger?'danger':options.secondary?'neutral':'primary',
       confirmation:!!options.confirm,className:options.secondary?'secondary':'',
       attrs:options.disabled?'disabled':''});
+  }
+  function cancelAuthenticator(c,review){
+    if(review?.token)c.api('authenticator_cancel',review.token).catch(()=>{});
+  }
+  function resetAuthenticator(c){
+    cancelAuthenticator(c,authenticator?.review);
+    authenticator={review:null,selected:new Set(),working:'',error:'',saved:0};
+  }
+  const matched=row=>!!row.email&&!row.problem;
+  function authenticatorView(c){
+    const {review,selected,working,error,saved}=authenticator;
+    const picker=button(c,working==='read'?'正在读取…':review?'重选二维码图片':'选择二维码图片',
+      'authenticator-choose',{secondary:!!review,disabled:!!working});
+    let confirmation='';
+    if(review){
+      const rows=window.NXComponents.pagedList(c,authenticatorKey,review.rows,row=>{
+        const match=matched(row),account=match&&c.data.accounts.find(item=>item.email===row.email);
+        const title=match?(account?c.name(account):row.email):row.source;
+        const subtitle=match?row.email:row.problem;
+        const selectedRow=selected.has(row.id);
+        const status=match&&(saved?(selectedRow?'已保存':'已跳过'):row.replaces?'更新':'');
+        const checkbox=match&&!saved?c.selectionButton({label:`导入 ${row.email}`,checked:selectedRow,
+          action:'authenticator-toggle',email:row.id}):'';
+        return `<div class="transfer-account"><span class="transfer-copy"><strong title="${c.esc(title)}">${c.esc(title)}</strong>
+          <small title="${c.esc(subtitle)}">${c.esc(subtitle)}</small></span>
+          ${status?`<span class="transfer-state">${c.esc(status)}</span>`:''}${checkbox}</div>`;
+      },{label:'验证器账号'});
+      const outcome=saved
+        ? `<div class="authenticator-outcome" role="status">${c.icon('check')}已保存 ${saved} 个验证器</div>`
+        : button(c,working==='save'?'正在保存…':selected.size?`保存 ${selected.size} 个验证器`:'保存验证器',
+          'authenticator-save',{disabled:!!working||!selected.size});
+      confirmation=`<div class="authenticator-review"><div class="authenticator-review-head"><strong>核对账号</strong>
+        ${saved?'':`<span class="transfer-state">已选 ${selected.size} / ${review.rows.length} 项</span>`}</div>${rows}${outcome}</div>`;
+    }
+    const content=`<div class="vault-import authenticator-import" aria-busy="${!!working}">
+      <p class="credential-hint">从 Google Authenticator 导出账号后，选齐二维码图片。</p>${picker}
+      ${error?`<p class="transfer-error" role="alert">${c.esc(error)}</p>`:''}${confirmation}</div>`;
+    return window.NXSettingsContent.disclosure(c,authenticatorKey,'导入手机 2FA',content);
+  }
+  function setAuthenticatorReview(c,flow,review){
+    cancelAuthenticator(c,flow.review);
+    flow.review=review;
+    flow.saved=0;
+    flow.selected=new Set((review?.rows||[]).filter(matched).map(row=>row.id));
+    c.ui.collectionPages[authenticatorKey]=1;
+  }
+  function revealAuthenticatorReview(c,flow){
+    const reveal=()=>{
+      if(flow!==authenticator||!c.ui.disclosures.has(authenticatorKey))return;
+      const card=document.querySelector('#sheet [data-disclosure="authenticator-import"]');
+      const review=card?.querySelector('.authenticator-review'),viewport=card?.closest('.sheet-body');
+      if(!review||!viewport)return;
+      if(card.__nxDisclosureOwned){requestAnimationFrame(reveal);return;}
+      const bounds=review.getBoundingClientRect(),visible=viewport.getBoundingClientRect();
+      const overflow=Math.min(bounds.bottom-visible.bottom+8,bounds.top-visible.top-8);
+      if(overflow>0)viewport.scrollBy({top:overflow,behavior:window.NXMotion?.enabled()?'smooth':'instant'});
+    };
+    requestAnimationFrame(reveal);
+  }
+  async function readAuthenticator(c){
+    const flow=authenticator;
+    let reviewed=false;
+    flow.working='read';flow.error='';c.render();
+    try{
+      const result=await c.api('authenticator_choose');
+      if(flow!==authenticator){cancelAuthenticator(c,result);return;}
+      if(result?.cancelled)return;
+      if(!result?.ok)throw new Error(result?.error||'二维码读取未完成');
+      setAuthenticatorReview(c,flow,result);
+      reviewed=true;
+    }catch(error){
+      if(flow!==authenticator)return;
+      setAuthenticatorReview(c,flow,null);
+      flow.error=error.message;
+    }finally{
+      if(flow===authenticator){
+        flow.working='';c.disclose(c.render);
+        if(reviewed)revealAuthenticatorReview(c,flow);
+      }
+    }
+  }
+  async function saveAuthenticator(c){
+    const flow=authenticator;
+    flow.working='save';flow.error='';c.render();
+    try{
+      const selections=flow.review.rows.filter(row=>flow.selected.has(row.id)).map(({id,email})=>({id,email}));
+      const result=await c.api('authenticator_commit',{token:flow.review.token,selections});
+      if(flow!==authenticator)return;
+      if(!result?.ok)throw new Error(result?.error||'保存未完成');
+      flow.saved=result.imported;flow.review.token=null;
+      await c.refresh();
+    }catch(error){if(flow===authenticator)flow.error=error.message;}
+    finally{if(flow===authenticator){flow.working='';c.disclose(c.render);}}
   }
   function option(c,title,note,key,checked,row=false){
     return `<div class="transfer-option${row?' collection-row':''}"><span class="transfer-copy"><strong>${c.esc(title)}</strong><small>${c.esc(note)}</small></span>${c.selectionButton({label:title,checked,action:'transfer-toggle',email:key})}</div>`;
@@ -108,7 +204,10 @@ window.NXDataTransfer = (() => {
     if(page==='data-export')return exportView(c);
     if(page==='data-import')return importView(c);
     if(page==='uninstall')return uninstallView(c);
-    return {title:'导入与导出',cls:'transfer-body',body:`<div class="transfer-overview" style="min-height:${c.ui.settingsScrollFloor||0}px"><div class="settings-list">${c.link('','导出数据','transfer-export')}${c.link('','导入备份','transfer-import')}${window.NXVault.imports(c)}</div></div>`};
+    return {title:'导入与导出',cls:'transfer-body',body:`<div class="transfer-overview">
+      ${c.settingsGroup('备份',c.link('','导出备份','transfer-export')+c.link('','导入备份','transfer-import'))}
+      ${c.settingsGroup('账号资料',window.NXVault.imports(c)+authenticatorView(c))}
+    </div>`};
   }
   function busy(page){return pages.has(page)&&!!(state?.pending||page==='data-export'&&state?.exportStage==='working'||page==='data-import'&&state?.importStage==='working'||page==='uninstall'&&state?.uninstallStage==='working');}
   function clearPasswords(){
@@ -122,6 +221,7 @@ window.NXDataTransfer = (() => {
   function leave(page,next,c){
     if(!pages.has(page)||page===next||!state)return;
     clearPasswords();
+    if(page==='data-transfer')resetAuthenticator(c);
     if(page==='data-import'){
       ticket++;state.loadedAccounts=null;state.file='';state.importSelected.clear();state.importStage='choose';
       c.api('backup_clear').catch(()=>{});
@@ -165,9 +265,11 @@ window.NXDataTransfer = (() => {
   }
   function handle(b,c){
     const action=b.dataset.action;
-    if(!/^(transfer-|export-|import-|uninstall-)/.test(action))return false;
+    if(!/^(transfer-|export-|import-|uninstall-|authenticator-)/.test(action))return false;
     if(busy(c.ui.page))return true;
     context=c;if(!state)reset(c);
+    if(action.startsWith('authenticator-')&&
+      (c.ui.page!=='data-transfer'||!c.ui.disclosures.has(authenticatorKey)||authenticator.working))return true;
     const key=b.dataset.email;
     switch(action){
       case 'transfer-open':{
@@ -175,6 +277,16 @@ window.NXDataTransfer = (() => {
         c.api('backup_info').then(result=>{if(current===ticket&&result?.ok){state.archivedCount=result.archived_count;c.render();}}).catch(()=>{});break;}
       case 'transfer-export':state.exportStage='edit';state.error='';c.show('data-export');break;
       case 'transfer-import':reset(c);state.importStage='choose';c.show('data-import');break;
+      case 'authenticator-choose':readAuthenticator(c);break;
+      case 'authenticator-toggle':
+        if(!authenticator.saved&&authenticator.review?.rows.some(row=>row.id===key&&matched(row))){
+          authenticator.selected.has(key)?authenticator.selected.delete(key):authenticator.selected.add(key);
+          c.render();
+        }
+        break;
+      case 'authenticator-save':
+        if(authenticator.review?.token&&authenticator.selected.size)saveAuthenticator(c);
+        break;
       case 'transfer-finish':c.back();break;
       case 'transfer-toggle':state[key]=!state[key];c.render();break;
       case 'export-account':state.selected.has(key)?state.selected.delete(key):state.selected.add(key);c.render();break;

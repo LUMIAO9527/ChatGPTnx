@@ -452,19 +452,36 @@ G='19 · 登录资料与验证器'
 for key,label,route,steps,params in [
  ('vault-detail','详情 · 密码与 2FA','detail',[],{'expand':'vault'}),
  ('vault-detail-other','详情 · 备用账号 2FA','detail',[],{'expand':'vault','email':'backup@example.com'}),
+ ('vault-detail-empty','详情 · 未录入资料','detail',[],{'expand':'vault','email':'studio@example.com'}),
  ('vault-password','详情 · 临时显示密码','detail',[click('vault-reveal')],{'expand':'vault'}),
- ('vault-edit','详情 · 修改登录资料','detail',[click('vault-edit')],{'expand':'vault'}),
- ('vault-edit-more','详情 · 其他登录资料','detail',[click('vault-edit'),{'click':'[data-disclosure="credential-more"] > summary'}],{'expand':'vault'}),
- ('mfa','详情 · 导入验证器','detail',[click('mfa-open')],{'expand':'vault'}),
- ('mfa-preview','详情 · 核对新验证码','detail',[click('mfa-open'),{'fill':'#mfa-secret','value':'JBSWY3DPEHPK3PXP'},click('mfa-preview')],{'expand':'vault'}),
- ('mfa-other','详情 · 备用账号验证器','detail',[click('mfa-open')],{'expand':'vault','email':'backup@example.com'}),
- ('phone-authenticator','导入 · 手机验证器','data-transfer',[{'click':'[data-disclosure="authenticator-import"] > summary'}],{}),
- ('phone-authenticator-review','导入 · 核对账号','data-transfer',[{'click':'[data-disclosure="authenticator-import"] > summary'},click('authenticator-choose')],{}),
- ('phone-authenticator-link','导入 · 验证器导出链接','data-transfer',[{'click':'[data-disclosure="authenticator-import"] > summary'},{'click':'[data-action="authenticator-method"][data-value="link"]'}],{}),
+ ('vault-edit','详情 · 录入密码','detail',[click('vault-edit')],{'expand':'vault','email':'studio@example.com'}),
  ('credential-import','导入 · 登录资料','data-transfer',[{'click':'[data-disclosure="credential-import"] > summary'}],{}),
 ]:
     add(G,key,label,route=route,steps=steps,**params)
     CASES[-1]['expected']=route
+
+G='20 · 账号详情绑定验证器'
+binding_start=[click('vault-import-authenticator')]
+binding_read=[{'example':'new:studio@example.com'},click('binding-file')]
+for key,label,steps in [
+    ('binding-details','详情 · 读取验证器二维码',binding_start),
+    ('binding-phone','详情 · 核对手机导出二维码',binding_start+[{'example':'phone:studio@example.com'},click('binding-file')]),
+    ('binding-confirm','详情 · 核对验证码',binding_start+binding_read),
+    ('binding-done','详情 · 验证器已保存',binding_start+binding_read+[click('binding-confirm')]),
+]:
+    add(G,key,label,route='detail',expand='vault',email='studio@example.com',steps=steps)
+    CASES[-1]['expected']='detail'
+
+G='21 · 批量导入手机验证器'
+open_batch=[selector('[data-disclosure="authenticator-import"] > summary')]
+read_batch=[{'example':'batch:phone'},click('authenticator-choose')]
+for key,label,steps in [
+    ('phone-authenticator','导入 · 选择二维码',open_batch),
+    ('phone-authenticator-review','导入 · 核对账号',open_batch+read_batch),
+    ('phone-authenticator-saved','导入 · 验证器已保存',open_batch+read_batch+[click('authenticator-save')]),
+]:
+    add(G,key,label,route='data-transfer',steps=steps)
+    CASES[-1]['expected']='data-transfer'
 
 NATIVE_SURFACES = [
  {'surface':'托盘菜单与气泡通知','source':'src/nx/desktop.py / src/nx/trayicon.py','verification':'由 Windows 原生绘制，须在本机验收；不以 HTML 模型冒充真实截图。'},

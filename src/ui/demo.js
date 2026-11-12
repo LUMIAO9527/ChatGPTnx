@@ -2,6 +2,7 @@
 'use strict';
 window.NXDemo = (() => {
   const clone=v=>JSON.parse(JSON.stringify(v));
+  const recordedPasswords=new Map();
   let state, usages, archives=[], resumeDetails=[], serial=0, failNext=false, previous=null, generation=0;
   const sec=()=>Math.floor(Date.now()/1000);
   const nextVersion=()=>{const parts=window.NX_CONFIG.version.split('.').map(Number);parts[2]=(parts[2]||0)+1;return parts.join('.');};
@@ -20,6 +21,8 @@ window.NXDemo = (() => {
     return state.accounts.filter(usable).sort(compare).map(a=>a.email);
   }
   function seed(){
+    window.NXDemoQR.reset();
+    recordedPasswords.clear();
     generation++;
     const n=sec(), day=86400;
     const defs=[['work-01@example.com','工作 01','plus',58,92],['work-02@example.com','工作 02','plus',17,29],
@@ -92,7 +95,7 @@ window.NXDemo = (() => {
       case 'retry_query':return operation('refresh',email,()=>{const a=state.accounts.find(a=>a.email===email);if(a){a.ok=true;a.error_code=null;a.paused=false;a.retry_at=null;delete a.query_warning;a.fetched_at=sec();}});
       case 'get_data':{
         if(state.demo_connection_error)throw new Error('演示：本地服务暂时不可用');
-        for(const [index,entry] of state.vault.entries())if(entry.has_secret){entry.remain=30-sec()%30;entry.code=String(100000+(Math.floor(sec()/30)+index*15371)%900000);}
+        for(const [index,entry] of state.vault.entries())if(entry.has_secret){entry.remain=30-sec()%30;entry.code=String(100000+(Math.floor(sec()/30)+(entry.demo_code_offset??index*15371))%900000);}
         for(const entry of state.mfa_pending){entry.remain=30-sec()%30;entry.code=String(100000+Math.floor(sec()/30)%900000);}
         const known=new Map(state.hotkeys.map(item=>[item.email,item]));
         state.hotkeys=state.accounts.map((a,i)=>known.get(a.email)||{email:a.email,shortcut:i<9?`ctrl+alt+${i+1}`:null,registered:i<9});
@@ -109,21 +112,16 @@ window.NXDemo = (() => {
           operation('switch',target,()=>commitSwitch(target));
           state.operation.source='recovery';
         }
+        await window.NXDemoQR.refresh(state.vault,state.mfa_pending);
         return clone(state);}
       case 'vault_secret':{
         const payload=email&&typeof email==='object'?email:{},entry=state.vault.find(v=>v.email===payload.email);
         if(!entry)return {ok:false,error:'没有保存这项资料'};
-        const values={password:entry.has_password?'demo-password':'',exchange_code:'demo-redemption',exchange_url:'https://example.com/redeem',recovery_codes:'DEMO-RECOVERY'};
+        const password=entry.has_password?(recordedPasswords.get(entry.email.toLowerCase())??'demo-password'):'';
+        const values={password,exchange_code:'demo-redemption',exchange_url:'https://example.com/redeem',recovery_codes:'DEMO-RECOVERY'};
         return values[payload.field]?{ok:true,value:values[payload.field]}:{ok:false,error:'没有保存这项资料'};
       }
       case 'vault_open_exchange':return {ok:true};
-      case 'authenticator_choose':
-      case 'authenticator_preview':return {ok:true,token:'demo-transfer',emails:state.accounts.map(a=>a.email),rows:[{id:'0',name:'OpenAI:work-01@example.com',issuer:'OpenAI',email:'work-01@example.com',replaces:true},{id:'1',name:'OpenAI:work-02@example.com',issuer:'OpenAI',email:'work-02@example.com',replaces:true}]};
-      case 'authenticator_commit':{
-        const p=email||{};if(p.token!=='demo-transfer'||!p.selections?.length)return {ok:false,error:'请至少选择一个账号'};
-        for(const row of p.selections){let entry=state.vault.find(e=>e.email===row.email);if(!entry){entry={email:row.email};state.vault.push(entry);}Object.assign(entry,{has_secret:true,secret_source:'imported',code:'482913',remain:23});}
-        return {ok:true,imported:p.selections.length};}
-      case 'authenticator_cancel':return {ok:true};
       case 'vault_import':{
         const payload=email&&typeof email==='object'?email:{};
         const lines=String(payload.text||'').split(/\r?\n/).filter(line=>line.trim());
@@ -131,6 +129,8 @@ window.NXDemo = (() => {
         for(const line of lines){
           const parts=line.split(/\s*-{4,}\s*|\s*\|\s*|\t+/).map(part=>part.trim());
           if(parts.length<2||!parts[0].includes('@'))continue;
+          if(parts[1])recordedPasswords.set(parts[0].toLowerCase(),parts[1]);
+          else recordedPasswords.delete(parts[0].toLowerCase());
           state.vault=state.vault.filter(v=>v.email.toLowerCase()!==parts[0].toLowerCase());
           state.vault.push({email:parts[0],has_password:!!parts[1],has_secret:!!parts[2],
             code:String(Math.floor(Math.random()*900000)+100000),remain:30,last_result:'ok'});
@@ -142,29 +142,60 @@ window.NXDemo = (() => {
         const p=email||{};if(!p.email?.includes('@'))return {ok:false,error:'邮箱格式不正确'};
         let entry=state.vault.find(v=>v.email.toLowerCase()===p.email.toLowerCase());
         if(!entry){entry={email:p.email,has_password:false,has_secret:false,last_result:''};state.vault.push(entry);}
-        if(p.password)entry.has_password=true;
-        if(p.material){entry.has_secret=/^[A-Z2-7\s-]{16,}$/i.test(p.material)||p.material.startsWith('otpauth://');entry.has_exchange=!entry.has_secret;}
+        if(p.password){
+          recordedPasswords.set(p.email.toLowerCase(),p.password);
+          entry.has_password=true;
+        }
+        if(p.material){
+          entry.has_secret=/^[A-Z2-7\s-]{16,}$/i.test(p.material)||p.material.startsWith('otpauth://');
+          entry.has_exchange=!entry.has_secret;
+          if(entry.has_secret){entry.code='482913';entry.remain=23;}
+        }
         if(p.exchange_url)entry.has_exchange=true;
         if(p.recovery_codes)entry.has_recovery=true;
-        if(entry.has_secret){entry.code='482913';entry.remain=23;}return {ok:true};}
-      case 'mfa_preview':{
-        const p=email||{};
-        if(p.email!==state.current)return {ok:false,error:'请先切换到这个账号'};
-        if(!/^[A-Z2-7\s-]{16,}$/i.test(p.secret||''))return {ok:false,error:'2FA 密钥格式不正确'};
-        const item={email:p.email,token:'demo-mfa-'+(++serial),code:'138402',remain:23,expires_at:sec()+900};
-        state.mfa_pending=[item];return {ok:true,...item};}
+        return {ok:true};}
+      case 'authenticator_choose':{
+        try {
+          const accounts = await NXDemoQR.choose();
+          return accounts ? NXDemoQR.batch(accounts, state.accounts, state.vault) : {ok:true,cancelled:true};
+        } catch (error) { return {ok:false,error:error.message||'二维码读取未完成'}; }
+      }
+      case 'authenticator_commit':{
+        try {
+          const exists = target => state.accounts.some(account => account.email === target);
+          const records = await NXDemoQR.commitBatch(email || {}, exists);
+          for (const record of records) {
+            let entry = state.vault.find(item => item.email.toLowerCase() === record.email.toLowerCase());
+            if (!entry) { entry = {}; state.vault.push(entry); }
+            Object.assign(entry, record, {has_secret:true,secret_source:'imported',migrated_at:0});
+          }
+          return {ok:true,imported:records.length};
+        } catch (error) { return {ok:false,error:error.message||'保存未完成'}; }
+      }
+      case 'authenticator_cancel':NXDemoQR.cancel(email);return {ok:true};
+      case 'mfa_clipboard':
+      case 'mfa_choose':{
+        try{
+          if(!state.accounts.some(account=>account.email===email?.email))return {ok:false,error:'请先登录并保存该账号'};
+          const accounts=method==='mfa_choose'?await NXDemoQR.choose():await NXDemoQR.clipboard(email?.image);
+          if(!accounts)return {ok:true,cancelled:true};
+          const item=await NXDemoQR.single(accounts,email?.email);state.mfa_pending=[item];return item;
+        }catch(error){return {ok:false,error:error.message||'二维码读取未完成'};}}
       case 'mfa_commit':{
         const p=email||{},item=state.mfa_pending.find(v=>v.token===p.token&&v.email===p.email);
-        if(!item||!p.confirmed||p.email!==state.current)return {ok:false,error:'请先完成设置页验证'};
+        if(!state.accounts.some(account=>account.email===p.email))return {ok:false,error:'请先登录并保存该账号'};
+        if(!item||!p.confirmed)return {ok:false,error:'请先完成验证码确认'};
+        try{NXDemoQR.commitSingle(p);}catch(error){return {ok:false,error:error.message};}
         let entry=state.vault.find(v=>v.email===p.email);
         if(!entry){entry={email:p.email};state.vault.push(entry);}
-        Object.assign(entry,{has_secret:true,secret_source:'enrolled',migrated_at:sec(),has_exchange:false,has_recovery:!!p.recovery_codes,code:'138402',remain:23});
+        Object.assign(entry,{has_secret:true,secret_source:item.source,migrated_at:item.source==='enrolled'?sec():0,code:item.code,remain:item.remain,demo_code_offset:0});
         state.mfa_pending=[];return {ok:true};}
-      case 'mfa_cancel':state.mfa_pending=state.mfa_pending.filter(v=>v.email!==email?.email);return {ok:true};
+      case 'mfa_cancel':NXDemoQR.cancel(email?.token);state.mfa_pending=state.mfa_pending.filter(v=>v.email!==email?.email||email?.token&&v.token!==email.token);return {ok:true};
       case 'vault_forget':{
         const payload=email&&typeof email==='object'?email:{};
         const before=state.vault.length;
         state.vault=state.vault.filter(v=>v.email!==payload.email);
+        if(state.vault.length!==before)recordedPasswords.delete(payload.email.toLowerCase());
         return {ok:true,removed:before-state.vault.length};
       }
       case 'dismiss_error':if(state.last_error?.id===email)state.last_error=null;return {ok:true};
@@ -511,7 +542,12 @@ window.NXDemo = (() => {
     if(which==='many')for(let i=5;i<14;i++)state.accounts.push({...clone(state.accounts[1]),email:`extra-${i}@example.com`,alias:`账号 ${i+1}`,identity_key:`extra-${i}`});
   }
   function simulate(event) {
-    if(event==='login'){
+    if(event==='authenticator-example'){
+      const batch=document.querySelector('#sheet [data-disclosure="authenticator-import"] > summary[aria-expanded="true"] + .disclosure-body [data-action="authenticator-choose"]:not(:disabled)');
+      const button=batch||document.querySelector('#sheet [data-action="binding-file"]:not(:disabled)');
+      if(!button||!NXDemoQR.example(batch?'batch:phone':'new:'+button.dataset.email))return;
+      button.click();
+    }else if(event==='login'){
       state.chatgpt_running=true;
       if(state.adding){state.add_login_status='ready';call('add_finish');}
       else if(state.reauth){state.reauth.demo_login_complete=true;call('reauth_finish',state.reauth.email);}

@@ -22,7 +22,7 @@ from nx.resume_policy import ATTENTION_REASONS, RETRYABLE_REASONS
 from screen_catalog import CASES
 
 STYLES = ('tokens.css', 'common.css', 'feedback.css', 'material.css')
-SCRIPTS = ('material.js', 'usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'views/data-transfer.js', 'motion.js', 'range-motion.js', 'local-motion.js', 'disclosure.js', 'vault.js', 'app.js')
+SCRIPTS = ('material.js', 'usage.js', 'components.js', 'runtime.js', 'preferences.js', 'feedback.js', 'views/accounts.js', 'views/resume.js', 'views/usage.js', 'views/settings.js', 'views/editors.js', 'views/onboarding.js', 'views/data-transfer.js', 'motion.js', 'range-motion.js', 'local-motion.js', 'disclosure.js', 'vault.js', 'binding.js', 'app.js')
 
 
 def ui_source_digest():
@@ -39,8 +39,10 @@ def panel(*, demo=False, proposal=None):
     width,height=CONFIG['sizes']['home']
     if proposal: raise ValueError('Only the maintained product layout is supported')
     css = f':root{{--panel-width:{width}px;--panel-height:{height}px;--list-page-size:{CONFIG["list_page_size"]};}}\n'+ '\n'.join((UI / name).read_text(encoding='utf-8') for name in STYLES)
-    files = (['demo.js', 'data-preview.js'] if demo else []) + list(SCRIPTS) + (['preview.js'] if demo else [])
+    files = (['vendor/jsQR.js', 'demo-qr-images.js', 'demo-authenticator.js', 'demo.js', 'data-preview.js'] if demo else []) + list(SCRIPTS) + (['preview.js'] if demo else [])
     js = '\n'.join((UI / f).read_text(encoding='utf-8') for f in files)
+    if demo:
+        js = '/* jsQR 1.4.0\n' + (UI/'vendor/jsQR.LICENSE').read_text(encoding='utf-8').replace('*/','* /') + '\n*/\n' + js
     if not demo and ('@example.com' in js or 'function seed(' in js):
         raise RuntimeError('demonstration data leaked into production panel')
     brand = 'window.NX_BRAND_MARK='+json.dumps((ROOT/'src/assets/nx-mark.svg').read_text(encoding='utf-8').strip())+';\n'

@@ -21,16 +21,15 @@
   let data = {accounts:[], current:null, updated:null, settings:{...defaults}, hotkeys:[], location:window.NX_SETUP||null};
   let workflowResume = false;
   let lastLoginResult = '';
-  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), vaultExpanded:new Set(), vaultReveal:null, vaultDraft:'', vaultEditor:null, vaultForget:null, mfa:null, disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map(),
-    authMethod:'image',authText:'',authTransfer:null,authRevision:0,authBusy:false};
+  const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), vaultExpanded:new Set(), vaultReveal:null, vaultDraft:'', vaultEditor:null, disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map(),
+    binding:null};
   let connected = false, bridgeError = '', acting = false, nativeDialog = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
   const app = $('#app');
   app.innerHTML = '<main id="home"></main><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden></section><div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>';
   const home = $('#home'), sheet = $('#sheet');
-  let detailScrollFloor=0;
   // Keep inline disclosure headings in place when the natural scroll range shrinks.
   function holdContentScroll(body,top=body?.scrollTop||0) {
-    const content=body?.querySelector(':scope > :is(.settings-content,.transfer-overview)');
+    const content=body?.querySelector(':scope > .settings-content');
     if(!content)return;
     const css=getComputedStyle(body),inset=parseFloat(css.paddingTop)+parseFloat(css.paddingBottom);
     ui.settingsScrollFloor=Math.ceil(top+body.clientHeight-inset+1);
@@ -39,19 +38,8 @@
   }
   app.addEventListener('scroll',event=>{
     const body=event.target;
-    if(detailScrollFloor&&body.matches?.('.detail-body')){
-      const tail=body.querySelector('.detail-compact');
-      if(!tail||[...tail.querySelectorAll('[data-disclosure]')].some(n=>n.__nxDisclosureIntent!==undefined))return;
-      const top=body.scrollTop;
-      const contentEnd=tail.getBoundingClientRect().bottom-body.getBoundingClientRect().top+
-        top+parseFloat(getComputedStyle(body).paddingBottom);
-      const floor=Math.ceil(top+body.clientHeight);
-      detailScrollFloor=top&&floor>contentEnd+1?floor:0;
-      body.style.setProperty('--detail-scroll-floor',detailScrollFloor+'px');
-      return;
-    }
     if(!ui.settingsScrollFloor)return;
-    const content=body.querySelector?.(':scope > :is(.settings-content,.transfer-overview)');
+    const content=body.querySelector?.(':scope > .settings-content');
     if(!content||[...content.querySelectorAll('[data-disclosure]')].some(n=>n.__nxDisclosureIntent!==undefined))return;
     const css=getComputedStyle(body),inset=parseFloat(css.paddingTop)+parseFloat(css.paddingBottom);
     const intrinsic=(content.lastElementChild?.getBoundingClientRect().bottom||0)-content.getBoundingClientRect().top;
@@ -228,7 +216,7 @@
     if (config.demo) return window.NXDemo.call(method,...args);
     const bridge=window.pywebview?.api;
     if (typeof bridge?.[method]!=='function') throw new Error('本地接口尚未就绪或版本不匹配');
-    const opensDialog=['backup_choose','backup_export','authenticator_choose'].includes(method);
+    const opensDialog=['backup_choose','backup_export','authenticator_choose','mfa_choose'].includes(method);
     if(opensDialog)nativeDialog=true;
     try{return await bridge[method](...args);}finally{if(opensDialog)nativeDialog=false;}
   }
@@ -250,6 +238,17 @@
   function formError(message,id='form-error') {
     const label=$('#'+id);if(label)label.textContent=message;
     $('#announcer').textContent=message;
+  }
+  async function copyValue(source,value) {
+    const token=feedback.begin(source,'正在复制…');
+    try{
+      if(config.demo)await navigator.clipboard.writeText(value);
+      else {
+        const result=await api('copy_text',value);
+        if(!result?.ok)throw new Error(result?.error||'复制失败');
+      }
+      feedback.finish(token,{text:'已复制'});
+    }catch(error){feedback.finish(token,{text:error.message||'复制失败',tone:'error'});}
   }
   function fieldError(field,message) {
     const input=$(field),label=$('#form-error');if(!input||!label)return false;
@@ -283,30 +282,66 @@
       saved.disclosures=[...ui.disclosures];
       saved.collectionPages={...ui.collectionPages};
     }
-    if(['settings','data-transfer'].includes(ui.page))saved.settingsScrollFloor=ui.settingsScrollFloor;
+    if(ui.page==='settings')saved.settingsScrollFloor=ui.settingsScrollFloor;
     if(ui.page==='detail'){
       saved.resetOpen=ui.resetExpanded.has(ui.email);
       saved.vaultOpen=ui.vaultExpanded.has(ui.email);
-      saved.detailScrollFloor=detailScrollFloor;
     }
     return saved;
   }
-  function resetAuthenticator() {
-    if(ui.authTransfer)api('authenticator_cancel').catch(()=>{});
-    ui.authRevision++;ui.authTransfer=null;ui.authText='';
-    const error=$('#authenticator-error');if(error)error.textContent='';
-  }
   function clearCredentialForms() {
-    resetAuthenticator();
     const error=$('#credential-error');if(error)error.textContent='';
-    if(ui.mfa)api('mfa_cancel',{email:ui.email}).catch(()=>{});
-    ui.mfa=null;ui.authMethod='image';ui.vaultEditor=null;ui.vaultReveal=null;ui.vaultForget=null;
-    ui.disclosures.delete('credential-more');
+    ui.vaultEditor=null;ui.vaultReveal=null;
+    clearBinding();
   }
-  function show(page, target=null, push=true, saved=null) {
+  function clearBinding() {
+    const binding=ui.binding;
+    ui.binding=null;
+    if(binding?.pending)api('mfa_cancel',{email:binding.email,token:binding.pending.token}).catch(()=>{});
+  }
+  function revealCredentialActions(selector,isActive) {
+    const reveal=()=>{
+      if(!isActive())return;
+      const viewport=sheet.querySelector('.detail-body');
+      const actions=viewport?.querySelector(selector);
+      if(!actions)return;
+      if(actions.closest('.detail-vault')?.__nxDisclosureOwned){
+        requestAnimationFrame(reveal);
+        return;
+      }
+      const overflow=actions.getBoundingClientRect().bottom-viewport.getBoundingClientRect().bottom+12;
+      if(overflow>0)viewport.scrollBy({top:overflow,behavior:window.NXMotion?.enabled()?'smooth':'instant'});
+    };
+    requestAnimationFrame(reveal);
+  }
+  async function readBinding(method,image=null) {
+    const binding=ui.binding;
+    if(ui.page!=='detail'||!binding||binding.email!==ui.email||binding.busy||binding.pending)return;
+    const ticket=navigation.ticket();
+    binding.error='';binding.busy=true;renderSheet();
+    try {
+      const result=await api(method,{email:binding.email,...(image?{image}:{})});
+      if(!navigation.current(ticket)||ui.binding!==binding){
+        if(result?.token)await api('mfa_cancel',{email:binding.email,token:result.token});
+        return;
+      }
+      if(result?.cancelled)return;
+      if(!result?.ok){binding.error=result?.error||'二维码读取未完成';return;}
+      binding.pending=result;
+    }catch(error){binding.error=error.message||'二维码读取未完成';}
+    finally{
+      binding.busy=false;
+      if(ui.binding===binding){
+        disclose(()=>renderSheet());
+        if(config.demo&&method==='mfa_clipboard'&&binding.error&&!image)
+          sheet.querySelector('[data-action="binding-read"]')?.focus({preventScroll:true});
+      }
+    }
+  }
+  function show(page, target=null, push=true, saved=null, expand='') {
     if(window.NXDataTransfer?.busy(ui.page))return;
     const previous=push&&ui.page?sheetHistory():null;
-    resetConfirmation=null;ui.resumeClearConfirm=false;ui.vaultForget=null;
+    resetConfirmation=null;ui.resumeClearConfirm=false;
     clearCredentialForms();
     if(page!=='detail'){ui.vaultReveal=null;ui.vaultExpanded.clear();}
     const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message','resume-clear':'resume-history'};
@@ -325,10 +360,9 @@
       ui.resetExpanded.clear();
       ui.vaultExpanded.clear();
       ui.vaultReveal=null;
-      detailScrollFloor=saved?.detailScrollFloor||0;
       ui.collectionPages['reset:'+target]=saved?.collectionPages?.['reset:'+target]||1;
-      if(saved?.resetOpen)ui.resetExpanded.add(target);
-      if(saved?.vaultOpen)ui.vaultExpanded.add(target);
+      if(saved?.resetOpen||expand==='reset')ui.resetExpanded.add(target);
+      if(saved?.vaultOpen||expand==='vault')ui.vaultExpanded.add(target);
     }
     if(page==='resume'){ui.resumeExpanded.clear();ui.resumeCollapsed.clear();}
     if(Object.hasOwn(aliases,initial)&&aliases[initial])selectSettingDisclosure(aliases[initial]);
@@ -363,7 +397,7 @@
     ui.scope=saved.scope;show(saved.page,saved.email,false,saved);
   }
   const link=(i,label,action,attrs='',description='')=>`<button class="link-row" data-action="${action}" ${attrs}>${i?icon(i):''}<span${description?' class="settings-link-copy"':''}>${esc(label)}${description?`<small>${esc(description)}</small>`:''}</span>${icon('chevron')}</button>`;
-  const settingsGroup=(label,...groups)=>`<section class="settings-section"><h3 class="settings-heading">${esc(label)}</h3>${groups.map(content=>`<div class="settings-list">${content}</div>`).join('')}</section>`;
+  const settingsGroup=(label,...groups)=>`<section class="settings-section"><h3 class="settings-heading">${esc(label)}</h3>${groups.map(content=>`<div class="settings-list${ui.page==='data-transfer'?' panel-list':''}">${content}</div>`).join('')}</section>`;
   const detail=(label,value,hint='')=>`<div class="detail-line detail-item detail-value-row"><span>${esc(label)}</span><span class="right"><strong>${esc(value)}</strong>${hint?`<small>${esc(hint)}</small>`:''}</span></div>`;
   function resetCredits(a) {
     const bank=readableQuota(a)?a.banked_resets:null;
@@ -486,10 +520,9 @@
       }
     }
     sheet.dataset.page=ui.page;
-    const oldErrors=preserve?[...sheet.querySelectorAll('#form-error,#credential-error,#authenticator-error')].map(node=>[node.id,node.textContent]):[];
+    const oldErrors=preserve?[...sheet.querySelectorAll('#form-error,#credential-error')].map(node=>[node.id,node.textContent]):[];
     const oldFields=[...sheet.querySelectorAll('.field')].map(n=>({node:n,id:n.id,value:n.value,invalid:n.getAttribute('aria-invalid'),focused:n===document.activeElement,start:n.selectionStart,end:n.selectionEnd}));
-    const floor=ui.page==='detail'&&detailScrollFloor?` style="--detail-scroll-floor:${detailScrollFloor}px"`:'';
-    const markup=pageHead(title,headActions)+`<div class="sheet-body ${cls}"${floor}>${statusRegion()}${body}</div>`+(foot?`<footer class="sheet-foot ${footClass}">${foot}</footer>`:'');
+    const markup=pageHead(title,headActions)+`<div class="sheet-body ${cls}">${statusRegion()}${body}</div>`+(foot?`<footer class="sheet-foot ${footClass}">${foot}</footer>`:'');
     // Keep shared identity nodes alive across routes. New routes reset input
     // nodes and scroll; passive state refreshes preserve both.
     patchHTML(sheet,markup,{preserveFields:preserve});
@@ -675,16 +708,6 @@
   }
   const settingDisclosureKeys=new Set(['appearance','notifications','relay','early-anchor','message','hotkeys','archives','resume-history']);
   function disclose(change){
-    // Preserve the visible heading when the expanded content retracts.
-    const detail=sheet.querySelector('.detail-body');
-    if(detail?.scrollTop){
-      detailScrollFloor=Math.ceil(detail.scrollTop+detail.clientHeight);
-      detail.style.setProperty('--detail-scroll-floor',detailScrollFloor+'px');
-    }
-    if(ui.page==='data-transfer'){
-      const body=sheet.querySelector('.sheet-body');
-      if(body?.scrollTop)holdContentScroll(body);
-    }
     if(window.NXDisclosure)window.NXDisclosure.transact(sheet,change);
     else change();
   }
@@ -754,13 +777,10 @@
       e.preventDefault();const d=summary.parentElement,opening=!(window.NXDisclosure?.isOpen(d)??d.open),body=d.closest('.sheet-body');
       const preservedScroll=body?.scrollTop||0;
       summary.focus({preventScroll:true});
-      if(ui.page==='settings'||ui.page==='data-transfer'&&body?.scrollTop!==preservedScroll)holdContentScroll(body,preservedScroll);
+      if(ui.page==='settings')holdContentScroll(body,preservedScroll);
       disclose(()=>{
         if(opening&&ui.page==='settings')selectSettingDisclosure(d.dataset.disclosure);
         d.open=opening;summary.setAttribute('aria-expanded',String(opening));syncDisclosure(d);
-        if(!opening&&d.dataset.disclosure==='authenticator-import'){
-          resetAuthenticator();ui.authMethod='image';renderSheet();
-        }
       });
       // Reveal a partially clipped heading on open.
       if(opening&&d.isConnected){const r=summary.getBoundingClientRect(),v=body?.getBoundingClientRect();if(v&&r.top<v.top)body.scrollTop-=v.top-r.top;}
@@ -770,7 +790,7 @@
     if(b.dataset.rootNav==='true'&&ui.page)closeSheet();
     const target=b.dataset.email,val=b.dataset.value;
     const ticket=navigation.ticket(),run=(method,...args)=>actionFrom(b,method,...args);
-    if(window.NXDataTransfer?.handle(b,{...viewContext(),show,back,render:()=>renderSheet()}))return;
+    if(window.NXDataTransfer?.handle(b,{...viewContext(),show,back,disclose,render:()=>renderSheet()}))return;
     try { switch(b.dataset.action){
       case 'refresh-state':{const token=feedback.begin(b,'正在检测…');await poll(true);feedback.finish(token,{text:bridgeError?'':'已重新检测'});break;}
       case 'refresh':if(data.accounts.length)await run('refresh');else show('add');break;
@@ -854,76 +874,79 @@
       case 'detail':show('detail',target);break;
       case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.vaultExpanded.delete(target);clearCredentialForms();ui.disclosures.delete('meta:'+target);}renderSheet();});break;
       case 'toggle-vault':disclose(()=>{ui.vaultReveal=null;if(ui.vaultExpanded.has(target)){ui.vaultExpanded.delete(target);clearCredentialForms();}else {ui.vaultExpanded.add(target);ui.disclosures.delete('meta:'+target);ui.resetExpanded.delete(target);ui.collectionPages['reset:'+target]=1;}renderSheet();});break;
-      case 'authenticator-reset':
-        if(ui.authBusy)break;
-        resetAuthenticator();disclose(()=>renderSheet());break;
-      case 'authenticator-method':{
-        if(ui.authBusy||!['image','link'].includes(val)||val===ui.authMethod)break;
-        resetAuthenticator();ui.authMethod=val;disclose(()=>renderSheet());break;}
-      case 'authenticator-choose':
-      case 'authenticator-preview':{
-        if(ui.authBusy)break;
-        const choose=b.dataset.action==='authenticator-choose';
-        const revision=ui.authRevision,errorId=ui.mfa?'credential-error':'authenticator-error';
-        const error=$('#'+errorId);if(error)error.textContent='';
-        ui.authBusy=true;renderSheet();
-        let result;
+      case 'vault-import-authenticator': {
+        if(ui.page==='detail'&&target===ui.email&&data.accounts.some(account=>account.email===target)){
+          const binding=window.NXBinding.initial(target);
+          disclose(()=>{clearCredentialForms();ui.binding=binding;renderSheet();});
+          revealCredentialActions('.binding-actions',()=>ui.binding===binding);
+        }
+        break;}
+      case 'binding-cancel':
+        disclose(()=>{clearBinding();renderSheet();});break;
+      case 'binding-file':await readBinding('mfa_choose');break;
+      case 'binding-read':await readBinding('mfa_clipboard');break;
+      case 'binding-reselect':{
+        const binding=ui.binding;
+        if(!binding||binding.busy)break;
+        disclose(()=>{clearBinding();ui.binding=window.NXBinding.initial(binding.email);renderSheet();});break;}
+      case 'binding-copy':{
+        const code=window.NXBinding.preview(ui.binding,data)?.code;
+        if(code)await copyValue(b,code);break;}
+      case 'binding-confirm':{
+        const binding=ui.binding;
+        const preview=window.NXBinding.preview(binding,data);
+        if(ui.page!=='detail'||!binding||binding.email!==ui.email||binding.busy||!preview?.code)break;
+        binding.error='';binding.busy=true;renderSheet();
         try{
-          result=choose?await api('authenticator_choose'):await api('authenticator_preview',{text:ui.authText});
-          if((!navigation.current(ticket)||ui.authRevision!==revision)&&result?.token)await api('authenticator_cancel');
-        }finally{ui.authBusy=false;renderSheet();}
-        if(!navigation.current(ticket)||ui.authRevision!==revision||result?.cancelled)break;
-        if(!result?.ok){formError(result?.error||'读取未完成',errorId);break;}
-        if(ui.mfa)api('mfa_cancel',{email:ui.email}).catch(()=>{});
-        ui.mfa=null;ui.vaultEditor=null;ui.authRevision++;ui.authTransfer=result;ui.authText='';
-        disclose(()=>renderSheet());break;}
-      case 'authenticator-commit':{
-        if(ui.authBusy||!ui.authTransfer)break;
-        const {token,rows}=ui.authTransfer,revision=ui.authRevision;
-        const selections=rows.filter(row=>row.email).map(({id,email})=>({id,email}));
-        const error=$('#authenticator-error');if(error)error.textContent='';
-        ui.authBusy=true;renderSheet();
-        let result;
-        try{result=await api('authenticator_commit',{token,selections});}
-        finally{ui.authBusy=false;renderSheet();}
-        if(!navigation.current(ticket)||ui.authRevision!==revision)break;
-        if(!result?.ok){formError(result?.error||'导入未完成','authenticator-error');break;}
-        ui.authTransfer=null;disclose(()=>renderSheet());await poll(true);notify(`已导入 ${result.imported} 个验证器`);break;}
-      case 'vault-open-exchange':await run('vault_open_exchange',{email:target});break;
-      case 'vault-edit':
-        clearCredentialForms();ui.vaultEditor={email:target,password:'',material:'',exchange_url:'',recovery_codes:''};
-        disclose(()=>renderSheet());$('#vault-password')?.focus({preventScroll:true});break;
+          const result=await api('mfa_commit',{email:binding.email,token:binding.pending.token,confirmed:true});
+          if(!navigation.current(ticket)||ui.binding!==binding)break;
+          if(!result?.ok){binding.error=result?.error||'保存未完成';break;}
+          await poll(true);
+          if(ui.binding===binding)disclose(()=>{ui.binding=null;renderSheet();});
+        }catch(error){binding.error=error.message||'保存未完成';}
+        finally{binding.busy=false;if(ui.binding===binding)renderSheet();}
+        break;}
+      case 'vault-edit':{
+        if(ui.page!=='detail'||target!==ui.email||!ui.vaultExpanded.has(target))break;
+        const editor={email:target,password:'',saving:false};
+        disclose(()=>{clearCredentialForms();ui.vaultEditor=editor;renderSheet();});
+        $('#vault-password')?.focus({preventScroll:true});
+        revealCredentialActions('.credential-editor > .vault-inline-actions',()=>ui.vaultEditor===editor&&!editor.saving);
+        break;}
       case 'vault-cancel':{
-        const action=ui.vaultEditor?'vault-edit':'mfa-open';
-        clearCredentialForms();disclose(()=>renderSheet());sheet.querySelector(`[data-action="${action}"]`)?.focus({preventScroll:true});break;}
+        clearCredentialForms();disclose(()=>renderSheet());sheet.querySelector('[data-action="vault-edit"]')?.focus({preventScroll:true});break;}
       case 'vault-save':{
-        const result=await api('vault_save',ui.vaultEditor||{});
-        if(!navigation.current(ticket))break;
-        if(result?.ok===false){formError(result.error,'credential-error');break;}
-        clearCredentialForms();disclose(()=>renderSheet());sheet.querySelector('[data-action="vault-edit"]')?.focus({preventScroll:true});
-        await poll(true);notify('登录资料已保存');break;}
-      case 'mfa-open':clearCredentialForms();ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};disclose(()=>renderSheet());break;
-      case 'mfa-reset':
-        ui.mfa={secret:'',recovery_codes:'',token:'',confirmed:false};
-        renderSheet();$('#mfa-secret')?.focus({preventScroll:true});break;
-      case 'mfa-preview':{
-        const owner=ui.email,result=await api('mfa_preview',{email:owner,secret:ui.mfa?.secret||''});
-        if(!navigation.current(ticket)){api('mfa_cancel',{email:owner}).catch(()=>{});break;}
-        if(result?.ok===false){formError(result.error,'credential-error');break;}
-        ui.mfa={...ui.mfa,...result,secret:'',confirmed:false};disclose(()=>renderSheet());await poll(true);break;}
-      case 'mfa-copy':{
-        const pending=(data.mfa_pending||[]).find(p=>p.token===ui.mfa?.token);
-        if(pending?.code)await navigator.clipboard.writeText(pending.code);break;}
-      case 'mfa-commit':{
-        const result=await api('mfa_commit',{email:ui.email,token:ui.mfa?.token,confirmed:ui.mfa?.confirmed===true,recovery_codes:ui.mfa?.recovery_codes||''});
-        if(!navigation.current(ticket))break;
-        if(result?.ok===false){formError(result.error,'credential-error');break;}
-        ui.mfa=null;disclose(()=>renderSheet());await poll(true);notify('新验证器已保存');break;}
+        const editor=ui.vaultEditor;
+        if(!editor||editor.email!==ui.email||!editor.password||editor.saving)break;
+        editor.saving=true;
+        renderSheet();
+        const input=$('#vault-password');
+        if(input)input.readOnly=true;
+        try{
+          const result=await api('vault_save',{email:editor.email,password:editor.password});
+          if(!navigation.current(ticket)||ui.vaultEditor!==editor)break;
+          if(!result?.ok){formError(result?.error||'密码保存未完成','credential-error');break;}
+          await poll(true);
+          if(ui.vaultEditor===editor){
+            disclose(()=>{clearCredentialForms();renderSheet();});
+            sheet.querySelector('[data-action="vault-edit"]')?.focus({preventScroll:true});
+            $('#announcer').textContent='密码已保存';
+          }
+        }catch(error){
+          if(ui.vaultEditor===editor)formError(error.message||'密码保存未完成','credential-error');
+        }finally{
+          editor.saving=false;
+          if(ui.vaultEditor===editor){
+            if(input)input.readOnly=false;
+            renderSheet();
+          }
+        }
+        break;}
       case 'vault-reveal':{
         const who=target;
         if(ui.vaultReveal&&ui.vaultReveal.email===who){ui.vaultReveal=null;renderSheet();break;}
         const secret=await api('vault_secret',{email:who,field:'password'});
-        if(!navigation.current(ticket))break;
+        if(!navigation.current(ticket)||ui.vaultEditor||!ui.vaultExpanded.has(who))break;
         if(!secret||secret.ok===false||!secret.value){notify(secret?.error||'没有保存这个账号的密码',{tone:'error'});break;}
         const reveal={email:who,value:secret.value};
         ui.vaultReveal=reveal;renderSheet();
@@ -934,17 +957,13 @@
         if(val==='email')copyText=target;
         else if(val==='code')copyText=window.NXVault.find(data,target)?.code||'';
         else {const secret=await api('vault_secret',{email:target,field:val});copyText=secret?.value||'';}
+        if(!navigation.current(ticket))break;
         if(!copyText){notify('没有可复制的内容',{tone:'error'});break;}
-        await navigator.clipboard.writeText(copyText);notify('已复制');break;}
+        await copyValue(b,copyText);break;}
       case 'vault-import':{
         const result=await api('vault_import',{text:ui.vaultDraft||''});
         if(result?.ok===false){notify(result.error||'导入未完成',{tone:'error'});break;}
         ui.vaultDraft='';const input=$('#vault-import');if(input)input.value='';await poll(true);renderSheet();notify(`已导入 ${result?.added??0} 个账号${result?.skipped?`，第 ${result.lines.join('、')} 行格式需修改`:''}`);break;}
-      case 'vault-forget':{
-        if(ui.vaultForget!==target){ui.vaultForget=target;renderSheet();break;}ui.vaultForget=null;
-        const result=await api('vault_forget',{email:target});
-        if(result?.ok===false){notify(result.error||'删除未完成',{tone:'error'});break;}
-        clearCredentialForms();disclose(()=>renderSheet());await poll(true);break;}
       case 'vault-login':{
         const known=(data.accounts||[]).some(account=>account.email===target);
         show(known?'reauth':'add',target);await run(known?'reauth_start':'add_start',target);break;}
@@ -1050,23 +1069,26 @@
       case 'error':if(data.last_error?.id)await run('dismiss_error',data.last_error.id);else {clearNotification();render();}break;
     }} catch(error){if(navigation.current(ticket))notify(error.message||'操作未完成，请重试',{tone:'error'});}
   });
-  app.addEventListener('change',event=>{
-    if(event.target.id==='mfa-confirm'&&ui.mfa){ui.mfa.confirmed=event.target.checked;const save=app.querySelector('[data-action="mfa-commit"]');if(save)save.disabled=!ui.mfa.confirmed;}
-    if(event.target.matches('.auth-map')&&ui.authTransfer){
-      const rows=ui.authTransfer.rows;
-      const row=rows.find(row=>row.id===event.target.dataset.id);
-      if(row){row.email=event.target.value;event.target.title=row.email||'忽略此条';renderSheet();}
-    }
-  });
   app.addEventListener('compositionstart',event=>{if(event.target.matches('.field'))composingField=event.target;});
   app.addEventListener('compositionend',()=>{composingField=null;if(deferredSheet){deferredSheet=false;renderSheet();}});
+  if(config.demo)app.addEventListener('paste',event=>{
+    if(ui.page!=='detail'||!ui.binding||ui.binding.busy||ui.binding.pending||event.target.closest?.('input,textarea'))return;
+    const image=[...(event.clipboardData?.files||[])].find(file=>file.type.startsWith('image/'));
+    if(!image)return;
+    event.preventDefault();
+    void readBinding('mfa_clipboard',image);
+  });
   app.addEventListener('input',event=>{
     if(!event.target.matches('.field'))return;
     const id=event.target.id;
-    if(id==='authenticator-text'){ui.authText=event.target.value;const read=sheet.querySelector('[data-action="authenticator-preview"]');if(read)read.disabled=!ui.authText.trim();return;}
-    const vaultFields={'vault-email':'email','vault-password':'password','vault-material':'material','vault-url':'exchange_url','vault-recovery':'recovery_codes'};
-    if(vaultFields[id]&&ui.vaultEditor){ui.vaultEditor[vaultFields[id]]=event.target.value;return;}
-    if((id==='mfa-secret'||id==='mfa-recovery')&&ui.mfa){ui.mfa[id==='mfa-secret'?'secret':'recovery_codes']=event.target.value;return;}
+    if(id==='vault-password'&&ui.vaultEditor){
+      ui.vaultEditor.password=event.target.value;
+      const save=sheet.querySelector('[data-action="vault-save"]');
+      if(save)save.disabled=!ui.vaultEditor.password||ui.vaultEditor.saving;
+      const error=$('#credential-error');
+      if(error)error.textContent='';
+      return;
+    }
     if(id==='vault-import'){
       ui.vaultDraft=event.target.value;
       const trigger=document.querySelector('[data-action="vault-import"]');
@@ -1151,7 +1173,7 @@
   function schedulePoll(delay=null){
     clearTimeout(pollTimer);pollTimer=null;
     if(!panelVisible && !config.demo) return;
-    const wait=delay ?? ((ui.mfa||ui.vaultExpanded.size)?1000:(busy()||ui.submitted||data.adding||data.reauth||['checking','downloading','installing'].includes(data.update?.status))?800:5000);
+    const wait=delay ?? ((ui.vaultExpanded.size)?1000:(busy()||ui.submitted||data.adding||data.reauth||['checking','downloading','installing'].includes(data.update?.status))?800:5000);
     pollTimer=setTimeout(()=>poll(),wait);
   }
   applyAppearance(data.settings.appearance);
@@ -1170,9 +1192,7 @@
         if(page==='resume'){await openResumeDetails();return;}
         const target=['detail','edit','remove','reauth'].includes(page)?data.accounts.find(a=>a.email===params.get('email'))||current()||data.accounts.find(a=>a.error_code==='reauth_required'):page==='confirm'?relay():null;
         if(page==='confirm')ui.switchKind=params.get('kind')==='relay'?'relay':'manual';
-        show(page,target?.email||null);
-        if(page==='detail'&&params.get('expand')==='reset'&&target){ui.resetExpanded.add(target.email);renderSheet();}
-        if(page==='detail'&&params.get('expand')==='vault'&&target){ui.vaultExpanded.add(target.email);renderSheet();}
+        show(page,target?.email||null,true,null,params.get('expand')||'');
         if(page==='settings'&&params.get('expand')==='resume-history'){ui.disclosures.add('resume-history');await loadInline('resume-history');}
         if(page==='archives')await loadInline('archives');
       },
