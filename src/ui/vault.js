@@ -57,9 +57,11 @@ window.NXVault = (() => {
             size: 'small', className: 'secondary', attrs: `data-email="${esc(account.email)}"`
           });
       const value = entry?.has_password
-        ? `<button class="vault-value control--embedded mono" data-action="vault-reveal"
-            data-email="${esc(account.email)}" aria-label="${revealing ? '隐藏密码' : '显示密码'}">
-            <strong>${esc(revealing ? ui.vaultReveal.value : '••••••••')}</strong></button>${edit}${copy('password')}`
+        ? `<div class="vault-value-slot${revealing ? ' is-revealed' : ''}">
+            <button type="button" class="vault-value control--embedded mono" data-action="vault-reveal"
+              data-email="${esc(account.email)}" aria-label="${revealing ? '隐藏密码' : '显示密码'}">
+              <strong>${esc(revealing ? ui.vaultReveal.value : '••••••••')}</strong>
+            </button></div>${edit}${copy('password')}`
         : `<strong>未保存</strong>${edit}`;
       password = `<div class="vault-line"><span class="vault-label">密码</span>${value}</div>`;
     }

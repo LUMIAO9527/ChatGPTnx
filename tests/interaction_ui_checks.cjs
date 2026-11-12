@@ -5,7 +5,7 @@ const root=path.resolve(__dirname,'..');
 const output=process.env.NX_TEST_OUTPUT||path.join(root,'_wip','interaction-ui');
 fs.mkdirSync(output,{recursive:true});
 (async()=>{
-  const browser=await chromium.launch({executablePath:process.argv[2],headless:true});
+  const browser=await chromium.launch({executablePath:process.argv[2],headless:true,ignoreDefaultArgs:['--hide-scrollbars']});
   try{
     const context=await browser.newContext({viewport:{width:520,height:690}});
     await context.route('**/*',route=>route.abort());
@@ -97,11 +97,13 @@ fs.mkdirSync(output,{recursive:true});
         panel:rect(document.querySelector('#app')),
         scroll:[body.clientWidth,body.scrollWidth,body.scrollTop],
         vault:rect(document.querySelector('.detail-vault')),
+        value:rect(document.querySelector('.vault-value-slot')),
         rows:[...body.querySelectorAll('.detail-line,.vault-line')].map(rect),
-        copy:[...body.querySelectorAll('[data-action="vault-copy"]')].map(rect),
+        tools:[...body.querySelectorAll('[data-action="vault-edit"],[data-action="vault-copy"]')].map(rect),
       };
     });
-    const email='work-02@example.com', longPassword='NX-synthetic_123!?'.repeat(32).slice(0,512);
+    const email='work-02@example.com', tail='NX_END_987!';
+    const longPassword='NX-synthetic_123!? '.repeat(32).slice(0,512-tail.length)+tail;
     for(const [width,appearance] of [[300,'dark'],[312,'light'],[327,'dark']]){
       await fresh();
       await page.evaluate(async ({width,appearance,email,longPassword})=>{
@@ -118,6 +120,7 @@ fs.mkdirSync(output,{recursive:true});
       await details(email);
       await page.locator('[data-action="toggle-vault"]').click();
       const password=page.locator('[data-action="vault-reveal"]');
+      const viewport=page.locator('.vault-value-slot');
       const edit=page.getByRole('button',{name:'更新本机密码记录'});
       const copy=page.locator('[data-action="vault-copy"][data-value="password"]');
       await page.locator('.detail-vault').scrollIntoViewIfNeeded();
@@ -132,14 +135,62 @@ fs.mkdirSync(output,{recursive:true});
       await password.click();
       await page.waitForFunction(()=>document.querySelector('.vault-value')?.getAttribute('aria-label')==='隐藏密码');
       assert.deepEqual(await geometry(),masked);
-      assert(await password.locator('strong').evaluate(node=>node.scrollWidth>node.clientWidth&&getComputedStyle(node).textOverflow==='ellipsis'));
-      if(width===312){
-        await page.locator('#app').screenshot({path:path.join(output,'long-password.png')});
-        await page.waitForFunction(()=>document.querySelector('.vault-value')?.getAttribute('aria-label')==='显示密码');
-      }else await password.click();
+      assert(await viewport.evaluate(node=>node.scrollWidth>node.clientWidth&&node.scrollLeft===0));
+      const box=await viewport.boundingBox();
+      await page.mouse.move(box.x+10,box.y+8);
+      if(width===312)await page.waitForTimeout(1800);
+      await page.mouse.wheel(width===327?190:0,width===327?0:190);
+      await page.waitForFunction(()=>document.querySelector('.vault-value-slot').scrollLeft>0);
       assert.deepEqual(await geometry(),masked);
+      if(width===312){
+        await page.waitForTimeout(1350);
+        assert.equal(await password.getAttribute('aria-label'),'隐藏密码');
+      }
+      if(width===300){
+        await password.press('Home');
+        const bar=await viewport.evaluate(node=>node.offsetHeight-node.clientHeight);
+        assert(bar>0);
+        const y=box.y+box.height-bar/2;
+        await page.mouse.move(box.x+2,y);
+        await page.mouse.down();
+        await page.mouse.move(box.x+45,y,{steps:5});
+        await page.mouse.up();
+        assert(await viewport.evaluate(node=>node.scrollLeft>0));
+        assert.equal(await password.getAttribute('aria-label'),'隐藏密码');
+      }
+      await password.press('End');
+      assert(await viewport.evaluate((node,tail)=>{
+        const text=node.querySelector('strong').firstChild;
+        const range=document.createRange();
+        range.setStart(text,text.length-tail.length);
+        range.setEnd(text,text.length);
+        const glyph=range.getBoundingClientRect(),frame=node.getBoundingClientRect();
+        return text.textContent.endsWith(tail)&&glyph.left>=frame.left-1&&glyph.right<=frame.right+1
+          &&Math.abs(node.scrollWidth-node.clientWidth-node.scrollLeft)<=1;
+      },tail));
+      const end=await viewport.evaluate(node=>node.scrollLeft);
+      await password.press('ArrowLeft');
+      assert((await viewport.evaluate(node=>node.scrollLeft))<end);
+      await password.press('ArrowRight');
+      assert.equal(await viewport.evaluate(node=>node.scrollLeft),end);
+      await page.evaluate(()=>NXPreview.refresh());
+      assert.equal(await viewport.evaluate(node=>node.scrollLeft),end);
+      assert.deepEqual(await geometry(),masked);
+      if(width===312)await page.locator('#app').screenshot({path:path.join(output,'long-password.png')});
       await copy.click();
       await page.waitForFunction(value=>window.__passwordCopy===value,longPassword);
+      if(width===312){
+        await page.waitForFunction(()=>document.querySelector('.vault-value')?.getAttribute('aria-label')==='显示密码');
+      }else{
+        await page.keyboard.press('Escape');
+        assert.equal(await password.getAttribute('aria-label'),'显示密码');
+      }
+      assert.deepEqual(await geometry(),masked);
+      await password.click();
+      await page.waitForFunction(()=>document.querySelector('.vault-value-slot').classList.contains('is-revealed'));
+      assert.equal(await viewport.evaluate(node=>node.scrollLeft),0);
+      await page.mouse.click(box.x+10,box.y+8);
+      assert.equal(await password.getAttribute('aria-label'),'显示密码');
       await edit.click();
       const field=page.locator('#vault-password');
       await field.waitFor();
@@ -156,7 +207,7 @@ fs.mkdirSync(output,{recursive:true});
       assert.equal((await page.locator('.detail-vault').boundingBox()).width,masked.vault[2]);
     }
     assert.deepEqual(errors,[]);
-    console.log('Password layout: 512-character display, mask, full copy, and pencil editor passed at 300/312/327 px.');
+    console.log('Password layout: wheel, scrollbar, keyboard, idle masking, refresh, full copy, and pencil editor passed at 300/312/327 px.');
     console.log('Interaction UI: all noncurrent accounts, independent choices/cancellation, reset confirmation/cancellation/single request, UUID, left alignment, light/dark passed.');
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});

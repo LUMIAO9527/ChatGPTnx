@@ -289,9 +289,35 @@
     }
     return saved;
   }
+  const revealedPasswordSelector='.vault-value-slot.is-revealed';
+  function clearVaultReveal() {
+    clearTimeout(ui.vaultReveal?.hideTimer);
+    ui.vaultReveal=null;
+  }
+  function scheduleVaultHide() {
+    const reveal=ui.vaultReveal;
+    if(!reveal)return;
+    clearTimeout(reveal.hideTimer);
+    reveal.hideTimer=setTimeout(()=>{
+      if(ui.vaultReveal===reveal){clearVaultReveal();renderSheet();}
+    },3000);
+  }
+  app.addEventListener('scroll',event=>{
+    if(event.target.matches?.(revealedPasswordSelector))scheduleVaultHide();
+  },true);
+  app.addEventListener('wheel',event=>{
+    const viewport=event.target.closest?.(revealedPasswordSelector);
+    const delta=event.deltaX||event.deltaY;
+    if(!viewport||event.ctrlKey||!delta||viewport.scrollWidth<=viewport.clientWidth)return;
+    const unit=event.deltaMode===WheelEvent.DOM_DELTA_LINE?16:
+      event.deltaMode===WheelEvent.DOM_DELTA_PAGE?viewport.clientWidth:1;
+    event.preventDefault();
+    viewport.scrollLeft+=delta*unit;
+    scheduleVaultHide();
+  },{passive:false});
   function clearCredentialForms() {
     const error=$('#credential-error');if(error)error.textContent='';
-    ui.vaultEditor=null;ui.vaultReveal=null;
+    ui.vaultEditor=null;clearVaultReveal();
     clearBinding();
   }
   function clearBinding() {
@@ -343,7 +369,7 @@
     const previous=push&&ui.page?sheetHistory():null;
     resetConfirmation=null;ui.resumeClearConfirm=false;
     clearCredentialForms();
-    if(page!=='detail'){ui.vaultReveal=null;ui.vaultExpanded.clear();}
+    if(page!=='detail')ui.vaultExpanded.clear();
     const aliases={automation:null,notifications:'notifications','relay-accounts':'relay',hotkeys:'hotkeys',archives:'archives','resume-message':'message','resume-clear':'resume-history'};
     const initial=page;
     if(Object.hasOwn(aliases,page))page='settings';
@@ -359,7 +385,6 @@
       ui.disclosures=new Set(saved?.disclosures);
       ui.resetExpanded.clear();
       ui.vaultExpanded.clear();
-      ui.vaultReveal=null;
       ui.collectionPages['reset:'+target]=saved?.collectionPages?.['reset:'+target]||1;
       if(saved?.resetOpen||expand==='reset')ui.resetExpanded.add(target);
       if(saved?.vaultOpen||expand==='vault')ui.vaultExpanded.add(target);
@@ -873,7 +898,7 @@
       case 'home':closeSheet();break;
       case 'detail':show('detail',target);break;
       case 'toggle-reset-credits':disclose(()=>{resetConfirmation=null;if(ui.resetExpanded.has(target))ui.resetExpanded.delete(target);else {ui.resetExpanded.add(target);ui.vaultExpanded.delete(target);clearCredentialForms();ui.disclosures.delete('meta:'+target);}renderSheet();});break;
-      case 'toggle-vault':disclose(()=>{ui.vaultReveal=null;if(ui.vaultExpanded.has(target)){ui.vaultExpanded.delete(target);clearCredentialForms();}else {ui.vaultExpanded.add(target);ui.disclosures.delete('meta:'+target);ui.resetExpanded.delete(target);ui.collectionPages['reset:'+target]=1;}renderSheet();});break;
+      case 'toggle-vault':disclose(()=>{if(ui.vaultExpanded.has(target)){ui.vaultExpanded.delete(target);clearCredentialForms();}else {ui.vaultExpanded.add(target);ui.disclosures.delete('meta:'+target);ui.resetExpanded.delete(target);ui.collectionPages['reset:'+target]=1;}renderSheet();});break;
       case 'vault-import-authenticator': {
         if(ui.page==='detail'&&target===ui.email&&data.accounts.some(account=>account.email===target)){
           const binding=window.NXBinding.initial(target);
@@ -944,13 +969,13 @@
         break;}
       case 'vault-reveal':{
         const who=target;
-        if(ui.vaultReveal&&ui.vaultReveal.email===who){ui.vaultReveal=null;renderSheet();break;}
+        if(ui.vaultReveal?.email===who){clearVaultReveal();renderSheet();break;}
         const secret=await api('vault_secret',{email:who,field:'password'});
         if(!navigation.current(ticket)||ui.vaultEditor||!ui.vaultExpanded.has(who))break;
         if(!secret||secret.ok===false||!secret.value){notify(secret?.error||'没有保存这个账号的密码',{tone:'error'});break;}
-        const reveal={email:who,value:secret.value};
-        ui.vaultReveal=reveal;renderSheet();
-        setTimeout(()=>{if(ui.vaultReveal===reveal){ui.vaultReveal=null;renderSheet();}},3000);
+        clearVaultReveal();
+        ui.vaultReveal={email:who,value:secret.value};
+        renderSheet();scheduleVaultHide();
         break;}
       case 'vault-copy':{
         let copyText='';
@@ -1132,6 +1157,17 @@
       const modifiers=[e.ctrlKey?'ctrl':null,e.altKey?'alt':null,e.shiftKey?'shift':null].filter(Boolean);
       if(modifiers.length<2){notify('至少同时使用 Ctrl、Alt、Shift 中的两个');return;}
       ui.recording=null;await action('set_account_hotkey',target,[...modifiers,e.key].join('+'));return;
+    }
+    if(ui.vaultReveal&&e.key==='Escape'){e.preventDefault();clearVaultReveal();renderSheet();return;}
+    const passwordViewport=e.target.closest?.(revealedPasswordSelector);
+    if(passwordViewport&&passwordViewport.scrollWidth>passwordViewport.clientWidth&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
+      const offsets={ArrowLeft:-32,ArrowRight:32,Home:-passwordViewport.scrollWidth,End:passwordViewport.scrollWidth};
+      if(Object.hasOwn(offsets,e.key)){
+        e.preventDefault();
+        passwordViewport.scrollLeft+=offsets[e.key];
+        scheduleVaultHide();
+        return;
+      }
     }
     if(e.key==='Enter'&&!e.isComposing&&e.keyCode!==229&&e.target.matches('.inline-field input')){e.preventDefault();e.target.closest('.inline-field').querySelector('.save-check:not(:disabled)')?.click();return;}
     if(e.key==='Escape'){e.preventDefault();if(ui.page)back();else api('hide').catch(()=>{});}

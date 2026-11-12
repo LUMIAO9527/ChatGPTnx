@@ -1,2 +1,2 @@
 """Single source of product version for runtime, RPC and packaging."""
-APP_VERSION = "1.8.6"
+APP_VERSION = "1.8.7"
