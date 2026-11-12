@@ -1,3 +1,3 @@
 @echo off
 setlocal
-start "" "%~dp0ChatGPTnx-v1.8.5.html"
+start "" "%~dp0ChatGPTnx-v1.8.6.html"

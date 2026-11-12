@@ -46,20 +46,21 @@ window.NXVault = (() => {
     const copy = field => tool('vault-copy', 'copy',
       '复制' + {email: '邮箱', password: '密码', code: '验证码'}[field],
       `data-value="${field}"`);
-    const editPassword = saved => actionButton({
-      action: 'vault-edit', content: saved ? '更新' : '录入',
-      label: saved ? '更新本机密码记录' : '保存账号密码到 NX',
-      size: 'small', className: 'secondary', attrs: `data-email="${esc(account.email)}"`
-    });
     let password;
     if (editing) {
       password = editor(c);
     } else {
+      const edit = entry?.has_password
+        ? tool('vault-edit', 'edit', '更新本机密码记录')
+        : actionButton({
+            action: 'vault-edit', content: '录入', label: '保存账号密码到 NX',
+            size: 'small', className: 'secondary', attrs: `data-email="${esc(account.email)}"`
+          });
       const value = entry?.has_password
         ? `<button class="vault-value control--embedded mono" data-action="vault-reveal"
             data-email="${esc(account.email)}" aria-label="${revealing ? '隐藏密码' : '显示密码'}">
-            <strong>${esc(revealing ? ui.vaultReveal.value : '••••••••')}</strong></button>${editPassword(true)}${copy('password')}`
-        : `<strong>未保存</strong>${editPassword(false)}`;
+            <strong>${esc(revealing ? ui.vaultReveal.value : '••••••••')}</strong></button>${edit}${copy('password')}`
+        : `<strong>未保存</strong>${edit}`;
       password = `<div class="vault-line"><span class="vault-label">密码</span>${value}</div>`;
     }
     const expiring = verifier?.has_secret && verifier.remain <= 5;
