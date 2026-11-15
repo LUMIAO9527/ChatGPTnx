@@ -58,3 +58,9 @@ def current_code(secret: object, *, at: float | None = None) -> tuple[str, int]:
     moment = time.time() if at is None else float(at)
     remaining = PERIOD - int(moment) % PERIOD
     return code(secret, at=moment), remaining
+
+
+def code_snapshot(secret: object, *, at: float | None = None) -> dict:
+    moment = time.time() if at is None else float(at)
+    value, seconds = current_code(secret, at=moment)
+    return {'code': value, 'remain': seconds, 'code_expires_at': int(moment) + seconds}

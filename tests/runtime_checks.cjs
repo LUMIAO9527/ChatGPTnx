@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const context = {window: {NX_CONFIG:require('./ui_config_fixture.cjs')}};
 vm.createContext(context);
-for(const file of ['runtime.js','components.js']){
+for(const file of ['runtime.js','components.js','vault.js','binding.js']){
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../src/ui',file),'utf8'),context);
 }
 const {readEpoch,coalescedRefresh} = context.window.NXRuntime;
@@ -44,6 +44,46 @@ const text=value=>new DomNode('#text',{text:value});
 const node=(tag,attrs={},children=[])=>new DomNode(tag,attrs,children);
 const patch=(root,next,options)=>{dom.next=next;context.window.NXRuntime.patchHTML(root,'fixture',options);};
 (async()=>{
+  await check('vault/expired snapshot cannot show a frozen countdown or supply a code',()=>{
+    const {codeWindow,row}=context.window.NXVault;
+    const email='fixture@example.invalid';
+    const entry={email,has_secret:true,code:'005924',remain:24,code_expires_at:990};
+    assert.equal(codeWindow(entry,966).remain,24);
+    assert.equal(codeWindow(entry,976).remain,14);
+    assert.equal(codeWindow(entry,990),null);
+    assert.equal(codeWindow(entry,1000),null);
+    context.Date={now:()=>1000000};
+    try{
+      const html=row({data:{vault:[entry]},ui:{vaultExpanded:new Set([email])},esc:String,icon:()=>'',actionButton:button=>button.attrs}, {email});
+      assert(!html.includes('005 924'));
+      assert(!html.includes('24s'));
+      assert.match(html,/data-value="code" data-code-copy disabled/);
+    }finally{delete context.Date;}
+  });
+  await check('vault/bound authenticator can open and close its replacement form',()=>{
+    const {row}=context.window.NXVault;
+    const email='fixture@example.invalid';
+    const data={vault:[{email,has_secret:true,code:'005924',code_expires_at:990}]};
+    const ui={vaultExpanded:new Set([email]),binding:null};
+    const buttons=[];
+    const c={data,ui,esc:String,icon:String,actionButton:button=>{buttons.push(button);return button.content;}};
+    context.Date={now:()=>966000};
+    try{
+      row(c,{email});
+      const open=buttons.find(button=>button.action==='vault-import-authenticator');
+      assert.equal(open.label,'重新绑定 2FA');
+      assert.match(open.attrs,/aria-expanded="false"/);
+      assert(buttons.some(button=>button.attrs.includes('data-value="code" data-code-copy')));
+      buttons.length=0;
+      ui.binding={email,pending:{email,token:'preview',expires_at:1500,code:'123456',code_expires_at:990}};
+      const html=row(c,{email});
+      assert.match(html,/123 456/);
+      assert.match(html,/核对新验证码/);
+      assert.equal(buttons.find(button=>button.action==='binding-confirm').content,'保存新验证器');
+      assert.match(buttons.find(button=>button.action==='binding-cancel').attrs,/aria-expanded="true"/);
+      assert(buttons.some(button=>button.action==='binding-copy'));
+    }finally{delete context.Date;}
+  });
   await check('navigation/old-read-invalidated',()=>{
     const epoch=readEpoch(), first=epoch.ticket();epoch.invalidate();
     assert.equal(epoch.current(first),false);assert.equal(epoch.current(epoch.ticket()),true);
@@ -164,7 +204,7 @@ const patch=(root,next,options)=>{dom.next=next;context.window.NXRuntime.patchHT
     const incoming=()=>node('section',{},[node('div',{class:'sheet-body usage-body'},[node('section',{'data-motion-identity':'a'},[node('span',{class:'avatar'},[text('A')])])])]);
     const env={sheet,ui:{page:'usage',scope:'a'},data:{accounts:[]},composingField:null,document:{activeElement:null},window:{NXMotion:{paint(){}}},
       esc:components.esc,captureScroll:context.window.NXRuntime.captureScroll,restoreScroll:context.window.NXRuntime.restoreScroll,focusKey:()=>null,restoreFocus(){},
-      usageContent:()=>'',pageHead:()=>'',statusRegion:()=>'',paintNotifications(){},feedback:{paint(){}},patchHTML:context.window.NXRuntime.patchHTML};
+      usageContent:()=>'',pageHead:()=>'',statusRegion:()=>'',paintNotifications(){},syncCredentialsExpanded(){},feedback:{paint(){}},patchHTML:context.window.NXRuntime.patchHTML};
     dom.next=incoming();vm.runInNewContext(renderer+'renderSheet(false);',env);
     assert.equal(sheet.firstChild,body);assert.equal(body.firstChild,card);assert.equal(card.firstChild,avatar);assert.equal(body.scrollTop,0);
     body.scrollTop=41;dom.next=incoming();vm.runInNewContext(renderer+'renderSheet(true);',env);

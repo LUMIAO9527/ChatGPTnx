@@ -24,6 +24,7 @@
   const ui = {page:null, email:null, locationTarget:null, history:[], scope:'all', days:30, usage:null, usageRevision:-1, submitted:null, recording:null, switchKind:'manual', quotaMetric:'quota', quotaScope:'relay', resumeDetails:[], resumePage:1, resumeClearConfirm:false, resumeClearPending:false, settingsScrollFloor:0, resumeExpanded:new Set(), resumeCollapsed:new Set(), resetExpanded:new Set(), vaultExpanded:new Set(), vaultReveal:null, vaultDraft:'', vaultEditor:null, disclosures:new Set(), collectionPages:{}, inlineLoading:{archives:'idle'}, inlineRequests:{}, messageDraft:null, metaDrafts:new Map(), fieldRevisions:new Map(),
     binding:null};
   let connected = false, bridgeError = '', acting = false, nativeDialog = false, previousFocus = null, previousFocusKey = null, freshSignature = '', lastErrorId = '', pollTimer = null, panelVisible = !!config.demo;
+  let credentialsExpanded = false, credentialsRevision = 0;
   const app = $('#app');
   app.innerHTML = '<main id="home"></main><section id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" hidden></section><div id="announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>';
   const home = $('#home'), sheet = $('#sheet');
@@ -309,6 +310,13 @@
     ui.binding=null;
     if(binding?.pending)api('mfa_cancel',{email:binding.email,token:binding.pending.token}).catch(()=>{});
   }
+  function syncCredentialsExpanded() {
+    const expanded=panelVisible&&ui.page==='detail'&&ui.vaultExpanded.has(ui.email);
+    if(expanded===credentialsExpanded)return;
+    credentialsExpanded=expanded;
+    if(!config.demo)api('set_credentials_expanded',expanded,++credentialsRevision).catch(()=>{});
+    if(expanded)poll(true);
+  }
   function revealCredentialActions(selector,isActive) {
     const reveal=()=>{
       if(!isActive())return;
@@ -398,6 +406,7 @@
     resetConfirmation=null;ui.resumeClearConfirm=false;
     feedback.clear();clearNotification();navigation.invalidate();ui.recording=null;
     ui.vaultExpanded.clear();ui.vaultDraft='';ui.page=null;ui.email=null;ui.history=[];sheet.hidden=true;home.inert=false;
+    syncCredentialsExpanded();
     setSize('home');renderHome();
     restoreFocus(home,previousFocusKey);
     if(!home.contains(document.activeElement))home.querySelector('button')?.focus({preventScroll:true});
@@ -464,6 +473,7 @@
   }
   let composingField=null, deferredSheet=false;
   function renderSheet(preserve=true,usageTransition=false) {
+    syncCredentialsExpanded();
     if(preserve&&composingField?.isConnected&&sheet.contains(composingField)){deferredSheet=true;return;}
     const rangePose=preserve&&ui.page==='usage'?window.NXUsageMotion?.beforePatch(sheet,true):null;
     const position=preserve?captureScroll(sheet):null;
@@ -901,7 +911,7 @@
         if(!binding||binding.busy)break;
         disclose(()=>{clearBinding();ui.binding=window.NXBinding.initial(binding.email);renderSheet();});break;}
       case 'binding-copy':{
-        const code=window.NXBinding.preview(ui.binding,data)?.code;
+        const code=window.NXVault.codeWindow(window.NXBinding.preview(ui.binding,data))?.code;
         if(code)await copyValue(b,code);break;}
       case 'binding-confirm':{
         const binding=ui.binding;
@@ -966,7 +976,7 @@
       case 'vault-copy':{
         let copyText='';
         if(val==='email')copyText=target;
-        else if(val==='code')copyText=window.NXVault.find(data,target)?.code||'';
+        else if(val==='code')copyText=window.NXVault.codeWindow(window.NXVault.find(data,target))?.code||'';
         else {const secret=await api('vault_secret',{email:target,field:val});copyText=secret?.value||'';}
         if(!navigation.current(ticket))break;
         if(!copyText){notify('没有可复制的内容',{tone:'error'});break;}
@@ -1158,6 +1168,10 @@
     if(e.key==='Tab'&&ui.page&&sheet.getAttribute('aria-modal')==='true'){const items=[...sheet.querySelectorAll('button:not(:disabled),input,textarea,summary,[tabindex="0"]')].filter(n=>n.offsetParent!==null);if(!items.length)return;const first=items[0],last=items.at(-1);if(e.shiftKey&&(document.activeElement===first||document.activeElement.id==='sheet-title')){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}
   });
   window.addEventListener('blur',()=>{if(!config.demo&&!nativeDialog&&!data.adding&&!data.reauth&&!data.operation&&!document.hasFocus())api('hide','blur').catch(()=>{});});
+  function refreshVerifierCountdown() {
+    if(panelVisible&&!window.NXVault.updateCountdown(sheet))poll(true);
+  }
+  window.addEventListener('focus',refreshVerifierCountdown);
   window.nxRequestSwitch=target=>requestSwitch(target);
   const systemAppearance=window.matchMedia('(prefers-color-scheme: dark)');
   let publishedNativeAppearance='';
@@ -1179,11 +1193,12 @@
   window.nxOpenUninstall=()=>{panelVisible=true;window.NXDataTransfer.handle({dataset:{action:"uninstall-open"}},{...viewContext(),show,back,render:()=>renderSheet()});poll();};
   window.nxOpenUpdate=()=>{panelVisible=true;show('update');poll();};
   window.nxShown=()=>{panelVisible=true;workflowResume=true;closeSheet(false);setSize('home');poll();};
-  window.nxHidden=()=>{clearCredentialForms();ui.vaultReveal=null;ui.vaultDraft='';window.NXDataTransfer?.hidden(ui.page,{api});window.NXMotion?.stop();panelVisible=false;resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
+  window.nxHidden=()=>{clearCredentialForms();ui.vaultReveal=null;ui.vaultDraft='';window.NXDataTransfer?.hidden(ui.page,{api});window.NXMotion?.stop();panelVisible=false;syncCredentialsExpanded();resetConfirmation=null;ui.resumeClearConfirm=false;clearTimeout(pollTimer);pollTimer=null;};
   window.addEventListener('pywebviewready',poll);
   window.addEventListener('resize',()=>{window.NXMotion?.stop();if(config.demo)setSize(ui.page?'workspace':'home');});
   setInterval(()=>{
     if(!panelVisible && !config.demo) return;
+    refreshVerifierCountdown();
     for(const el of app.querySelectorAll('[data-reset]')){
       const ts=Number(el.dataset.reset);el.textContent=el.hasAttribute('data-reset-compact')?compactReset(ts):reset(ts);
       if(el.hasAttribute('data-reset-compact'))el.title=reset(ts)+'后重置';

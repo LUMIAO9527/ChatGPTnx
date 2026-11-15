@@ -10,10 +10,40 @@ window.NXVault = (() => {
     return entry && (entry.has_password || entry.has_secret) ? '已保存' : '未保存';
   }
 
-  function codeText(entry) {
+  function secondsLeft(expiresAt, now) {
+    const seconds = Math.ceil(Number(expiresAt) - now);
+    return seconds > 0 && seconds <= 30 ? seconds : 0;
+  }
+
+  function codeWindow(entry, now = Date.now() / 1000) {
+    const remain = secondsLeft(entry?.code_expires_at, now);
+    const code = entry?.code;
+    return remain && typeof code === 'string' && /^[0-9]{6}$/.test(code) ? {code, remain} : null;
+  }
+
+  function updateCountdown(root) {
+    const row = root.querySelector('.vault-verifier[data-code-expires-at]');
+    if (!row) return true;
+    const remain = secondsLeft(row.dataset.codeExpiresAt, Date.now() / 1000);
+    const label = row.querySelector('.vault-remain');
+    const code = row.querySelector('.vault-code');
+    if (!remain) {
+      row.removeAttribute('data-code-expires-at');
+      code.textContent = '······';
+      code.classList.remove('danger');
+      label.remove();
+      row.querySelector('[data-code-copy]').disabled = true;
+      return false;
+    }
+    label.textContent = remain + 's';
+    label.classList.toggle('danger', remain <= 5);
+    code.classList.toggle('danger', remain <= 5);
+    return true;
+  }
+
+  function codeText(entry, code = codeWindow(entry)?.code) {
     if (!entry?.has_secret) return '未绑定';
-    const code = String(entry.code || '');
-    return code.length === 6 ? code.slice(0, 3) + ' ' + code.slice(3) : '······';
+    return code ? code.slice(0, 3) + ' ' + code.slice(3) : '······';
   }
 
   function summary(c, email) {
@@ -43,9 +73,9 @@ window.NXVault = (() => {
       action, content: icon(symbol), label, title: label, size: 'small',
       iconOnly: true, className: 'tool', attrs: `data-email="${esc(account.email)}" ${attrs}`
     });
-    const copy = field => tool('vault-copy', 'copy',
+    const copy = (field, attrs = '') => tool('vault-copy', 'copy',
       '复制' + {email: '邮箱', password: '密码', code: '验证码'}[field],
-      `data-value="${field}"`);
+      `data-value="${field}" ${attrs}`);
     let password;
     if (editing) {
       password = editor(c);
@@ -65,15 +95,24 @@ window.NXVault = (() => {
         : `<strong>未保存</strong>${edit}`;
       password = `<div class="vault-line"><span class="vault-label">密码</span>${value}</div>`;
     }
-    const expiring = verifier?.has_secret && verifier.remain <= 5;
-    const remaining = verifier?.has_secret && Number.isFinite(verifier.remain)
-      ? `<small class="vault-remain${expiring ? ' danger' : ''}">${pending?.expired ? '' : esc(verifier.remain) + 's'}</small>` : '';
+    const live = codeWindow(verifier);
+    const expiring = live && live.remain <= 5;
+    const remaining = live
+      ? `<small class="vault-remain${expiring ? ' danger' : ''}">${live.remain}s</small>` : '';
+    const codeAttrs = live ? 'data-code-copy' : 'data-code-copy disabled';
+    const bindingAction = bindingActive ? 'binding-cancel' : 'vault-import-authenticator';
+    const bindingAttrs = `aria-expanded="${bindingActive}" aria-controls="account-binding-form"
+        ${bindingActive && ui.binding.busy ? 'disabled' : ''}`;
+    const replacement = entry?.has_secret
+      ? tool(bindingAction, bindingActive ? 'close' : 'edit',
+          bindingActive ? '收起验证器绑定' : '重新绑定 2FA', bindingAttrs)
+      : '';
     const authenticator = verifier?.has_secret
-      ? remaining + (pending ? tool('binding-copy', 'copy', '复制验证码', pending.expired ? 'disabled' : '') : copy('code'))
+      ? remaining + replacement + (pending ? tool('binding-copy', 'copy', '复制验证码', codeAttrs) : copy('code', codeAttrs))
       : actionButton({
-          action: bindingActive ? 'binding-cancel' : 'vault-import-authenticator',
+          action: bindingAction,
           content: bindingActive ? '收起' : '绑定', size: 'small', className: 'secondary',
-          attrs: `data-email="${esc(account.email)}" aria-expanded="${bindingActive}" aria-controls="account-binding-form"`
+          attrs: `data-email="${esc(account.email)}" ${bindingAttrs}`
         });
     const actions = editing ? `<div class="vault-inline-actions">${actionButton({
         action: 'vault-cancel', content: '取消', size: 'large', className: 'secondary',
@@ -88,8 +127,8 @@ window.NXVault = (() => {
       <div class="vault-line"><span class="vault-label">邮箱</span>
         <strong class="mono" title="${esc(account.email)}">${esc(account.email)}</strong>${copy('email')}</div>
       ${password}
-      <div class="vault-line vault-verifier"><span class="vault-label">2FA</span>
-        <strong class="mono vault-code${expiring ? ' danger' : ''}">${esc(codeText(verifier))}</strong>${authenticator}</div>
+      <div class="vault-line vault-verifier" ${live ? `data-code-expires-at="${esc(verifier.code_expires_at)}"` : ''}><span class="vault-label">2FA</span>
+        <strong class="mono vault-code${expiring ? ' danger' : ''}">${esc(codeText(verifier, live?.code || ''))}</strong>${authenticator}</div>
       ${actions}${binding}</div>` : '';
     return `<div class="detail-vault detail-item control-container${expanded ? ' is-open' : ''}"
         data-disclosure="vault:${esc(account.email)}">
@@ -122,5 +161,5 @@ window.NXVault = (() => {
     return window.NXSettingsContent.disclosure(c, 'credential-import', '导入账号密码', batch);
   }
 
-  return {find, stateText, codeText, summary, row, editor, imports, savedAccounts};
+  return {find, stateText, codeText, codeWindow, updateCountdown, summary, row, editor, imports, savedAccounts};
 })();

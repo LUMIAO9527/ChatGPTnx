@@ -153,10 +153,18 @@ class VaultFlowTests(unittest.TestCase):
 
     def test_single_qr_binds_selected_saved_account_and_preserves_material(self):
         s = self.service
-        s.vault.put('b@example.com', password='saved', recovery_codes='synthetic recovery')
+        old_secret = 'JBSWY3DPEHPK3PXP'
+        s.vault.put('b@example.com', password='saved', secret=old_secret, recovery_codes='synthetic recovery')
         with qr_image(transfer_uri('OpenAI:B@EXAMPLE.COM')) as image:
             self.assertFalse(s.mfa_preview_images({'email': 'a@example.com', 'paths': [image]})['ok'])
-            preview = s.mfa_preview_images({'email': 'b@example.com', 'paths': [image]})
+            chosen = {'email': 'b@example.com', 'paths': [image]}
+            discarded = s.mfa_preview_images(chosen)
+            self.assertEqual(s.vault.get('b@example.com').secret, old_secret)
+            s.mfa_cancel({'email': 'b@example.com', 'token': discarded['token']})
+            self.assertFalse(s.mfa_commit({'email': 'b@example.com', 'token': discarded['token'],
+                                           'confirmed': True})['ok'])
+            self.assertEqual(Vault(s.vault.path).get('b@example.com').secret, old_secret)
+            preview = s.mfa_preview_images(chosen)
         self.assertTrue(preview['account_matched'])
         self.assertRegex(preview['code'], r'^\d{6}$')
         self.assertNotIn(SECRET, json.dumps(s.mfa_public()))

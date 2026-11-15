@@ -5,6 +5,10 @@ window.NXDemo = (() => {
   const recordedPasswords=new Map();
   let state, usages, archives=[], resumeDetails=[], serial=0, failNext=false, previous=null, generation=0;
   const sec=()=>Math.floor(Date.now()/1000);
+  function demoCode(moment,offset=0) {
+    const remain=30-moment%30;
+    return {code:String(100000+(Math.floor(moment/30)+offset)%900000),remain,code_expires_at:moment+remain};
+  }
   const nextVersion=()=>{const parts=window.NX_CONFIG.version.split('.').map(Number);parts[2]=(parts[2]||0)+1;return parts.join('.');};
   const loginSaved=()=>{state.login_result={id:'demo-login-'+(++serial),message:'登录已验证并保存',quota_ok:true};};
   function demoRelayOrder() {
@@ -95,8 +99,9 @@ window.NXDemo = (() => {
       case 'retry_query':return operation('refresh',email,()=>{const a=state.accounts.find(a=>a.email===email);if(a){a.ok=true;a.error_code=null;a.paused=false;a.retry_at=null;delete a.query_warning;a.fetched_at=sec();}});
       case 'get_data':{
         if(state.demo_connection_error)throw new Error('演示：本地服务暂时不可用');
-        for(const [index,entry] of state.vault.entries())if(entry.has_secret){entry.remain=30-sec()%30;entry.code=String(100000+(Math.floor(sec()/30)+(entry.demo_code_offset??index*15371))%900000);}
-        for(const entry of state.mfa_pending){entry.remain=30-sec()%30;entry.code=String(100000+Math.floor(sec()/30)%900000);}
+        const moment=sec();
+        for(const [index,entry] of state.vault.entries())if(entry.has_secret)Object.assign(entry,demoCode(moment,entry.demo_code_offset??index*15371));
+        for(const entry of state.mfa_pending)Object.assign(entry,demoCode(moment));
         const known=new Map(state.hotkeys.map(item=>[item.email,item]));
         state.hotkeys=state.accounts.map((a,i)=>known.get(a.email)||{email:a.email,shortcut:i<9?`ctrl+alt+${i+1}`:null,registered:i<9});
         state.relay_order=demoRelayOrder();

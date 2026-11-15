@@ -16,18 +16,19 @@ window.NXBinding = (() => {
   function content(c) {
     const {ui, data, esc, actionButton} = c;
     const binding = ui.binding;
+    const replacing = window.NXVault.find(data, binding.email)?.has_secret;
     const pending = preview(binding, data);
     let title, hint;
     if (pending?.expired) {
       title = '重新读取二维码';
       hint = '读取结果已过期，请重选二维码。';
     } else if (pending) {
-      title = '核对验证码';
+      title = replacing ? '核对新验证码' : '核对验证码';
       hint = pending.account_matched === false
         ? '二维码未标邮箱，请核对归属后保存。'
         : '核对上方六位验证码，确认后保存。';
     } else {
-      title = binding.busy ? '正在读取二维码…' : '读取验证器二维码';
+      title = binding.busy ? '正在读取二维码…' : replacing ? '读取新的验证器二维码' : '读取验证器二维码';
       hint = '如有多张二维码图片，请一次选齐。';
     }
     const action = (name, text, primary = false, disabled = false) => actionButton({
@@ -37,7 +38,7 @@ window.NXBinding = (() => {
     });
     const actions = pending
       ? action('binding-reselect', '重选二维码')
-        + action('binding-confirm', '保存验证器', true, pending.expired)
+        + action('binding-confirm', replacing ? '保存新验证器' : '保存验证器', true, pending.expired)
       : action('binding-read', '读取截图')
         + action('binding-file', '选择二维码图片', true);
     return `<div class="binding-content">

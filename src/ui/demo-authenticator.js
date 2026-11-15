@@ -156,10 +156,11 @@ window.NXDemoQR = (() => {
   async function code(secret) {
     if (!crypto.subtle) fail('请用 Chrome 打开此 HTML 后读取二维码');
     if (!keys.has(secret)) keys.set(secret, await crypto.subtle.importKey('raw', secretBytes(secret), {name: 'HMAC', hash: 'SHA-1'}, false, ['sign']));
-    const buffer = new ArrayBuffer(8); new DataView(buffer).setBigUint64(0, BigInt(Math.floor(now() / 30)));
+    const moment = now(), remain = 30 - moment % 30;
+    const buffer = new ArrayBuffer(8); new DataView(buffer).setBigUint64(0, BigInt(Math.floor(moment / 30)));
     const digest = new Uint8Array(await crypto.subtle.sign('HMAC', keys.get(secret), buffer)), offset = digest[19] & 15;
     const value = (((digest[offset] & 127) << 24) | (digest[offset + 1] << 16) | (digest[offset + 2] << 8) | digest[offset + 3]) >>> 0;
-    return {code: String(value % 1000000).padStart(6, '0'), remain: 30 - now() % 30};
+    return {code: String(value % 1000000).padStart(6, '0'), remain, code_expires_at: moment + remain};
   }
   async function single(accounts, email) {
     if (!/^[^\s@]+@[^\s@]+$/.test(email || '')) fail('请填写账号邮箱');

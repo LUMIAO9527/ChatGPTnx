@@ -550,6 +550,11 @@ class Bridge:
             return {'ok': False}
         self._host._dispatch_ui(lambda: self._host._set_native_appearance(appearance, material))
         return {'ok': True}
+    def set_credentials_expanded(self, expanded, revision):
+        if type(expanded) is not bool or type(revision) is not int:
+            return {'ok': False}
+        queued = self._host._dispatch_ui(lambda: self._host._set_credentials_expanded(expanded, revision))
+        return {'ok': queued}
     def hide(self, reason='user'):
         self._host.hide(reason=reason)
         return {'ok': True}
@@ -584,6 +589,8 @@ class Desktop:
         self._native_material = None
         self._window_material = None
         self._hide_token = 0  # show() invalidates pending blur-confirm timers
+        self._credentials_expanded = False
+        self._credentials_revision = 0
         self._relay_restore = None
         self._relay_pinned = False
         self.tray_monitor = None  # HMONITOR remembered from the last tray click
@@ -601,7 +608,8 @@ class Desktop:
                 if flow:
                     self._dispatch_ui(lambda: self._set_panel_topmost(True) if self.visible else None)
                 elif previous and not self._relay_restore:
-                    self._dispatch_ui(lambda: self._set_panel_topmost(False) if self.visible else None)
+                    self._dispatch_ui(lambda: self._set_panel_topmost(False)
+                                      if self.visible and not self._credentials_expanded else None)
         operation = self.service.operation
         if (operation and operation.get('kind') == 'switch' and self.visible
                 and not self._relay_restore):
@@ -1113,8 +1121,17 @@ class Desktop:
             close()
         return True
 
+    def _set_credentials_expanded(self, expanded, revision):
+        if revision <= self._credentials_revision:
+            return
+        self._credentials_revision = revision
+        self._credentials_expanded = self.visible and expanded
+        if self._credentials_expanded:
+            self._set_panel_topmost(True)
+
     def hide(self, *args, reason='user'):
-        if getattr(self,'native_dialog',False) and reason in ('blur','focus','outside'):
+        if (reason in ('blur', 'focus', 'outside')
+                and (getattr(self, 'native_dialog', False) or getattr(self, '_credentials_expanded', False))):
             return
         # The first-run bootstrap panel must outlive every automatic foreground
         # or style change: the native folder dialog takes the foreground while
@@ -1160,6 +1177,7 @@ class Desktop:
         if not self.window or (not self.visible and reason != 'repair'):
             return
         self.visible = False
+        self._credentials_expanded = False
         self._hide_token += 1
         token = self._hide_token
         self._shown_at = 0.0
@@ -1378,7 +1396,7 @@ class Desktop:
             if not self.visible and user32.IsWindowVisible(hwnd):
                 self.service.log.info('panel_visibility_reasserted')
                 self.hide(reason='repair')
-            elif self.visible and self._login_workflow():
+            elif self.visible and (self._credentials_expanded or self._login_workflow()):
                 self._set_panel_topmost(True, hwnd)
 
         def on_foreground(_hook, event, hwnd, _ido, _idc, _tid, _time):

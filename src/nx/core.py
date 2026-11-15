@@ -452,15 +452,13 @@ class Service:
         from . import mfa_migration
         rows = []
         for item in self.vault.public():
-            row = dict(item)
-            row['code'] = ''
-            row['remain'] = 0
+            row = {**item, 'code': '', 'remain': 0, 'code_expires_at': 0}
             entry = self.vault.get(item['email'])
             if entry is not None and entry.secret:
                 try:
-                    row['code'], row['remain'] = mfa_migration.current_code(entry.secret)
+                    row.update(mfa_migration.code_snapshot(entry.secret))
                 except Exception:
-                    row['code'], row['remain'] = '', 0
+                    pass
             rows.append(row)
         return rows
 
@@ -638,10 +636,9 @@ class Service:
 
     @staticmethod
     def _mfa_display(token, item, now):
-        from .mfa_migration import current_code
-        code, remain = current_code(item['secret'], at=now)
+        from .mfa_migration import code_snapshot
         return {'email': item['email'], 'token': token, 'expires_at': item['expires_at'],
-                'account_matched': item['account_matched'], 'code': code, 'remain': remain}
+                'account_matched': item['account_matched'], **code_snapshot(item['secret'], at=now)}
 
     def _stage_mfa(self, email, secret, *, source, matched=True):
         with self.lock:

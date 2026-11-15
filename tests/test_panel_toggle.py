@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from nx.desktop import Desktop
+from nx.desktop import Bridge, Desktop
 
 
 class PanelToggleTests(unittest.TestCase):
@@ -64,6 +64,35 @@ class PanelToggleTests(unittest.TestCase):
         self.timer.call_args.args[1]()
         self.assertTrue(self.panel.visible)
         self.form.Hide.assert_not_called()
+
+    def test_expanded_credentials_keep_panel_open_but_tray_can_close(self):
+        self.panel.show()
+        bridge = Bridge(self.service, self.panel)
+        self.assertTrue(bridge.set_credentials_expanded(True, 1)['ok'])
+        for reason in ('blur', 'focus', 'outside'):
+            self.panel.hide(reason=reason)
+        self.timer.assert_not_called()
+        self.form.Hide.assert_not_called()
+        self.assertTrue(self.panel.visible)
+        self.panel.toggle()
+        self.assertFalse(self.panel.visible)
+        self.form.Hide.assert_called_once()
+
+    def test_expansion_cancels_pending_hide_and_collapse_restores_auto_hide(self):
+        self.panel.show()
+        self.cursor = (200, 200)
+        self.panel.hide(reason='blur')
+        confirm = self.timer.call_args.args[1]
+        bridge = Bridge(self.service, self.panel)
+        bridge.set_credentials_expanded(True, 1)
+        confirm()
+        self.assertTrue(self.panel.visible)
+        bridge.set_credentials_expanded(False, 3)
+        bridge.set_credentials_expanded(True, 2)
+        self.panel.hide(reason='focus')
+        self.timer.call_args.args[1]()
+        self.assertFalse(self.panel.visible)
+        self.form.Hide.assert_called_once()
 
     def test_blur_before_queued_show_does_not_cancel_opening(self):
         queued = []

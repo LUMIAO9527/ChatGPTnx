@@ -83,6 +83,16 @@ class CurrentCodeTests(unittest.TestCase):
         self.assertEqual(len(code), 6)
         self.assertTrue(1 <= remaining <= 30)
 
+    def test_snapshot_expiry_belongs_to_the_period_that_generated_the_code(self):
+        previous = migration.code_snapshot(KNOWN, at=1234567889.75)
+        current = migration.code_snapshot(KNOWN, at=1234567890)
+        self.assertEqual(previous['code_expires_at'], 1234567890)
+        self.assertEqual(previous['remain'], 1)
+        self.assertEqual(current['code_expires_at'], 1234567920)
+        self.assertEqual(current['remain'], 30)
+        self.assertEqual(current['code'], totp.code(KNOWN, at=1234567890))
+        self.assertNotEqual(previous['code'], current['code'])
+
 
 if __name__ == '__main__':
     unittest.main()
