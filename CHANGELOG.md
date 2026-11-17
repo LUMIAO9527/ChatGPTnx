@@ -2,6 +2,10 @@
 
 公开版本以 [GitHub Releases](https://github.com/LUMIAO9527/ChatGPTnx/releases) 为准。日期为本地时间（UTC+8）。
 
+## 1.9.0（2026-11-17）
+
+修复 Windows 缩放时磨砂面板描边被裁掉的问题，并使演示截图的四个圆角完整透明。中英文 README 更新了使用步骤与示例截图。
+
 ## 1.8.10（2026-11-17）
 
 修复新版 ChatGPT 桌面端切换账号时漏同步本机对话项目归属的问题。新版与旧版切号场景均通过 Windows 隔离检查。

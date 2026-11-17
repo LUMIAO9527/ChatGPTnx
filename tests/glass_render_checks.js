@@ -48,7 +48,8 @@ window.nxCheckGlassRendering = async () => {
       const header=bounds(head),first=bounds(firstNode);
       layouts.push({appearance,page,header,first});
       assert(Math.abs(header.h-42)<.6,appearance+'/'+page+': compact shared title row');
-      assert(Math.abs(first.y-(page==='settings'?45:53))<1,appearance+'/'+page+': expected body origin');
+      const origin={'settings':45,'quota-overview':48}[page]??53;
+      assert(Math.abs(first.y-origin)<1,appearance+'/'+page+': expected body origin');
       assert(body.scrollWidth<=body.clientWidth+1,appearance+'/'+page+': no horizontal overflow');
       if(page==='usage'){
         assert(alpha(getComputedStyle(surface.querySelector('.usage-summary')).backgroundColor)===0,appearance+': overview report stays transparent');
@@ -78,11 +79,18 @@ window.nxCheckNativeMaterialSwitching = async () => {
       document.querySelector(`[data-segment="pref:window_material"] [data-value="${material}"]`).click();
       await wait(180);await window.NX_NATIVE_SYNC;await wait(60);
       const native=await window.pywebview.api.material_state();
-      const shown=document.documentElement.dataset.material;
+      const root=document.documentElement;
+      const shown=root.dataset.material;
       const expected=material==='glass'?'blur':'solid';
+      const fitted=['width','height'].every(dimension=>{
+        const size=root.style.getPropertyValue('--native-panel-'+dimension);
+        return material==='glass'
+          ? Math.abs(parseFloat(size)*window.devicePixelRatio-native.backdrop_clip?.[dimension])<1
+          : size==='';
+      });
       const ok=native.mode===expected&&shown===material&&!native.native_error
-        &&(material!=='glass'||native.backdrop_clip?.radius>0);
-      cases.push({appearance,material,shown,...native,ok});
+        &&fitted&&(material!=='glass'||native.backdrop_clip?.radius>0);
+      cases.push({appearance,material,shown,fitted,...native,ok});
       if(!ok)failures.push(appearance+'/'+material+': '+JSON.stringify(native));
     }
   }

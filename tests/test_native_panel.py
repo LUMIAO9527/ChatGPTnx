@@ -142,6 +142,8 @@ class PanelTests(unittest.TestCase):
             for dpi in (96,120,144,168,192,240):
                 self.dpi = dpi
                 self.size = (round(312*dpi/96),round(458*dpi/96))
+                self.host._window_material.outline = {'width': self.size[0], 'height': self.size[1],
+                                                      'radius': round(16*dpi/96)}
                 self.assertTrue(self.host._apply_native_shape())
                 self.host._corner_edges.apply.assert_called_with(HWND,round(16*dpi/96),(255,255,255,196))
 
@@ -152,8 +154,10 @@ class PanelTests(unittest.TestCase):
         self.host._corner_edges = Mock()
         self.host._bind_corner_events = Mock()
         self.host._window_material.apply.return_value = 'acrylic'
+        self.host._window_material.outline = {'width': 312, 'height': 458, 'radius': 16}
         self.host._post_script.side_effect = RuntimeError('WebView is initializing')
         self.assertTrue(self.host._apply_native_shape())
+        self.host._post_script.assert_called_once()
         self.assertEqual(self.dwm.DwmSetWindowAttribute.calls, [])
 
     def test_win10_solid_fallback_repaints_existing_glass_edges(self):

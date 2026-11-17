@@ -7,7 +7,10 @@ html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background:
   startup background. Browser demos keep their CSS-rounded outline.
 */
 body.live { background: var(--bg); }
-body.demo { min-height: 100vh; padding: 24px; display: grid; place-items: center; background: var(--surface-2); }
+body.demo { min-height: 100vh; padding: 24px; display: grid; place-items: center; isolation: isolate; }
+/* Keep the scene inside the document rather than propagating it to the HTML canvas. */
+body.demo::before { content: ''; position: fixed; inset: 0; z-index: -1; background: var(--surface-2); pointer-events: none; }
+:root[data-panel-capture] body.demo { clip-path: inset(var(--panel-capture-inset) round var(--radius-window)); }
 button, input, textarea, select { font: inherit; }
 button { color: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 /* Noninteractive surfaces. Interactive geometry is defined by the shared control system. */
@@ -21,7 +24,11 @@ input, select, .field, .detail-line, .quota-failure, .mark { border-radius: var(
 .icon { width: 19px; height: 19px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
 #app { width: var(--panel-width); height: var(--panel-height); position: relative; overflow: hidden; background: var(--bg); border-radius: var(--window-r);
   box-shadow: var(--shadow-window); isolation: isolate; contain: paint; }
-body:not(.demo) #app { width: 100vw !important; height: 100vh !important; box-shadow: none; border-radius: 0; overflow: hidden; }
+body:not(.demo) #app {
+  width: min(100vw, var(--native-panel-width, 100vw)) !important;
+  height: min(100vh, var(--native-panel-height, 100vh)) !important;
+  box-shadow: none; border-radius: 0;
+}
 #home, .sheet { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 #home { padding: 11px 14px 5px; gap: 8px; }
 .header { display: flex; align-items: center; gap: 5px; flex: 0 0 34px; min-height: 34px; }

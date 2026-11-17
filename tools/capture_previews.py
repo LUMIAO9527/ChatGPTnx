@@ -1,13 +1,13 @@
 """Capture every catalog state in both palettes, plus full-content views for scrolling pages.
 
-The source UI is unmodified for viewport images. Full-content images deliberately
-extend only the height and are labeled as such; they are not native window sizes.
+The browser clips the whole demo scene to the panel's rounded outline.
+Full-content images extend only the height and are labeled as such.
 """
 import argparse
 import json
-import hashlib
-import struct
+from io import BytesIO
 from pathlib import Path
+from PIL import Image
 from browser_session import ROOT,browser_session,demo_html
 from screen_catalog import CASES
 from build import CONFIG,APP_VERSION,ui_source_digest
@@ -22,11 +22,29 @@ METRICS=r'''() => {
    scroll:scrollables.map(n=>({selector:n.classList.contains('sheet-body')?'.sheet-body':n.classList.contains('account-list')?'.account-list':n.classList.contains('onboarding-main')?'.onboarding-main':'.onboarding-main',extra:Math.max(0,n.scrollHeight-n.clientHeight),height:n.clientHeight}))};
 }'''
 
-def verify_png_size(image: bytes, width: int, height: int) -> None:
- if image[:8] != b'\x89PNG\r\n\x1a\n' or len(image)<24:
-  raise ValueError('Invalid preview PNG')
- actual=struct.unpack('>II',image[16:24])
- if actual!=(width,height):raise ValueError(f'PNG geometry mismatch: {actual}, expected {(width,height)}')
+def capture_panel(page, path: Path, width: int, height: int) -> None:
+    app = page.locator('#app')
+    radius = app.evaluate('''app => {
+      const root = document.documentElement;
+      const box = app.getBoundingClientRect();
+      const insets = [box.top, innerWidth - box.right, innerHeight - box.bottom, box.left];
+      root.style.setProperty('--panel-capture-inset', insets.map(n => n + 'px').join(' '));
+      root.dataset.panelCapture = '';
+      return parseFloat(getComputedStyle(app).borderTopLeftRadius);
+    }''')
+    png = app.screenshot(animations='disabled', omit_background=True)
+    with Image.open(BytesIO(png)) as image:
+        if image.format != 'PNG' or image.size != (width, height):
+            raise ValueError(f'Invalid preview PNG geometry: {image.size}, expected {(width, height)}')
+        alpha = image.convert('RGBA').getchannel('A')
+        inset = int(radius) // 8
+        for x in (0, width - inset - 1):
+            for y in (0, height - inset - 1):
+                if alpha.crop((x, y, x + inset + 1, y + inset + 1)).getbbox():
+                    raise ValueError('Preview background extends past the rounded panel')
+        if alpha.getpixel((width // 2, height // 2)) != 255:
+            raise ValueError('Preview is missing the backdrop inside the panel')
+    path.write_bytes(png)
 
 def main(browser,output,appearance='both',only=None,resume=False):
  output.mkdir(parents=True,exist_ok=True)
@@ -60,7 +78,7 @@ def main(browser,output,appearance='both',only=None,resume=False):
       if metrics['page']!=case['expected']:errors.append(f"Expected {case['expected']}, got {metrics['page']}")
       if metrics['horizontalOverflow'] or metrics['clippedQuotas']:errors.append('Horizontal overflow or clipped quotas')
       if (metrics['width'],metrics['height']) not in tuple(tuple(v) for v in CONFIG['sizes'].values())+(tuple(size),):errors.append('Unexpected panel geometry')
-      image=f"{palette}/{case['id']}.png";png=page.locator('#app').screenshot(path=str(output/image),animations='disabled');verify_png_size(png,metrics['width'],metrics['height']);row['image']=image
+      image=f"{palette}/{case['id']}.png";capture_panel(page,output/image,metrics['width'],metrics['height']);row['image']=image
       extra=max([r['extra'] for r in metrics['scroll']]+[0])
       if extra>2:
        height=metrics['height']+extra+3
@@ -68,7 +86,7 @@ def main(browser,output,appearance='both',only=None,resume=False):
        page.set_viewport_size({'width':view_width,'height':height+90})
        page.add_style_tag(content=f'#app{{height:{height}px!important}} .status-dock,.status-runway{{display:none!important}}')
        page.evaluate('height=>{const app=document.querySelector("#app");app.style.height=height+"px";document.querySelectorAll(".sheet-body,.account-list,.onboarding-main").forEach(n=>n.scrollTop=0);}',height)
-       full=f"{palette}/{case['id']}--full.png";png=page.locator('#app').screenshot(path=str(output/full),animations='disabled');verify_png_size(png,metrics['width'],height);row['fullImage']=full;row['fullHeight']=height
+       full=f"{palette}/{case['id']}--full.png";capture_panel(page,output/full,metrics['width'],height);row['fullImage']=full;row['fullHeight']=height
        remaining=page.evaluate(METRICS)['scroll']
        if any(item['extra']>2 for item in remaining):errors.append('Full-content preview still scrolls')
      except Exception as error:errors.append(str(error))

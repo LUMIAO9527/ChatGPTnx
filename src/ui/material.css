@@ -36,17 +36,17 @@
 :root[data-material="glass"][data-appearance="dark"] .segmented::before { background: rgb(187 205 229 / .17); }
 :root[data-material="glass"] .quota-overview-toolbar { background:transparent; backdrop-filter:none; }
 /* Browser previews have their own backdrop, inside the same document. */
-:root[data-material-preview] body.demo {
+:root[data-material-preview] body.demo::before {
   background: radial-gradient(ellipse at 12% 12%, #b4d4f8 0, transparent 52%),
     radial-gradient(ellipse at 87% 76%, #d6c9f4 0, transparent 55%),
     radial-gradient(ellipse at 12% 92%, #f9c6b4 0, transparent 55%), #c4d5e6;
 }
-:root[data-material-preview="midnight"] body.demo {
+:root[data-material-preview="midnight"] body.demo::before {
   background: radial-gradient(ellipse at 12% 12%, #426983 0, transparent 52%),
     radial-gradient(ellipse at 88% 80%, #624b82 0, transparent 55%),
     radial-gradient(ellipse at 12% 92%, #755248 0, transparent 55%), #1c2b40;
 }
-:root[data-material-preview="contrast"] body.demo {
+:root[data-material-preview="contrast"] body.demo::before {
   background: repeating-linear-gradient(125deg, #262c39 0 34px, #e3ac75 34px 68px, #bbcde6 68px 102px);
 }
 :root[data-material="glass"] body.demo #app { backdrop-filter: blur(25px) saturate(1.22); }

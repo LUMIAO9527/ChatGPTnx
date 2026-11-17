@@ -1,104 +1,47 @@
-[简体中文](README.md) | **English**
+[简体中文](README.md) · **English**
 
 <div align="center">
-<img src="docs/images/nx-mark.png" width="88" alt="ChatGPTnx">
-<h1>ChatGPTnx</h1>
-<p><b>Automatic handoff · Task continuation · Configure n accounts for your workload</b></p>
-<p>Keep a long task moving across the accounts you own. Switch accounts when quota runs out, then attempt to continue the original task.</p>
-
-<img src="docs/images/badges/platform.svg" alt="Windows 10 | 11" height="20">
-<img src="docs/images/badges/version.svg" alt="v1.8.10" height="20">
-<img src="docs/images/badges/license.svg" alt="Source available to inspect; rights reserved" height="20">
+  <img src="docs/images/nx-mark.png" width="72" alt="">
+  <h1>ChatGPTnx</h1>
+  <p>Manage ChatGPT accounts, quotas, and local task continuation from the Windows tray.</p>
+  <p><a href="https://github.com/LUMIAO9527/ChatGPTnx/releases/latest/download/ChatGPTnx.exe"><b>Download ChatGPTnx.exe</b></a> · <a href="https://github.com/LUMIAO9527/ChatGPTnx/releases/latest">Release notes and offline demo</a> · <a href="USAGE.md">User guide (Chinese)</a></p>
+  <p><img src="docs/images/badges/platform.svg" alt="Windows 10 and 11" height="20"> <img src="docs/images/badges/version.svg" alt="Current release" height="20"></p>
+  <img src="docs/images/home-dark.png" width="220" alt="Dark home panel showing the active account, quota, and next account">
+  <img src="docs/images/home-light.png" width="220" alt="Light home panel showing the quotas for other accounts">
 </div>
 
-ChatGPTnx is a lightweight Windows desktop utility that reduces the waiting and manual steps when a long task is interrupted by an account's usage limit. It brings account handoff, task continuation, quota information, and usage statistics into one tray app.
+## Getting started
 
-## Video introduction
+Requires 64-bit Windows 10 or 11, the ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
 
-Chinese narration and subtitles.
+1. Launch `ChatGPTnx.exe` and choose a program folder. Open NX from the Windows tray after setup.
+2. Select **Add account** and sign in through ChatGPT. NX verifies and saves the account.
+3. Try a manual handoff with **Next account**. In Settings, choose the accounts to use and enable automatic handoff or task continuation as needed.
+4. To update an existing installation, open **Settings → About → Version update**.
 
-https://github.com/user-attachments/assets/e1d24f80-0716-4bba-a024-7058e5c0b2e0
-
-## Features
-
-- **Automatic handoff:** Switch to a participating account with available quota when the current account runs out. You can also switch manually, choose participating accounts, or schedule a cancellable handoff after an account's quota recovers.
-- **Relay preheat:** During active desktop work, start selected spare Plus accounts' five-hour windows with a tiny request and prepare the next round after recovery. Off by default; no desktop login changes or repeat requests within the same window.
-- **Task continuation:** After a switch, attempt to resume the original desktop task. Configure a continuation message and review successful, skipped, and unresolved results separately. Identified background agents do not trigger independent desktop continuation.
-- **Quotas and usage:** See each account's remaining quota, reset times, and token usage. Temporary query failures retain known quotas consistently across views and handoff decisions. Normal queries and preheat share pause and cooldown rules.
-- **Credential protection and diagnostics:** Protect account snapshots with Windows current-user encryption, and preview or copy a redacted diagnostic summary.
-- **Portable backups:** Export selected accounts and membership details in a password-encrypted backup, with optional usage, quota history, and general settings, then import them on another computer.
-- **Installation and removal:** Register in Windows Installed apps and open the same uninstall page from Windows or Settings, with a choice to retain account data.
-- **Sign-in and updates:** Keep the panel visible during sign-in, automatically verify and save completed sign-ins, and check for official GitHub updates from Settings.
-- **Passwords and 2FA:** Encrypt sign-in material, import Google Authenticator export images, show current codes, and fill recognized sign-in forms one step at a time.
-- **Lightweight desktop controls:** Keep the app in the Windows tray, with notifications, keyboard shortcuts, and light and dark themes.
-
-### Keeping long tasks moving
-
-Automatic handoff and task continuation are separate settings. When the current account reaches its limit, handoff switches to an eligible account. Continuation then checks the original desktop task and attempts to resume it there. Continuation depends on the task's state and may wait or report a failure; it cannot guarantee that every task will resume.
-
-**n is the number of your own accounts you choose to configure for your workload.** Start with a few and adjust the participating accounts as your usage changes. For example, five Plus accounts can take turns in a rotation so a long task spends less time waiting for one account's quota to reset.
-
-The quota overview and usage statistics help you see which account is available and how much capacity you actually use.
+For work you want to continue on the same computer after switching accounts, start the task locally in a local project. NX tries the desktop app's native **Continue** action first and records the outcome. Private cloud chats appear under the ChatGPT account that owns them.
 
 ## Screenshots
 
-### Account handoff and task continuation
+The screenshots use synthetic accounts and data. The [latest release](https://github.com/LUMIAO9527/ChatGPTnx/releases/latest) includes an offline HTML demo with the current screens, both themes, and interactive examples. The UI is in Chinese.
 
-| Home · Current account and next handoff | Account handoff · Confirm the next account | Task continuation · Review results |
-| --- | --- | --- |
-| <img src="docs/images/home-live.png" width="260" alt="Home: current account, remaining quota, and next handoff"> | <img src="docs/images/relay-confirm-live.png" width="260" alt="Confirm the next account and start handoff"> | <img src="docs/images/resume-live.png" width="260" alt="Task continuation records"> |
+| Confirm a handoff | Review continuation | Compare quotas |
+| :---: | :---: | :---: |
+| <img src="docs/images/handoff-confirm.png" width="205" alt="Confirm the active and next accounts before handoff"> | <img src="docs/images/continue-history.png" width="205" alt="Task continuation results, timestamps, and retry control"> | <img src="docs/images/quota-overview.png" width="205" alt="Quota and reset times across accounts"> |
 
-### Quotas and usage
+| Review usage | Manage passwords and 2FA | Check for updates |
+| :---: | :---: | :---: |
+| <img src="docs/images/personal-usage.png" width="205" alt="Date range, token totals, and usage trends"> | <img src="docs/images/account-security.png" width="205" alt="Password, authenticator, and code in account details"> | <img src="docs/images/version-update.png" width="205" alt="Current version, check for updates button, and result"> |
 
-| Quota overview | Personal usage | Account details |
-| --- | --- | --- |
-| <img src="docs/images/quota-live.png" width="260" alt="Quota overview for all accounts"> | <img src="docs/images/usage-live.png" width="260" alt="Personal token usage and trends"> | <img src="docs/images/detail-live.png" width="260" alt="Account details"> |
+- **Handoff** supports manual, automatic, and scheduled switching after quota recovery. Optional preheat is available for spare accounts.
+- **Accounts and usage** include quota comparisons, token usage by account, aliases, membership dates, and archiving.
+- **Passwords and 2FA** can be updated from account details, with support for replacing a saved authenticator and importing Google Authenticator QR codes.
+- **Appearance and controls** include light and dark themes, frosted glass and solid surfaces, tray notifications, and keyboard shortcuts.
 
-### Settings and appearance
+## Data and source
 
-| Settings | Dark theme | Add an account |
-| --- | --- | --- |
-| <img src="docs/images/settings-live.png" width="260" alt="Settings for handoff and task continuation"> | <img src="docs/images/home-dark-current.png" width="260" alt="Home screen in dark theme"> | <img src="docs/images/add-account-live.png" width="260" alt="Add an account: open the desktop sign-in window and confirm the account"> |
+Account snapshots and saved sign-in details use Windows current-user encryption. To move to another computer, export a password-protected backup from **Settings → Accounts and data → Import and export**. The diagnostic summary in Settings can be previewed and copied with sensitive fields removed.
 
-## Download and run
+Download the source package from the [latest release](https://github.com/LUMIAO9527/ChatGPTnx/releases/latest). Run `setup.cmd` to prepare the dependencies and `build.cmd` to build the app. See the [user guide](USAGE.md) and [changelog](CHANGELOG.md) for details.
 
-The current version is **v1.8.10**. Open `ChatGPTnx-v1.8.10.html` at the project root for all current pages and states.
-
-After an account switch, ChatGPTnx tries the original chat's Continue button first. If it confirms that no button action was sent, it sends the configured continuation message.
-
-Download `ChatGPTnx.exe` from the [v1.8.10 release](https://github.com/LUMIAO9527/ChatGPTnx/releases/tag/v1.8.10). The release also provides `ChatGPTnx-v1.8.10-source.zip` for source inspection. You need 64-bit Windows 10 or 11, the installed ChatGPT desktop app with a signed-in account, Microsoft .NET Framework 4.6.2 or later, and Microsoft Edge WebView2 Runtime.
-
-1. On first launch the panel opens to choose the program folder (recommended: `D:\ChatGPTnx`; nothing is written beside the download before you choose). Open the panel from the system tray afterwards.
-2. Select **Add account** and sign in to ChatGPT. The app automatically verifies and saves the account. If verification is temporarily unavailable, use **Retry verification** in the panel.
-3. Try one manual handoff with **Next account**. Then enable automatic handoff in Settings and choose the participating accounts.
-4. Enable **Automatically continue tasks after switching accounts** if you want task continuation. Configure a continuation message if needed, and check the task continuation records for results.
-
-Closing the panel only hides it; the app keeps running in the tray. Use the tray menu to exit completely.
-
-## Data and privacy
-
-Account snapshots, archived snapshots, and transaction recovery backups use Windows current-user encryption and restricted file permissions. Use the application's password-encrypted backup to move data between computers; importing protects credentials again for the new Windows user. The official desktop app's active authentication file keeps its existing format.
-
-Account and runtime data are stored next to the EXE. Keep that folder private and do not upload it publicly. When reporting an issue, use the diagnostic summary in Settings. It excludes email addresses, tokens, task content, and local paths, and is never uploaded automatically.
-
-See [USAGE.md](USAGE.md) (Chinese) for query recovery, continuation behavior, and rollback instructions. Before restoring an executable that cannot read encrypted snapshots, restore the credential format using the documented recovery tool.
-
-## License
-
-The source is available to inspect. Use and redistribution are governed by the [LICENSE](LICENSE); all rights are reserved. ChatGPTnx is an independent tool and is not affiliated with or endorsed by OpenAI.
-
-## Unified offline demo and debugging
-
-Open `ChatGPTnx-v1.8.10.html` at the project root or run `preview.cmd`. It includes the current UI, searchable scenarios, themes, simulated login/update states, and safe debug-report exports. The preview automatically fits and centers in the available space. Select 100% to inspect its actual dimensions. It uses synthetic data and does not access local accounts or perform actual desktop, download, or installation actions.
-
-The console can check all light/dark scenarios and record intermediate navigation frames, including interrupted returns, inline disclosures, floating notices, passive refreshes, and long release notes. A shared rule prioritizes information-card backgrounds, then main buttons or account avatars; unrelated pages use a grouped body transition.
-
-Regenerate it with `python tools/build_explorer.py` after editing the UI; `build.cmd` also generates it. Building the glass host requires the Windows 10 / 11 SDK; the released application includes this component. Native Windows behavior requires separate acceptance.
-
-## Passwords and 2FA
-
-Open **Password and 2FA** in account details. Record or update the local password on its row, and click the password to reveal it. Scroll long passwords within the row. Click the password again or leave account details to hide it. The copy button copies the full password. Select **Bind** on the 2FA row to choose a QR image or read a screenshot. Check the six-digit code and save the authenticator. The same row shows the current code and countdown.
-
-The panel stays open while you switch windows with this section expanded. To replace a saved authenticator, select the pencil on the 2FA row, read the new QR code, review the six-digit code, and select **Save new authenticator**.
-
-Open **Settings → Import and Export → Import Phone 2FA** to select multiple QR images or all images from the same Google Authenticator export. Review the matched email addresses, then save the selected authenticators.
+The source is available to inspect. See the [LICENSE](LICENSE) for use and distribution terms. ChatGPTnx is an independent tool and is not affiliated with OpenAI.

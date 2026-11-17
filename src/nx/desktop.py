@@ -776,7 +776,8 @@ class Desktop:
                 mode = self._window_material.apply(form, hwnd, dark=self._native_appearance == 'dark',
                                                    requested=self._native_material == 'glass')
                 try:
-                    self._post_script('window.nxNativeBackdrop?.(' + json.dumps(mode) + ')')
+                    self._post_script('window.nxNativeBackdrop?.(...' +
+                                      json.dumps([mode, self._window_material.outline]) + ')')
                 except Exception:
                     # The native surface can exist before CoreWebView2 is ready.
                     # show() reapplies and publishes the active material later.

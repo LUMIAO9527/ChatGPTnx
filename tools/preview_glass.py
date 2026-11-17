@@ -76,7 +76,8 @@ def main():
             args.report.parent.mkdir(parents=True, exist_ok=True)
             args.report.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
     def publish():
-        preview.evaluate_js('window.nxNativeBackdrop(' + json.dumps(state['mode']) + ')')
+        preview.evaluate_js('window.nxNativeBackdrop(...' +
+                            json.dumps([state['mode'], state.get('backdrop_clip')]) + ')')
         board.evaluate_js('document.getElementById("mode").textContent=' + json.dumps(
             {'acrylic':'Windows 原生磨砂', 'blur':'高斯模糊', 'solid':'纯色'}[state['mode']]))
         write_report()
@@ -138,7 +139,6 @@ def main():
             publish()
             return True
         def close(self):
-            preview.destroy()
             board.destroy()
         def material_state(self):
             return {key:state.get(key) for key in ('appearance','backend','mode','native_error','backdrop_clip')}
@@ -206,16 +206,16 @@ def main():
                 if not finished.wait(20):
                     raise TimeoutError('Native material switching did not finish')
                 write_report({'material_switches':switched})
-                if args.close_after_check:
-                    preview.destroy()
-                    board.destroy()
         except Exception as error:
             import traceback
             write_report({'error':type(error).__name__, 'details':str(error), 'trace':traceback.format_exc()})
+        finally:
             if args.close_after_check:
-                preview.destroy()
                 board.destroy()
-    board.events.closed += lambda: preview.destroy()
+    def close_preview():
+        if preview.uid in BrowserView.instances:
+            preview.destroy()
+    board.events.closed += close_preview
     webview.start(ready, gui='edgechromium', private_mode=True, storage_path=str(RUNTIME/'webview'))
 
 
