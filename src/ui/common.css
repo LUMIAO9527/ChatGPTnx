@@ -1,14 +1,9 @@
 /* Shared controls, then single-panel page layouts. Tokens live in tokens.css. */
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
-/*
-  desktop.py owns the live window outline and its antialiased edges. Paint the
-  whole WebView surface so transparent CSS pixels never expose its fixed
-  startup background. Browser demos keep their CSS-rounded outline.
-*/
+/* Windows shapes the live panel. The browser demo draws its own backdrop. */
 body.live { background: var(--bg); }
 body.demo { min-height: 100vh; padding: 24px; display: grid; place-items: center; isolation: isolate; }
-/* Keep the scene inside the document rather than propagating it to the HTML canvas. */
 body.demo::before { content: ''; position: fixed; inset: 0; z-index: -1; background: var(--surface-2); pointer-events: none; }
 :root[data-panel-capture] body.demo { clip-path: inset(var(--panel-capture-inset) round var(--radius-window)); }
 button, input, textarea, select { font: inherit; }

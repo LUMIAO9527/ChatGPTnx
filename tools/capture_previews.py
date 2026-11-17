@@ -1,8 +1,4 @@
-"""Capture every catalog state in both palettes, plus full-content views for scrolling pages.
-
-The browser clips the whole demo scene to the panel's rounded outline.
-Full-content images extend only the height and are labeled as such.
-"""
+"""Capture rounded catalog previews and full-height views of scrolling pages."""
 import argparse
 import json
 from io import BytesIO
@@ -34,9 +30,9 @@ def capture_panel(page, path: Path, width: int, height: int) -> None:
     }''')
     png = app.screenshot(animations='disabled', omit_background=True)
     with Image.open(BytesIO(png)) as image:
-        if image.format != 'PNG' or image.size != (width, height):
-            raise ValueError(f'Invalid preview PNG geometry: {image.size}, expected {(width, height)}')
-        alpha = image.convert('RGBA').getchannel('A')
+        if image.size != (width, height):
+            raise ValueError(f'Preview size {image.size}, expected {(width, height)}')
+        alpha = image.getchannel('A')
         inset = int(radius) // 8
         for x in (0, width - inset - 1):
             for y in (0, height - inset - 1):
@@ -55,7 +51,6 @@ def main(browser,output,appearance='both',only=None,resume=False):
  size=CONFIG['sizes']['home']
  view_width=max(520,size[0]+80);view_height=max(700,size[1]+80)
  palettes=['light','dark'] if appearance=='both' else [appearance]
- selected=[c for c in CASES if not only or c['id'] in only]
  for palette in palettes:
   done={r['id'] for r in report['cases'] if r['appearance']==palette and r['passed']}
   selected=[c for c in CASES if (not only or c['id'] in only) and (not resume or c['id'] not in done)]
@@ -82,7 +77,6 @@ def main(browser,output,appearance='both',only=None,resume=False):
       extra=max([r['extra'] for r in metrics['scroll']]+[0])
       if extra>2:
        height=metrics['height']+extra+3
-       # Scroll-only preview: same width, all rows; explicit full-content artifact.
        page.set_viewport_size({'width':view_width,'height':height+90})
        page.add_style_tag(content=f'#app{{height:{height}px!important}} .status-dock,.status-runway{{display:none!important}}')
        page.evaluate('height=>{const app=document.querySelector("#app");app.style.height=height+"px";document.querySelectorAll(".sheet-body,.account-list,.onboarding-main").forEach(n=>n.scrollTop=0);}',height)

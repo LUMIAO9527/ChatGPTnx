@@ -779,8 +779,7 @@ class Desktop:
                     self._post_script('window.nxNativeBackdrop?.(...' +
                                       json.dumps([mode, self._window_material.outline]) + ')')
                 except Exception:
-                    # The native surface can exist before CoreWebView2 is ready.
-                    # show() reapplies and publishes the active material later.
+                    # show() synchronizes the material after WebView2 loads.
                     pass
                 if mode != 'solid' or not version or version().build < 22621:
                     from .window_corners import WindowCorners

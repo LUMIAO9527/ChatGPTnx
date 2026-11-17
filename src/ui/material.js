@@ -1,4 +1,4 @@
-/* Native blur is authoritative; HTML alone never claims a desktop backdrop. */
+/* Panel appearance and native client dimensions. */
 'use strict';
 window.NXMaterial = (() => {
   const root = document.documentElement;
@@ -11,17 +11,10 @@ window.NXMaterial = (() => {
     root.dataset.backdrop = enabled ? nativeMode : 'solid';
   }
   function fitNativePanel() {
-    // WebView2 can composite a few extra device pixels at fractional scales.
-    // Use the client area measured for the native backdrop. The WebView scale
-    // may update after the host sends its geometry.
+    const scale = window.devicePixelRatio;
     for (const dimension of ['width', 'height']) {
-      const value = nativeOutline?.[dimension];
-      const property = '--native-panel-' + dimension;
-      if (Number.isFinite(value) && value > 0) {
-        root.style.setProperty(property, (value / window.devicePixelRatio) + 'px');
-      } else {
-        root.style.removeProperty(property);
-      }
+      const size = nativeOutline ? (nativeOutline[dimension] / scale) + 'px' : '';
+      root.style.setProperty('--native-panel-' + dimension, size);
     }
   }
   function native(mode, outline) {
@@ -44,5 +37,5 @@ window.NXMaterial = (() => {
     nativeMode = 'preview'; preferred = query.get('material') === 'solid' ? 'solid' : 'glass';
   }
   apply();
-  return { native, preference, preferred: () => preferred, mode: () => root.dataset.material };
+  return { preference, preferred: () => preferred };
 })();
