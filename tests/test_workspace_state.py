@@ -51,6 +51,22 @@ def document(active=True):
     return result
 
 
+def shared_document():
+    result = workspace()
+    migration = result.pop('app-server-projects-migration-by-host')
+    selected = result.pop('selected-project')
+    result.update({
+        'electron-renderer-content-owner': OLD,
+        'electron-owner-value:app-server-projects-migration-by-host:'+OLD: migration,
+        'electron-owner-value:selected-project:'+OLD: selected,
+        'electron-owner-atoms:'+OLD: {'private-draft': 'old-private',
+            'sidebar-project-expanded-v1-codex:'+PROJECT: True,
+            'flat-project-sidebar-preferences-v1': {'mode': 'project'}},
+        'projectless-thread-ids': ['projectless-thread'],
+        'unrelated-global': {'exact': ['preserve', 7, False]}})
+    return result
+
+
 @unittest.skipUnless(os.name == 'nt', 'Windows desktop-state transactions')
 class WorkspaceTests(unittest.TestCase):
     def setUp(self):
@@ -157,6 +173,172 @@ $ast.FindAll({param($a) $a -is [Management.Automation.Language.FunctionDefinitio
     def test_identity_hash_matches_the_installed_desktop_algorithm(self):
         output = self.invoke('(Read-Identity $AuthFile).RendererOwner')
         self.assertEqual(output, OLD)
+
+    def test_shared_desktop_keeps_shared_records_and_prepares_only_target_owner(self):
+        doc = shared_document()
+        result = self.transform(doc)
+        changed = {key for key in set(doc) | set(result) if doc.get(key) != result.get(key)}
+        self.assertEqual(changed, {
+            'electron-owner-value:app-server-projects-migration-by-host:'+NEW,
+            'electron-owner-value:selected-project:'+NEW,
+            'electron-owner-atoms:'+NEW})
+        self.assertNotIn('electron-account-renderer-state-v1', result)
+        migration = result['electron-owner-value:app-server-projects-migration-by-host:'+NEW][HOST]
+        self.assertFalse(migration['projectsMigrated'])
+        self.assertFalse(migration['threadAssignmentsMigrated'])
+        self.assertFalse(migration['threadAssignmentsReadMigrated'])
+        self.assertEqual(set(migration['pendingThreadAssignmentIds']), {THREAD, 'projectless-thread'})
+        self.assertNotIn('private-draft', result['electron-owner-atoms:'+NEW])
+
+    def test_shared_completed_target_rechecks_current_memberships_without_copying_source_checkpoint(self):
+        doc = shared_document()
+        key = 'electron-owner-value:app-server-projects-migration-by-host:'+NEW
+        doc[key] = {HOST: {'version': 1, 'projectsMigrated': True,
+            'threadAssignmentsMigrated': True, 'threadAssignmentsReadMigrated': True,
+            'pendingThreadAssignmentIds': ['older-local-thread'], 'desktop-extra': 42},
+            'ssh:other-host': {'exact': ['preserve', True]}}
+        result = self.transform(doc)
+        target = result[key][HOST]
+        self.assertTrue(target['projectsMigrated'])
+        self.assertEqual(target['desktop-extra'], 42)
+        self.assertFalse(target['threadAssignmentsMigrated'])
+        self.assertTrue(target['threadAssignmentsReadMigrated'])
+        self.assertEqual(set(target['pendingThreadAssignmentIds']),
+                         {THREAD, 'projectless-thread', 'older-local-thread'})
+        self.assertEqual(result[key]['ssh:other-host'], doc[key]['ssh:other-host'])
+        old_key = 'electron-owner-value:app-server-projects-migration-by-host:'+OLD
+        self.assertEqual(result[old_key], doc[old_key])
+
+    def test_shared_preserves_existing_target_atoms_and_selection(self):
+        doc = shared_document()
+        key = 'electron-owner-atoms:'+NEW
+        doc[key] = {'private-draft': 'new-private', 'appearance': 'light',
+            'flat-project-sidebar-preferences-v1': {'mode': 'recent'},
+            'sidebar-project-expanded-v1-codex:'+PROJECT: False}
+        selected_key = 'electron-owner-value:selected-project:'+NEW
+        doc[selected_key] = {'projectKind': 'chatgpt', 'projectId': 'private-cloud-project'}
+        result = self.transform(doc)
+        self.assertEqual(result[key], doc[key])
+        self.assertEqual(result[selected_key], doc[selected_key])
+
+    def test_shared_completed_source_passes_only_pending_local_changes(self):
+        doc = shared_document()
+        prefix = 'electron-owner-value:app-server-projects-migration-by-host:'
+        doc[prefix+NEW] = {HOST: {'version': 1, 'projectsMigrated': True,
+            'threadAssignmentsMigrated': True, 'threadAssignmentsReadMigrated': True,
+            'pendingThreadAssignmentIds': []}}
+        source = doc[prefix+OLD][HOST]
+        source.update(threadAssignmentsMigrated=True, threadAssignmentsReadMigrated=True,
+                      pendingThreadAssignmentIds=[])
+        result = self.transform(doc)
+        self.assertEqual(result[prefix+NEW], doc[prefix+NEW])
+        source.update(threadAssignmentsMigrated=False, pendingThreadAssignmentIds=[THREAD, 'other-host-thread'])
+        result = self.transform(doc)
+        self.assertFalse(result[prefix+NEW][HOST]['threadAssignmentsMigrated'])
+        self.assertEqual(result[prefix+NEW][HOST]['pendingThreadAssignmentIds'], [THREAD])
+
+    def test_shared_excludes_remote_and_cloud_memberships_from_target_migration(self):
+        doc = shared_document()
+        doc['thread-project-assignments']['cloud-thread'] = {'projectKind': 'chatgpt', 'projectId': 'cloud-project'}
+        doc['thread-project-assignments']['remote-thread'] = {'projectKind': 'local', 'projectId': PROJECT}
+        doc['thread-project-membership-host-ids'].update({'remote-thread': 'ssh:host', 'remote-projectless': 'ssh:host'})
+        doc['projectless-thread-ids'].extend(['remote-projectless', 'cloud-thread'])
+        result = self.transform(doc)
+        migration = result['electron-owner-value:app-server-projects-migration-by-host:'+NEW][HOST]
+        self.assertEqual(set(migration['pendingThreadAssignmentIds']), {THREAD, 'projectless-thread'})
+        self.assertEqual(result['thread-project-assignments'], doc['thread-project-assignments'])
+        self.assertEqual(result['thread-project-membership-host-ids'], doc['thread-project-membership-host-ids'])
+
+    def test_shared_round_trip_and_new_conversation_keep_every_membership(self):
+        doc = self.transform(shared_document())
+        self.assertIsNone(self.transform(doc))
+        doc['electron-renderer-content-owner'] = NEW
+        extra = '33333333-3333-4333-8333-333333333333'
+        doc['thread-project-assignments'][extra] = {'projectKind': 'local', 'projectId': PROJECT}
+        before = copy.deepcopy(doc['thread-project-assignments'])
+        result = self.transform(doc, OLD)
+        self.assertEqual(result['thread-project-assignments'], before)
+        key = 'electron-owner-value:app-server-projects-migration-by-host:'+OLD
+        self.assertIn(extra, result[key][HOST]['pendingThreadAssignmentIds'])
+        self.assertIsNone(self.transform(result, OLD))
+
+    def test_shared_real_scale_stale_checkpoint_queues_all_recorded_assignments(self):
+        doc = shared_document()
+        ids = [f'thread-{n:03}' for n in range(215)]
+        doc['thread-project-assignments'] = {t: {'projectKind': 'local', 'projectId': PROJECT} for t in ids}
+        key = 'electron-owner-value:app-server-projects-migration-by-host:'+NEW
+        doc[key] = {HOST: {'version': 1, 'projectsMigrated': True,
+            'threadAssignmentsMigrated': False, 'threadAssignmentsReadMigrated': False,
+            'pendingThreadAssignmentIds': ids[:203]}}
+        result = self.transform(doc)
+        self.assertEqual(set(result[key][HOST]['pendingThreadAssignmentIds']), set(ids+['projectless-thread']))
+        self.assertEqual(result['thread-project-assignments'], doc['thread-project-assignments'])
+
+    def test_shared_schema_does_not_revive_retired_account_snapshot(self):
+        doc = shared_document()
+        stale = document(False)['electron-account-renderer-state-v1']
+        stale['inactive'][OLD]['globals']['thread-project-assignments']['deleted-thread'] = {
+            'projectKind': 'local', 'projectId': PROJECT}
+        doc['electron-account-renderer-state-v1'] = stale
+        result = self.transform(doc)
+        self.assertNotIn('deleted-thread', result['thread-project-assignments'])
+        self.assertEqual(result['electron-account-renderer-state-v1'], stale)
+
+    def test_shared_signed_out_state_keeps_data_without_source_private_preferences(self):
+        doc = shared_document()
+        doc['electron-renderer-content-owner'] = None
+        result = self.transform(doc)
+        self.assertEqual(result['local-projects'], doc['local-projects'])
+        self.assertNotIn('electron-owner-atoms:'+NEW, result)
+        self.assertNotIn('electron-owner-value:selected-project:'+NEW, result)
+
+    def test_shared_empty_workspace_is_not_restored_from_old_or_foreign_account_data(self):
+        doc = shared_document()
+        doc['local-projects'] = {}
+        doc['electron-account-renderer-state-v1'] = document(False)['electron-account-renderer-state-v1']
+        self.assertIsNone(self.transform(doc))
+
+    def test_shared_invalid_identity_fails_without_changing_state(self):
+        self.state.write_text(json.dumps(shared_document()), encoding='utf-8')
+        before = self.state.read_bytes()
+        self.invoke("$doc=Get-Content -LiteralPath (Join-Path $env:NX_TEST_ROOT '.codex-global-state.json') -Raw | ConvertFrom-Json; "
+                    "Workspace-Update $doc 'invalid-owner'", success=False)
+        self.assertEqual(self.state.read_bytes(), before)
+
+    def test_shared_switch_failure_rolls_back_auth_and_workspace(self):
+        original = json.dumps(shared_document(), indent=3).encode()+b'\r\n'
+        self.state.write_bytes(original)
+        auth_before = self.auth.read_bytes()
+        self.snapshots.mkdir()
+        (self.snapshots/'new@example.com.json').write_bytes(credential('new-user', 'new-account', 'new@example.com'))
+        self.invoke(r"""
+$To='new@example.com';$RestoreProjects=$false;$List=$false;$DryRun=$false;$Snapshot=$false;$Park=$false
+function Stop-App {}
+$script:starts=0
+function Start-App {
+    $script:starts++
+    if($script:starts -eq 1) {
+        $current = [IO.File]::ReadAllText((Join-Path $env:NX_TEST_ROOT '.codex-global-state.json')) | ConvertFrom-Json
+        if(-not $current.PSObject.Properties['electron-owner-value:app-server-projects-migration-by-host:' + (Read-Identity $AuthFile).RendererOwner]) {
+            throw 'No shared transaction'
+        }
+        throw 'Synthetic launch failure'
+    }
+}
+$full=[IO.File]::ReadAllText($env:NX_TEST_SCRIPT)
+$failedAsExpected = $false
+try { Invoke-Expression $full.Substring($full.IndexOf('if ($RestoreProjects -and')) }
+catch {
+    if($_.Exception.Message -ne 'Synthetic launch failure' -or $script:starts -ne 2){throw}
+    $failedAsExpected = $true
+}
+if (-not $failedAsExpected) { throw 'Expected launch failure did not occur' }
+exit 0
+""")
+        self.assertEqual(self.auth.read_bytes(), auth_before)
+        self.assertEqual(self.state.read_bytes(), original)
+        backup = self.snapshots/'recovery/desktop-workspace-recovery.json'
+        self.assertNotIn(b'old-private', backup.read_bytes())
 
     def test_identical_inactive_layouts_are_unambiguous_and_signed_out_state_works(self):
         doc = document(False)

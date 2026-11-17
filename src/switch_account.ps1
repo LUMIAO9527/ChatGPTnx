@@ -255,8 +255,89 @@ function Workspace-ProjectIdentity($Workspace) {
     }
     return ($parts -join "`n")
 }
+function Shared-WorkspaceUpdate($Document, [string]$TargetOwner) {
+    # New desktops share local projects/memberships, but keep migration progress
+    # and sidebar atoms in owner-suffixed keys. Never recreate the retired owner
+    # block or copy a different account's migration-complete checkpoint.
+    $doc = State-Map $Document
+    $owner = $doc['electron-renderer-content-owner']
+    if (($null -ne $owner -and ($owner -isnot [string] -or $owner -notmatch '^[a-f0-9]{64}$')) -or
+        $TargetOwner -notmatch '^[a-f0-9]{64}$') {
+        throw 'Desktop account identity unavailable; no workspace changes made'
+    }
+    $globals = State-Map $doc
+    $selected = 'electron-owner-value:selected-project:'
+    $globals['selected-project'] = if ($owner) { $doc[$selected + $owner] } else { $null }
+    $sourceAtoms = if ($owner) { $doc['electron-owner-atoms:' + $owner] } else { $null }
+    $source = Local-Workspace $globals $sourceAtoms
+    if (-not $source) { return $null }
+
+    $migrationPrefix = 'electron-owner-value:app-server-projects-migration-by-host:'
+    $sourceMigrations = if ($owner) { State-Map $doc[$migrationPrefix + $owner] } else { @{} }
+    $key = $migrationPrefix + $TargetOwner
+    $migrations = State-Map $doc[$key]
+    $hosts = @(@($migrations.Keys) + @($source.globals['app-server-project-id-by-legacy-project-id-by-host'].Keys) |
+        Where-Object { $_ -like 'local:*' } | Sort-Object -Unique)
+    $members = State-Map $doc['thread-project-membership-host-ids']
+    $assignments = State-Map $doc['thread-project-assignments']
+    $projectless = @($doc['projectless-thread-ids'] | Where-Object {
+        $_ -is [string] -and -not $assignments.ContainsKey($_) -and
+        (-not $members.ContainsKey($_) -or $members[$_] -eq 'local')
+    })
+    $threadIds = @(@($source.globals['thread-project-assignments'].Keys) + $projectless)
+    $changed = $false
+    foreach ($hostKey in $hosts) {
+        $migration = State-Map $migrations[$hostKey]
+        $idsToSync = $threadIds
+        $sourceMigration = State-Map $sourceMigrations[$hostKey]
+        if ($migration.Count -and $sourceMigration['threadAssignmentsReadMigrated'] -ceq $true) {
+            # Once the source has read native membership, only its still-pending
+            # local changes need to go to an existing target.
+            $idsToSync = @($sourceMigration['pendingThreadAssignmentIds'] | Where-Object { $threadIds -contains $_ })
+        }
+        if (-not $idsToSync.Count) { continue }
+        $pending = @(@($migration['pendingThreadAssignmentIds']) + $idsToSync |
+            Where-Object { $_ -is [string] } | Sort-Object -Unique)
+        # Reopen the destination's local membership pass before the desktop can
+        # adopt an older/null server assignment. The desktop performs metadata
+        # writes itself when its local-project membership feature is available.
+        $oldPending = @($migration['pendingThreadAssignmentIds'] | Sort-Object -Unique)
+        if ($migration['threadAssignmentsMigrated'] -cne $false -or
+            (ConvertTo-Json -InputObject $oldPending -Compress) -cne (ConvertTo-Json -InputObject $pending -Compress)) {
+            if (-not $migration.ContainsKey('version')) { $migration['version'] = 1 }
+            if (-not $migration.ContainsKey('projectsMigrated')) { $migration['projectsMigrated'] = $false }
+            if (-not $migration.ContainsKey('threadAssignmentsReadMigrated')) { $migration['threadAssignmentsReadMigrated'] = $false }
+            $migration['threadAssignmentsMigrated'] = $false
+            $migration['pendingThreadAssignmentIds'] = $pending
+            $migrations[$hostKey] = $migration
+            $changed = $true
+        }
+    }
+    if ($changed) { $doc[$key] = $migrations }
+
+    $atomKey = 'electron-owner-atoms:' + $TargetOwner
+    $atoms = State-Map $doc[$atomKey]
+    $atomsChanged = $false
+    foreach ($atom in $source.atoms.Keys) {
+        if (-not $atoms.ContainsKey($atom)) {
+            $atoms[$atom] = $source.atoms[$atom]
+            $atomsChanged = $true
+        }
+    }
+    if ($atomsChanged) { $doc[$atomKey] = $atoms; $changed = $true }
+    if (-not $doc.ContainsKey($selected + $TargetOwner) -and $source.globals['selected-project']) {
+        $doc[$selected + $TargetOwner] = $source.globals['selected-project']
+        $changed = $true
+    }
+    if ($changed) { return $doc }
+    return $null
+}
 function Workspace-Update($Document, [string]$TargetOwner) {
     $doc = State-Map $Document
+    if ($doc.ContainsKey('electron-renderer-content-owner') -or
+        @($doc.Keys | Where-Object { $_ -like 'electron-owner-value:*' -or $_ -like 'electron-owner-atoms:*' }).Count) {
+        return Shared-WorkspaceUpdate $doc $TargetOwner
+    }
     $scope = State-Map $doc['electron-account-renderer-state-v1']
     if (-not $scope.Count) { return $null } # Older desktop versions keep their existing behavior.
     if (($null -ne $scope['owner'] -and ($scope['owner'] -isnot [string] -or $scope['owner'] -notmatch '^[a-f0-9]{64}$')) -or
